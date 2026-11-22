@@ -39,7 +39,7 @@ jobs:
           SRC
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            ca-certificates sudo locales dbus dbus-x11 \
+            ca-certificates sudo locales tzdata dbus dbus-x11 x11-xserver-utils fontconfig \
             waybar wofi swaybg mako-notifier libnotify-bin wl-clipboard wtype \
             alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
             imv zathura zathura-pdf-poppler mpv \
@@ -112,6 +112,13 @@ jobs:
           sed -i 's/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen
           sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
           locale-gen zh_CN.UTF-8 en_US.UTF-8 >/dev/null
+          ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+          echo "Asia/Shanghai" > /etc/timezone
+
+          # Install JetBrainsMono Nerd Font + Omarchy icon font (fixes Waybar & UI icons)
+          mkdir -p /usr/share/fonts/truetype/omarchy /usr/share/fonts/truetype/jetbrains-mono-nerd
+          curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" | tar -xJ -C /usr/share/fonts/truetype/jetbrains-mono-nerd --wildcards '*NerdFont-Regular.ttf' '*NerdFont-Bold.ttf' '*NerdFontMono-Regular.ttf' '*NerdFontPropo-Regular.ttf' || \
+            curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" | tar -xJ -C /usr/share/fonts/truetype/jetbrains-mono-nerd
 
           # Install lazygit ARM64
           LG_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/jesseduffield/lazygit/releases/latest" | sed 's|.*/tag/v||')
@@ -121,6 +128,8 @@ jobs:
           # Clone official basecamp/omarchy & Audrey-cn/omarchy-android core scripts
           mkdir -p /root/.local/share/applications /root/.local/share/icons/hicolor/256x256/apps /usr/share/pixmaps /root/.config/sway /root/.config/fcitx5 /root/.config/omarchy /root/.config/alacritty
           git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
+          find /root/.local/share/omarchy -maxdepth 3 -name "*.ttf" -exec cp -f {} /usr/share/fonts/truetype/omarchy/ \;
+          fc-cache -f
           git clone --depth 1 https://github.com/Audrey-cn/omarchy-android.git /tmp/omarchy-android
 
           cp -f /tmp/omarchy-android/core/bin/* /usr/local/bin/

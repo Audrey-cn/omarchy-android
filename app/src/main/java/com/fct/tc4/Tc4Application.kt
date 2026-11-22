@@ -19,6 +19,7 @@ package com.fct.tc4
 
 import android.app.Application
 import com.fct.tc4.ui.misc.Global
+import com.fct.tc4.ui.misc.OmarchyX11Overlay
 import com.google.android.material.color.DynamicColors
 
 class Tc4Application : Application() {
@@ -27,5 +28,6 @@ class Tc4Application : Application() {
         DynamicColors.applyToActivitiesIfAvailable(this)
 
         Global.init(this)
+        OmarchyX11Overlay.register(this)
     }
 }

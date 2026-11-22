@@ -27,6 +27,7 @@ feature:
       export SHELL=/bin/bash
       export LANG=zh_CN.UTF-8
       export LC_ALL=zh_CN.UTF-8
+      export TZ=Asia/Shanghai
       export WLR_BACKENDS=x11
       export WLR_RENDERER=pixman
       export WLR_NO_HARDWARE_CURSORS=1
@@ -67,6 +68,6 @@ boot_command: >
   /usr/bin/env -i HOME=/root USER=root SHELL=/bin/bash TERM=xterm-256color
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$EXTRA_PATH
   LD_LIBRARY_PATH=$EXTRA_LD_LIBRARY_PATH
-  DISPLAY=:0 XDG_RUNTIME_DIR=/tmp LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8
+  DISPLAY=:0 XDG_RUNTIME_DIR=/tmp LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 TZ=Asia/Shanghai
   MOZ_FAKE_NO_SANDBOX=1 QTWEBENGINE_DISABLE_SANDBOX=1 ELECTRON_DISABLE_SANDBOX=1
   $EXTRA_ENV /bin/bash -l
