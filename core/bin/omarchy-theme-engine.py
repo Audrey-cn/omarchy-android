@@ -142,6 +142,7 @@ white   = "{c[15]}"
             "custom/bluetooth",
             "custom/network",
             "custom/audio",
+            "custom/phone-mode",
             "custom/monitor",
             "custom/power"
         ],
@@ -241,6 +242,15 @@ white   = "{c[15]}"
             "tooltip": False,
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel audio",
             "on-click-right": "PULSE_SERVER=127.0.0.1 pactl set-sink-mute @DEFAULT_SINK@ toggle"
+        },
+        "custom/phone-mode": {
+            "exec": "/usr/local/bin/omarchy-phone-mode status",
+            "return-type": "json",
+            "interval": 5,
+            "signal": 12,
+            "tooltip": False,
+            "on-click": "/usr/local/bin/omarchy-phone-mode toggle",
+            "on-click-right": "GDK_BACKEND=wayland /usr/local/bin/omarchy-osk toggle"
         },
         "custom/monitor": {
             "format": "󰃠",
@@ -350,8 +360,12 @@ white   = "{c[15]}"
   color: @accent;
 }}
 
-#custom-agents, #custom-bluetooth, #custom-network, #custom-audio, #custom-monitor, #custom-power {{
+#custom-agents, #custom-bluetooth, #custom-network, #custom-audio, #custom-phone-mode, #custom-monitor, #custom-power {{
   padding: 0 8px;
+}}
+
+#custom-phone-mode.active {{
+  color: @accent;
 }}
 
 tooltip {{

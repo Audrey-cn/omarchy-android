@@ -1,0 +1,395 @@
+#!/usr/bin/env python3
+"""
+Omarchy Native Wayland On-Screen Keyboard & Floating Trigger (GTK3 + GtkLayerShell)
+Modes:
+  - omarchy-osk fab                   : Floating bottom-right pill (Toggle Keyboard + Voice Input)
+  - omarchy-osk show [docked|compact|floating] : Open virtual keyboard in selected layout mode
+  - omarchy-osk toggle                : Toggle virtual keyboard visibility
+  - omarchy-osk close-all             : Close both keyboard and floating pill
+"""
+import os
+import re
+import sys
+import glob
+import signal
+import subprocess
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GtkLayerShell", "0.1")
+from gi.repository import Gtk, Gdk, GLib, GtkLayerShell
+
+OSK_PID = "/tmp/omarchy-osk.pid"
+FAB_PID = "/tmp/omarchy-osk-fab.pid"
+MODE_FILE = "/root/.config/omarchy/osk-mode"
+
+
+def load_theme():
+    bg, fg, accent = "#1a1b26", "#c0caf5", "#7aa2f7"
+    p = "/root/.config/omarchy/current/theme/colors.toml"
+    if os.path.exists(p):
+        try:
+            txt = open(p, encoding="utf-8", errors="ignore").read()
+            for k in ("background", "foreground", "accent"):
+                m = re.search(rf'^\s*{k}\s*=\s*"(#[0-9a-fA-F]{{6}})"', txt, re.M)
+                if m:
+                    if k == "background": bg = m.group(1)
+                    elif k == "foreground": fg = m.group(1)
+                    elif k == "accent": accent = m.group(1)
+        except Exception:
+            pass
+    return bg, fg, accent
+
+
+def get_swaysock():
+    socks = sorted(glob.glob("/tmp/sway-ipc.*.sock"), key=os.path.getmtime, reverse=True)
+    return socks[0] if socks else "/tmp/sway-ipc.sock"
+
+
+def wl_env():
+    return {
+        **os.environ,
+        "XDG_RUNTIME_DIR": "/tmp",
+        "WAYLAND_DISPLAY": "wayland-1",
+        "SWAYSOCK": get_swaysock(),
+        "DISPLAY": ":0",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/omarchy-dbus.sock",
+    }
+
+
+def run_bg(cmd):
+    subprocess.Popen(
+        cmd, shell=True, env=wl_env(),
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def kill_pidfile(path):
+    if os.path.exists(path):
+        try:
+            pid = int(open(path).read().strip())
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return True
+    return False
+
+
+def trigger_voice_input():
+    if os.path.exists("/usr/local/bin/omarchy-voice-toggle"):
+        run_bg("/usr/local/bin/omarchy-voice-toggle")
+    else:
+        run_bg("notify-send '语音输入 (豆包说)' '请在 安装 -> AI 中安装 Doubao Say 后使用' 2>/dev/null || true")
+
+
+def apply_css(bg, fg, accent, floating=False):
+    alpha_bg = f"alpha({bg}, 0.86)" if floating else bg
+    css = f"""
+    window {{
+        background-color: {alpha_bg};
+        border-top: 2px solid {accent};
+        border-left: {'2px solid ' + accent if floating else 'none'};
+        border-right: {'2px solid ' + accent if floating else 'none'};
+        border-bottom: {'2px solid ' + accent if floating else 'none'};
+        border-radius: {'12px' if floating else '0px'};
+    }}
+    .fab-win {{
+        background-color: alpha({bg}, 0.92);
+        border: 2px solid {accent};
+        border-radius: 22px;
+    }}
+    .osk-root {{
+        padding: 6px 8px 8px 8px;
+        background-color: transparent;
+    }}
+    button.kbtn {{
+        background-image: none;
+        box-shadow: none;
+        background-color: alpha({fg}, 0.10);
+        color: {fg};
+        border: 1px solid alpha({fg}, 0.18);
+        border-radius: 6px;
+        padding: 6px 2px;
+        min-height: 34px;
+        min-width: 24px;
+        font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+    }}
+    button.kbtn:active {{
+        background-color: alpha({accent}, 0.45);
+    }}
+    button.kbtn-mod {{
+        background-color: alpha({accent}, 0.14);
+        border-color: alpha({accent}, 0.45);
+        color: {accent};
+    }}
+    button.kbtn-latched {{
+        background-color: {accent};
+        color: {bg};
+        border-color: {accent};
+        font-weight: bold;
+    }}
+    button.kbtn-bar {{
+        background-image: none;
+        box-shadow: none;
+        background-color: alpha({fg}, 0.08);
+        color: {fg};
+        border: 1px solid alpha({accent}, 0.40);
+        border-radius: 6px;
+        padding: 3px 8px;
+        min-height: 24px;
+        font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+        font-size: 11px;
+    }}
+    button.kbtn-bar-active {{
+        background-color: alpha({accent}, 0.30);
+        border-color: {accent};
+        font-weight: bold;
+    }}
+    button.fab-btn {{
+        background-image: none;
+        box-shadow: none;
+        background-color: transparent;
+        color: {fg};
+        border: none;
+        padding: 8px 12px;
+        font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+        font-size: 16px;
+    }}
+    button.fab-btn:active {{
+        color: {accent};
+    }}
+    """
+    prov = Gtk.CssProvider()
+    prov.load_from_data(css.encode("utf-8"))
+    Gtk.StyleContext.add_provider_for_screen(
+        Gdk.Screen.get_default(), prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+
+
+class FloatingFab(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Omarchy OSK Trigger")
+        self.set_decorated(False)
+        self.set_resizable(False)
+        self.get_style_context().add_class("fab-win")
+
+        bg, fg, accent = load_theme()
+        apply_css(bg, fg, accent, floating=True)
+
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+        GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, True)
+        GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+        GtkLayerShell.set_margin(self, GtkLayerShell.Edge.BOTTOM, 18)
+        GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, 14)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        b_kb = Gtk.Button(label="")
+        b_kb.get_style_context().add_class("fab-btn")
+        b_kb.connect("clicked", lambda _: run_bg("GDK_BACKEND=wayland /usr/local/bin/omarchy-osk toggle"))
+
+        b_mic = Gtk.Button(label="󰍬")
+        b_mic.get_style_context().add_class("fab-btn")
+        b_mic.connect("clicked", lambda _: trigger_voice_input())
+
+        box.pack_start(b_kb, False, False, 0)
+        box.pack_start(b_mic, False, False, 0)
+        self.add(box)
+        box.show_all()
+        self.realize()
+        self.show()
+
+
+class OmarchyOSK(Gtk.Window):
+    def __init__(self, mode="docked"):
+        super().__init__(title="Omarchy OSK")
+        self.mode = mode
+        self.set_decorated(False)
+        self.set_resizable(False)
+        self.latched = {"super": False, "ctrl": False, "alt": False, "shift": False}
+        self.mod_buttons = {}
+
+        bg, fg, accent = load_theme()
+        apply_css(bg, fg, accent, floating=(mode == "floating"))
+
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY if mode == "floating" else GtkLayerShell.Layer.TOP)
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.NONE)
+        GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, True)
+        if mode != "floating":
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.LEFT, True)
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+            GtkLayerShell.auto_exclusive_zone_enable(self)
+        else:
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.BOTTOM, 14)
+            GtkLayerShell.set_exclusive_zone(self, 0)
+            self.set_size_request(760, -1)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+        root.get_style_context().add_class("osk-root")
+        self.add(root)
+
+        # Top mode switcher bar
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for mk, ml in [("docked", "停靠(推挤)"), ("compact", "精简条"), ("floating", "悬浮")]:
+            mb = Gtk.Button(label=ml)
+            mb.get_style_context().add_class("kbtn-bar")
+            if mk == mode:
+                mb.get_style_context().add_class("kbtn-bar-active")
+            mb.connect("clicked", lambda _, m=mk: self.switch_mode(m))
+            bar.pack_start(mb, False, False, 0)
+
+        spacer = Gtk.Box()
+        bar.pack_start(spacer, True, True, 0)
+
+        for lbl, fn in [
+            ("中/EN", lambda _: run_bg("/usr/local/bin/omarchy-toggle-ime")),
+            ("󰍬 语音", lambda _: trigger_voice_input()),
+            ("✕ 收起", lambda _: Gtk.main_quit()),
+        ]:
+            rb = Gtk.Button(label=lbl)
+            rb.get_style_context().add_class("kbtn-bar")
+            rb.connect("clicked", fn)
+            bar.pack_start(rb, False, False, 0)
+        root.pack_start(bar, False, False, 2)
+
+        if mode == "compact":
+            rows = [
+                [("Esc", "Escape"), ("Tab", "Tab"), ("Super", "MOD:super"), ("Ctrl", "MOD:ctrl"), ("Alt", "MOD:alt"), ("Shift", "MOD:shift"), ("←", "Left"), ("↓", "Down"), ("↑", "Up"), ("→", "Right")],
+                [("应用", "CMD:/usr/local/bin/omarchy-menu-ui apps"), ("菜单", "CMD:/usr/local/bin/omarchy-menu-ui"), ("终端", "CMD:alacritty"), ("关窗", "CMD:swaymsg kill"), ("全屏", "CMD:swaymsg fullscreen toggle"), ("全键盘", "MODE:docked")],
+            ]
+        else:
+            rows = [
+                [("Esc", "Escape"), ("Tab", "Tab"), ("Super", "MOD:super"), ("Ctrl", "MOD:ctrl"), ("Alt", "MOD:alt"), ("←", "Left"), ("↓", "Down"), ("↑", "Up"), ("→", "Right"), ("⌫", "BackSpace")],
+                [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4"), ("5", "5"), ("6", "6"), ("7", "7"), ("8", "8"), ("9", "9"), ("0", "0"), ("-", "minus"), ("=", "equal")],
+                [("q", "q"), ("w", "w"), ("e", "e"), ("r", "r"), ("t", "t"), ("y", "y"), ("u", "u"), ("i", "i"), ("o", "o"), ("p", "p"), ("[", "bracketleft"), ("]", "bracketright")],
+                [("a", "a"), ("s", "s"), ("d", "d"), ("f", "f"), ("g", "g"), ("h", "h"), ("j", "j"), ("k", "k"), ("l", "l"), (";", "semicolon"), ("'", "apostrophe"), ("⏎", "Return")],
+                [("⇧", "MOD:shift"), ("z", "z"), ("x", "x"), ("c", "c"), ("v", "v"), ("b", "b"), ("n", "n"), ("m", "m"), (",", "comma"), (".", "period"), ("/", "slash"), ("󰍬", "VOICE")],
+                [("应用", "CMD:/usr/local/bin/omarchy-menu-ui apps"), ("菜单", "CMD:/usr/local/bin/omarchy-menu-ui"), ("Space", "space"), ("终端", "CMD:alacritty"), ("关窗", "CMD:swaymsg kill")],
+            ]
+
+        for row in rows:
+            hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            hbox.set_homogeneous(len(row) >= 8)
+            for label, code in row:
+                b = Gtk.Button(label=label)
+                b.get_style_context().add_class("kbtn")
+                if code.startswith(("MOD:", "CMD:", "MODE:", "VOICE")):
+                    b.get_style_context().add_class("kbtn-mod")
+                if code.startswith("MOD:"):
+                    mname = code.split(":", 1)[1]
+                    self.mod_buttons[mname] = b
+                b.connect("clicked", lambda _, c=code: self.on_key_click(c))
+                expand = (code == "space") or (len(row) < 8)
+                hbox.pack_start(b, expand, True, 0)
+            root.pack_start(hbox, False, False, 0)
+
+        self.connect("destroy", Gtk.main_quit)
+        root.show_all()
+        self.realize()
+        self.show()
+
+    def switch_mode(self, new_mode):
+        os.makedirs(os.path.dirname(MODE_FILE), exist_ok=True)
+        open(MODE_FILE, "w").write(new_mode)
+        run_bg(f"GDK_BACKEND=wayland /usr/local/bin/omarchy-osk show {new_mode}")
+        Gtk.main_quit()
+
+    def update_mod_styles(self):
+        for mname, btn in self.mod_buttons.items():
+            sc = btn.get_style_context()
+            if self.latched[mname]:
+                sc.add_class("kbtn-latched")
+            else:
+                sc.remove_class("kbtn-latched")
+
+    def on_key_click(self, code):
+        if code.startswith("MOD:"):
+            mname = code.split(":", 1)[1]
+            self.latched[mname] = not self.latched[mname]
+            self.update_mod_styles()
+            return
+        if code.startswith("CMD:"):
+            run_bg(code[4:])
+            return
+        if code.startswith("MODE:"):
+            self.switch_mode(code[5:])
+            return
+        if code == "VOICE":
+            trigger_voice_input()
+            return
+
+        # Handle Super-latched Omarchy WM shortcuts directly
+        if self.latched["super"]:
+            handled = True
+            if code == "space": run_bg("/usr/local/bin/omarchy-menu-ui apps")
+            elif code == "m": run_bg("/usr/local/bin/omarchy-menu-ui")
+            elif code == "Return": run_bg("alacritty")
+            elif code in ("w", "q"): run_bg("swaymsg kill")
+            elif code == "f": run_bg("swaymsg fullscreen toggle")
+            elif code == "t": run_bg("swaymsg floating toggle")
+            elif code == "i": run_bg("/usr/local/bin/omarchy-toggle-ime")
+            elif code in ("1", "2", "3", "4", "5"): run_bg(f"swaymsg workspace number {code}")
+            elif code in ("Left", "Right", "Up", "Down"): run_bg(f"swaymsg focus {code.lower()}")
+            else: handled = False
+            self.latched = {k: False for k in self.latched}
+            self.update_mod_styles()
+            if handled:
+                return
+
+        # Normal / Ctrl / Alt / Shift keystroke via native Wayland `wtype`
+        args = ["wtype"]
+        if self.latched["ctrl"]: args += ["-M", "ctrl"]
+        if self.latched["alt"]: args += ["-M", "alt"]
+        if self.latched["shift"]: args += ["-M", "shift"]
+        args += ["-k", code]
+        if self.latched["shift"]: args += ["-m", "shift"]
+        if self.latched["alt"]: args += ["-m", "alt"]
+        if self.latched["ctrl"]: args += ["-m", "ctrl"]
+
+        subprocess.Popen(args, env=wl_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if any(self.latched.values()):
+            self.latched = {k: False for k in self.latched}
+            self.update_mod_styles()
+
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "toggle"
+    if cmd == "close-all":
+        kill_pidfile(OSK_PID)
+        kill_pidfile(FAB_PID)
+        sys.exit(0)
+    if cmd == "fab":
+        kill_pidfile(FAB_PID)
+        open(FAB_PID, "w").write(str(os.getpid()))
+        FloatingFab()
+        try:
+            Gtk.main()
+        finally:
+            if os.path.exists(FAB_PID) and open(FAB_PID).read().strip() == str(os.getpid()):
+                os.remove(FAB_PID)
+        sys.exit(0)
+    if cmd == "toggle":
+        if kill_pidfile(OSK_PID):
+            sys.exit(0)
+        mode = open(MODE_FILE).read().strip() if os.path.exists(MODE_FILE) else "docked"
+    else:
+        kill_pidfile(OSK_PID)
+        mode = sys.argv[2] if len(sys.argv) > 2 else (open(MODE_FILE).read().strip() if os.path.exists(MODE_FILE) else "docked")
+
+    open(OSK_PID, "w").write(str(os.getpid()))
+    OmarchyOSK(mode)
+    try:
+        Gtk.main()
+    finally:
+        if os.path.exists(OSK_PID) and open(OSK_PID).read().strip() == str(os.getpid()):
+            os.remove(OSK_PID)

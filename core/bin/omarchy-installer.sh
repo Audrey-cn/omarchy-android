@@ -79,6 +79,34 @@ case "$KEY" in
         ;;
 
     # --- 2. AI Desktop & CLI Tools ---
+    install.ai.doubao-say)
+        echo "正在安装 Doubao Say (豆包说 · Wayland / Omarchy 语音输入)..."
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-webkit-6.0 libportaudio2 libasound2-plugins python3-venv python3-pip
+        rm -rf /opt/doubao-say
+        git clone --depth 1 https://github.com/quanru/doubao-say.git /opt/doubao-say
+        python3 -m venv --system-site-packages /opt/doubao-say/.venv
+        /opt/doubao-say/.venv/bin/pip install --no-cache-dir "PyJWT[crypto]>=2.10,<3" "websockets>=12" "sounddevice>=0.4.6" "evdev>=1.4"
+        cat > /usr/local/bin/doubao-say-launch <<'LAUNCH'
+#!/usr/bin/env bash
+export XDG_RUNTIME_DIR=/tmp WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland PULSE_SERVER=127.0.0.1
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/omarchy-dbus.sock"
+export PYTHONPATH="/opt/doubao-say/src${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1
+exec /opt/doubao-say/.venv/bin/python -m doubao_input "$@"
+LAUNCH
+        chmod 755 /usr/local/bin/doubao-say-launch
+        cat > "$APP_DIR/Doubao-Say.desktop" <<'DESKTOP'
+[Desktop Entry]
+Name=Doubao Say (豆包说)
+Comment=豆包语音输入 (Wayland / Omarchy)
+Exec=/usr/local/bin/doubao-say-launch
+Icon=audio-input-microphone
+Terminal=false
+Type=Application
+Categories=Utility;AudioVideo;
+DESKTOP
+        echo "✓ Doubao Say (豆包说) 已安装完成！可在应用网格中启动并登录豆包网页端授权。"
+        ;;
     install.ai.cc-switch)
         echo "正在从 GitHub Releases 下载最新版 CC Switch (ARM64 .deb)..."
         CC_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/farion1231/cc-switch/releases/latest" | sed 's|.*/tag/v||')

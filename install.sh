@@ -119,8 +119,13 @@ DESKTOP
     for f in /root/.local/share/omarchy/applications/*.desktop; do
       b=$(basename "$f")
       case "$b" in
-        "foot.desktop"|"Activity Monitor.desktop"|omarchy-*.desktop) continue ;;
-        *) cp -f "$f" "/root/.local/share/applications/$b" ;;
+        "foot.desktop"|"Activity Monitor.desktop"|"Game Vibes.desktop"|"Herdr.desktop"|omarchy-*.desktop) continue ;;
+        *)
+          cp -f "$f" "/root/.local/share/applications/$b"
+          sed -i "s|^Exec=omarchy-launch-webapp |Exec=/usr/local/bin/omarchy-launch-webapp |" "/root/.local/share/applications/$b"
+          sed -i "s|^Exec=omarchy-webapp-handler-hey.*|Exec=/usr/local/bin/omarchy-launch-webapp https://app.hey.com/|" "/root/.local/share/applications/$b"
+          sed -i "s|^Exec=omarchy-webapp-handler-zoom.*|Exec=/usr/local/bin/omarchy-launch-webapp https://app.zoom.us/wc|" "/root/.local/share/applications/$b"
+          ;;
       esac
     done
     cp -rf /root/.local/share/omarchy/config/fcitx5/* /root/.config/fcitx5/ 2>/dev/null || true
@@ -197,8 +202,13 @@ DESKTOP
     for f in /root/.local/share/omarchy/applications/*.desktop; do
       b=$(basename "$f")
       case "$b" in
-        "foot.desktop"|"Activity Monitor.desktop"|omarchy-*.desktop) continue ;;
-        *) cp -f "$f" "/root/.local/share/applications/$b" ;;
+        "foot.desktop"|"Activity Monitor.desktop"|"Game Vibes.desktop"|"Herdr.desktop"|omarchy-*.desktop) continue ;;
+        *)
+          cp -f "$f" "/root/.local/share/applications/$b"
+          sed -i "s|^Exec=omarchy-launch-webapp |Exec=/usr/local/bin/omarchy-launch-webapp |" "/root/.local/share/applications/$b"
+          sed -i "s|^Exec=omarchy-webapp-handler-hey.*|Exec=/usr/local/bin/omarchy-launch-webapp https://app.hey.com/|" "/root/.local/share/applications/$b"
+          sed -i "s|^Exec=omarchy-webapp-handler-zoom.*|Exec=/usr/local/bin/omarchy-launch-webapp https://app.zoom.us/wc|" "/root/.local/share/applications/$b"
+          ;;
       esac
     done
     /usr/local/bin/omarchy-theme-engine.py set tokyo-night
