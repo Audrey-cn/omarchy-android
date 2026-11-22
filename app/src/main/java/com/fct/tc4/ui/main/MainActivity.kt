@@ -261,6 +261,7 @@ class MainActivity : AppCompatActivity() {
         if (viewModel.screen.value !is MainViewModel.Screen.Init) return
 
         if (!Global.isFirstLaunchDone && Global.hasBuiltInRootfs() && Global.installedContainers.isEmpty()) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             val containerViewModel: ContainerManageViewModel by viewModels()
             containerViewModel.autoInstallBuiltInContainer()
             viewModel.navigateTo(MainViewModel.Screen.ContainerManage)

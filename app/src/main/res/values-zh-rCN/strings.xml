@@ -28,8 +28,8 @@
     <string name="tc4_label_version">版本 %1$s</string>
 
     <!-- ==================== Container Management ==================== -->
-    <string name="tc4_container_title">容器管理</string>
-    <string name="tc4_container_empty_hint">暂无容器，请点击右上角导入</string>
+    <string name="tc4_container_title">Omarchy 系统管理</string>
+    <string name="tc4_container_empty_hint">正在准备 Omarchy 桌面环境…</string>
     <string name="tc4_container_calculating_space">正在计算占用…</string>
     <string name="tc4_container_delete_success">删除成功</string>
     <string name="tc4_container_delete_failed">删除失败: %1$s</string>
@@ -55,9 +55,9 @@
     <string name="tc4_import_title">导入容器</string>
     <string name="tc4_import_warning">1、尽量只导入官方容器。\n一个精心设计的恶意容器完全有能力摧毁其他已安装的容器，甚至软件本身。\n如果你提供了存储权限，恶意容器还可以修改、发送、删除设备上的重要数据（如照片）。\n\n2、免责声明：本软件按 GPL 开放源代码，无任何担保。\n任何情况下作者不承担责任。\n请用户自行审阅代码并承担使用风险。</string>
     <string name="tc4_import_builtin_btn">安装内置容器</string>
-    <string name="tc4_import_copying_title">正在复制容器文件到缓存…</string>
-    <string name="tc4_import_extracting_title">正在解压配置信息…</string>
-    <string name="tc4_import_installing_title">正在安装容器…</string>
+    <string name="tc4_import_copying_title">正在准备 Omarchy 桌面镜像…</string>
+    <string name="tc4_import_extracting_title">正在初始化环境配置…</string>
+    <string name="tc4_import_installing_title">正在初始化 Omarchy 桌面环境…</string>
     <string name="tc4_import_deleting_old_title">正在删除旧容器文件…</string>
     <string name="tc4_import_cleaning_title">正在清理临时文件…</string>
     <string name="tc4_import_completed">「%1$s」安装完成</string>
@@ -108,13 +108,13 @@
 
     <!-- ==================== Help Page ==================== -->
     <string name="tc4_help_source_code_title">前往代码仓库</string>
-    <string name="tc4_help_source_code_desc">看到小小容器的每一行代码。获取文档，进行反馈等等也都在这里。</string>
+    <string name="tc4_help_source_code_desc">查看 Omarchy Android 源代码、使用文档与问题反馈。</string>
     <string name="tc4_help_releases_title">前往软件发布页面</string>
-    <string name="tc4_help_releases_desc">获取最新版小小容器</string>
-    <string name="tc4_help_oss_title">开源库</string>
-    <string name="tc4_help_oss_desc">感谢这些库让开发变得简单。</string>
-    <string name="tc4_help_license_title">许可证</string>
-    <string name="tc4_help_license_desc">运行Linux必不可少的组件——PRoot——使用了GPL开源，所以我同样得开放源代码:D</string>
+    <string name="tc4_help_releases_desc">获取最新版 Omarchy Android 一体包</string>
+    <string name="tc4_help_oss_title">开源库与致谢</string>
+    <string name="tc4_help_oss_desc">查看项目所依赖的开源组件与许可证。</string>
+    <string name="tc4_help_license_title">开源许可证</string>
+    <string name="tc4_help_license_desc">本项目基于 GPLv3 协议开放源代码。</string>
     <string name="tc4_help_wechat_title">微信公众号：装机宝典</string>
     <string name="tc4_help_wechat_desc">我可能会把一些小小容器使用教程发到这里，如果你访问不了Github，这里可能会有用。</string>
     <string name="tc4_help_bilibili_title">Caten的bilibili</string>

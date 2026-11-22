@@ -32,7 +32,6 @@ feature:
       export WLR_RENDERER=pixman
       export WLR_NO_HARDWARE_CURSORS=1
       export DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/omarchy-dbus.sock"
-      export GTK_IM_MODULE=fcitx
       export QT_IM_MODULE=fcitx
       export XMODIFIERS=@im=fcitx
       mkdir -p /tmp
@@ -74,6 +73,6 @@ boot_command: >
   LD_LIBRARY_PATH=$EXTRA_LD_LIBRARY_PATH
   DISPLAY=:0 XDG_RUNTIME_DIR=/tmp LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 TZ=Asia/Shanghai
   DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/omarchy-dbus.sock
-  GTK_IM_MODULE=fcitx QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx
+  QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx
   MOZ_FAKE_NO_SANDBOX=1 QTWEBENGINE_DISABLE_SANDBOX=1 ELECTRON_DISABLE_SANDBOX=1
   $EXTRA_ENV /bin/bash -l

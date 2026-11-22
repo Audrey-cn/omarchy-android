@@ -81,12 +81,12 @@ class HelpFragment : Fragment() {
         HelpItem(
             titleRes = R.string.tc4_help_source_code_title,
             descriptionRes = R.string.tc4_help_source_code_desc,
-            url = "https://github.com/Cateners/tiny_container"
+            url = "https://github.com/Audrey-cn/omarchy-android-app"
         ),
         HelpItem(
             titleRes = R.string.tc4_help_releases_title,
             descriptionRes = R.string.tc4_help_releases_desc,
-            url = "https://github.com/Cateners/tiny_container/releases"
+            url = "https://github.com/Audrey-cn/omarchy-android-app/releases"
         ),
         HelpItem(
             titleRes = R.string.tc4_help_oss_title,
@@ -97,26 +97,6 @@ class HelpFragment : Fragment() {
             titleRes = R.string.tc4_help_license_title,
             descriptionRes = R.string.tc4_help_license_desc,
             url = null
-        ),
-        HelpItem(
-            titleRes = R.string.tc4_help_wechat_title,
-            descriptionRes = R.string.tc4_help_wechat_desc,
-            url = null
-        ),
-        HelpItem(
-            titleRes = R.string.tc4_help_bilibili_title,
-            descriptionRes = R.string.tc4_help_bilibili_desc,
-            url = "https://space.bilibili.com/189835375"
-        ),
-        HelpItem(
-            titleRes = R.string.tc4_help_spark_store_title,
-            descriptionRes = R.string.tc4_help_spark_store_desc,
-            url = "https://www.spark-app.store/"
-        ),
-        HelpItem(
-            titleRes = R.string.tc4_help_gxde_title,
-            descriptionRes = R.string.tc4_help_gxde_desc,
-            url = "https://www.gxde.top/"
         ),
     )
 }
