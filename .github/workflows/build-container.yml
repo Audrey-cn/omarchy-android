@@ -1,0 +1,118 @@
+name: Build Omarchy Ubuntu 24.04 ARM64 Container (.tar.zst)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'container/**'
+      - '.github/workflows/build-container.yml'
+
+jobs:
+  build-rootfs:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install host build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y debootstrap zstd curl tar
+
+      - name: Build clean Ubuntu 24.04 ARM64 Omarchy rootfs
+        run: |
+          ROOTFS=/tmp/omarchy-rootfs
+          sudo mkdir -p "$ROOTFS"
+          sudo debootstrap --arch=arm64 --variant=minbase noble "$ROOTFS" http://ports.ubuntu.com/ubuntu-ports
+
+          sudo cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
+          sudo mount --bind /dev "$ROOTFS/dev"
+          sudo mount --bind /proc "$ROOTFS/proc"
+          sudo mount --bind /sys "$ROOTFS/sys"
+
+          sudo chroot "$ROOTFS" /bin/bash -e <<'CHROOT'
+          export DEBIAN_FRONTEND=noninteractive
+          cat > /etc/apt/sources.list <<'SRC'
+          deb http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
+          deb http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
+          deb http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
+          SRC
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            ca-certificates sudo locales dbus dbus-x11 \
+            sway waybar wofi swaybg mako-notifier libnotify-bin wl-clipboard wtype \
+            alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
+            imv zathura zathura-pdf-poppler mpv \
+            git gh curl wget unzip zstd webp imagemagick \
+            fonts-noto-cjk fonts-dejavu-core papirus-icon-theme \
+            python3 python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 \
+            grim slurp \
+            fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
+
+          sed -i 's/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen
+          sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+          locale-gen zh_CN.UTF-8 en_US.UTF-8 >/dev/null
+
+          # Install lazygit ARM64
+          LG_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/jesseduffield/lazygit/releases/latest" | sed 's|.*/tag/v||')
+          curl -fsSL "https://github.com/jesseduffield/lazygit/releases/download/v${LG_VER}/lazygit_${LG_VER}_Linux_arm64.tar.gz" -o /tmp/lg.tar.gz
+          tar -xzf /tmp/lg.tar.gz -C /usr/local/bin lazygit && chmod 755 /usr/local/bin/lazygit && rm -f /tmp/lg.tar.gz
+
+          # Clone official basecamp/omarchy & Audrey-cn/omarchy-android core scripts
+          mkdir -p /root/.local/share/applications /root/.local/share/icons/hicolor/256x256/apps /usr/share/pixmaps /root/.config/sway /root/.config/fcitx5 /root/.config/omarchy /root/.config/alacritty
+          git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
+          git clone --depth 1 https://github.com/Audrey-cn/omarchy-android.git /tmp/omarchy-android
+
+          cp -f /tmp/omarchy-android/core/bin/* /usr/local/bin/
+          cp -f /tmp/omarchy-android/core/ai-suite/*launch /usr/local/bin/
+          cp -f /tmp/omarchy-android/core/config/sway/config /root/.config/sway/config
+          cp -f /tmp/omarchy-android/core/config/fcitx5/profile /root/.config/fcitx5/profile
+          chmod 755 /usr/local/bin/omarchy-* /usr/local/bin/launch-waybar /usr/local/bin/*-launch
+          rm -rf /tmp/omarchy-android
+
+          printf '\n[terminal.shell]\nprogram = "/bin/bash"\n' >> /root/.config/alacritty/alacritty.toml
+          echo 'DPkg::Post-Invoke { "/usr/local/bin/omarchy-fix-desktops || true"; };' > /etc/apt/apt.conf.d/99-omarchy-desktop-guard
+
+          # Deploy official Omarchy WebApps & lowercase icons
+          for ic in /root/.local/share/omarchy/applications/icons/*.png; do
+            b=$(basename "$ic")
+            low=$(echo "$b" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+            cp -f "$ic" "/root/.local/share/icons/hicolor/256x256/apps/$b"
+            cp -f "$ic" "/root/.local/share/icons/hicolor/256x256/apps/$low"
+            cp -f "$ic" "/usr/share/pixmaps/$low"
+          done
+          for f in /root/.local/share/omarchy/applications/*.desktop; do
+            b=$(basename "$f")
+            case "$b" in
+              "foot.desktop"|"Activity Monitor.desktop"|"Game Vibes.desktop"|"Herdr.desktop"|omarchy-*.desktop) continue ;;
+              *) cp -f "$f" "/root/.local/share/applications/$b" ;;
+            esac
+          done
+          cat > /root/.local/share/applications/lazygit.desktop <<'DESK'
+          [Desktop Entry]
+          Name=Lazygit
+          Comment=Terminal UI for Git
+          Exec=alacritty -e lazygit
+          Icon=git
+          Terminal=false
+          Type=Application
+          Categories=Development;
+          DESK
+
+          /usr/local/bin/omarchy-fix-desktops || true
+          apt-get clean
+          rm -rf /var/lib/apt/lists/* /tmp/*
+          CHROOT
+
+          sudo umount -lf "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
+          sudo cp container/omarchy.tiny.yaml "$ROOTFS/.tiny.yaml"
+
+          echo "Packing omarchy-ubuntu24-arm64.tar.zst..."
+          sudo tar --numeric-owner -C "$ROOTFS" -cf - . | zstd -T0 -6 -o /tmp/omarchy-ubuntu24-arm64.tar.zst
+          ls -lh /tmp/omarchy-ubuntu24-arm64.tar.zst
+
+      - name: Upload Container Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-ubuntu24-arm64-container
+          path: /tmp/omarchy-ubuntu24-arm64.tar.zst
