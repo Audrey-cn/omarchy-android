@@ -109,8 +109,13 @@ DESKTOP
     if [[ ! -d /root/.local/share/omarchy/.git ]]; then
       git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
     fi
-    cp -f /root/.local/share/omarchy/applications/icons/* /root/.local/share/icons/hicolor/256x256/apps/ 2>/dev/null || true
-    cp -f /root/.local/share/omarchy/applications/icons/* /usr/share/pixmaps/ 2>/dev/null || true
+    for ic in /root/.local/share/omarchy/applications/icons/*.png; do
+      b=$(basename "$ic")
+      low=$(echo "$b" | tr "[:upper:]" "[:lower:]" | tr " " "-")
+      cp -f "$ic" "/root/.local/share/icons/hicolor/256x256/apps/$b"
+      cp -f "$ic" "/root/.local/share/icons/hicolor/256x256/apps/$low"
+      cp -f "$ic" "/usr/share/pixmaps/$low"
+    done
     for f in /root/.local/share/omarchy/applications/*.desktop; do
       b=$(basename "$f")
       case "$b" in
@@ -182,8 +187,13 @@ Type=Application
 Categories=Development;
 DESKTOP
     [[ -d /root/.local/share/omarchy/.git ]] || git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
-    cp -f /root/.local/share/omarchy/applications/icons/* /root/.local/share/icons/hicolor/256x256/apps/ 2>/dev/null || true
-    cp -f /root/.local/share/omarchy/applications/icons/* /usr/share/pixmaps/ 2>/dev/null || true
+    for ic in /root/.local/share/omarchy/applications/icons/*.png; do
+      b=$(basename "$ic")
+      low=$(echo "$b" | tr "[:upper:]" "[:lower:]" | tr " " "-")
+      cp -f "$ic" "/root/.local/share/icons/hicolor/256x256/apps/$b"
+      cp -f "$ic" "/root/.local/share/icons/hicolor/256x256/apps/$low"
+      cp -f "$ic" "/usr/share/pixmaps/$low"
+    done
     for f in /root/.local/share/omarchy/applications/*.desktop; do
       b=$(basename "$f")
       case "$b" in
