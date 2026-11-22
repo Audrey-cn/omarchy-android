@@ -140,7 +140,10 @@ DESKTOP
         DEBIAN_FRONTEND=noninteractive apt-get install -y claude-desktop
         rm -f "$APP_DIR/Claude.desktop"
         for f in /usr/share/applications/*claude*.desktop; do
-            [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/claude-desktop-launch %u|" "$f"
+            if [ -f "$f" ]; then
+                sed -i "s|^Exec=.*|Exec=/usr/local/bin/claude-desktop-launch %u|" "$f"
+                cp -f "$f" "$APP_DIR/$(basename "$f")"
+            fi
         done
         update-desktop-database /usr/share/applications "$APP_DIR" 2>/dev/null || true
         echo "✓ 官方原生 ARM64 Claude Desktop 已安装完成！"

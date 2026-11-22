@@ -65,14 +65,17 @@ def handle_text(msg):
     if not text:
         return
     env = wl_env()
-    # Copy UTF-8 text to Wayland clipboard via wl-copy (non-blocking daemon)
-    p = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        p.stdin.write(text.encode("utf-8"))
-        p.stdin.close()
-    except Exception:
-        pass
-    time.sleep(0.08)
+    # Set Wayland clipboard synchronously and verify wl-paste matches before Ctrl+V (ZERO 1-step lag!)
+    subprocess.Popen(["wl-copy", "--", text], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + 0.5
+    while time.time() < deadline:
+        try:
+            cur = subprocess.check_output(["wl-paste", "--no-newline"], env=env, text=True, stderr=subprocess.DEVNULL, timeout=0.3)
+            if cur == text:
+                break
+        except Exception:
+            pass
+        time.sleep(0.03)
 
     app = focused_app_id()
     is_term = any(t in app for t in ("alacritty", "kitty", "foot", "terminal", "wezterm"))

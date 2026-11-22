@@ -21,6 +21,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -135,35 +136,28 @@ public class DeckOverlayService extends Service {
         }
         hideOsk();
 
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setBackground(makeRounded("#E61a1b26", "#7aa2f7", 10, 2));
-        bar.setPadding(dp(8), dp(6), dp(8), dp(6));
-
+        // Completely invisible 1x1px anchor so ONLY Android Doubao IME pops up (ZERO extra bar on screen!)
         EditText edit = new EditText(this);
-        edit.setHint("豆包语音/中文直输 (停顿 0.9 秒自动上屏 · 空框按退格删Linux文字)");
-        edit.setHintTextColor(Color.parseColor("#565f89"));
-        edit.setTextColor(Color.parseColor("#c0caf5"));
-        edit.setTextSize(13);
+        edit.setAlpha(0f);
+        edit.setBackgroundColor(Color.TRANSPARENT);
+        edit.setTextColor(Color.TRANSPARENT);
+        edit.setCursorVisible(false);
         edit.setSingleLine(true);
         edit.setImeOptions(EditorInfo.IME_ACTION_SEND);
-        edit.setBackground(makeRounded("#24283b", "#414868", 8, 1));
-        edit.setPadding(dp(10), dp(6), dp(10), dp(6));
-        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        elp.rightMargin = dp(6);
-        bar.addView(edit, elp);
 
         Runnable flushNow = () -> {
             if (autoSendTask != null) mainHandler.removeCallbacks(autoSendTask);
-            String txt = edit.getText().toString();
+            Editable ed = edit.getText();
+            if (ed == null || ed.length() == 0) return;
+            // Wait if user is still composing pinyin inside Doubao IME
+            if (BaseInputConnection.getComposingSpanStart(ed) != -1) return;
+            String txt = ed.toString();
             if (!txt.isEmpty()) {
                 sendText(txt);
                 edit.setText("");
             }
         };
 
-        // Direct Backspace passthrough to Linux when box is empty!
         edit.setOnKeyListener((v, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_DEL && event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (edit.getText().length() == 0) {
@@ -171,18 +165,22 @@ public class DeckOverlayService extends Service {
                     return true;
                 }
             }
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+                hideImeBar();
+                return true;
+            }
             return false;
         });
 
         edit.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEND || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
                 flushNow.run();
+                sendKey("Return");
                 return true;
             }
             return false;
         });
 
-        // Auto-commit 0.9s after Doubao voice/typing finishes!
         edit.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
@@ -190,29 +188,24 @@ public class DeckOverlayService extends Service {
             public void afterTextChanged(Editable s) {
                 if (autoSendTask != null) mainHandler.removeCallbacks(autoSendTask);
                 if (s != null && s.length() > 0) {
+                    boolean composing = BaseInputConnection.getComposingSpanStart(s) != -1;
                     autoSendTask = flushNow;
-                    mainHandler.postDelayed(autoSendTask, 900);
+                    mainHandler.postDelayed(autoSendTask, composing ? 900 : 180);
                 }
             }
         });
 
-        bar.addView(makeBarBtn("⌫", false, v -> sendKey("BackSpace")));
-        bar.addView(makeBarBtn("⏎", false, v -> { flushNow.run(); sendKey("Return"); }));
-        bar.addView(makeBarBtn("✕", false, v -> hideImeBar()));
-
         WindowManager.LayoutParams ilp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
+                1, 1,
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                         ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                         : WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
-        ilp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        ilp.y = dp(32);
+        ilp.gravity = Gravity.BOTTOM | Gravity.START;
         ilp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE;
 
-        imeBarView = bar;
+        imeBarView = edit;
         wm.addView(imeBarView, ilp);
         imeBarVisible = true;
 
