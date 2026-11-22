@@ -94,7 +94,7 @@ jobs:
           cd /tmp/build-sway
           curl -fsSL "https://github.com/swaywm/sway/releases/download/1.10.1/sway-1.10.1.tar.gz" | tar -xz
           cd sway-1.10.1
-          meson setup build --prefix=/usr/local -Dxwayland=disabled -Dman-pages=disabled
+          meson setup build --prefix=/usr/local -Dman-pages=disabled -Dtray=disabled
           ninja -C build -j$(nproc)
           ninja -C build install
           cd /
