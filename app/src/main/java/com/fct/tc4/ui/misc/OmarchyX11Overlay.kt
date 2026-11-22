@@ -355,12 +355,8 @@ object OmarchyX11Overlay {
             attached = true
 
             // Restore user's hard-locked orientation preference (default: landscape)
-            val savedOrient = prefs.getString("locked_orientation", "landscape")
-            if (savedOrient == "portrait") {
-                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            } else if (savedOrient == "landscape") {
-                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-            }
+            val savedOrient = prefs.getString("locked_orientation", "landscape") ?: "landscape"
+            applyLockedOrientation(savedOrient)
 
             dockedRight = prefs.getBoolean("dock_right", true)
             dockYFraction = prefs.getFloat("dock_y_frac", 0.65f).coerceIn(0.15f, 0.85f)
@@ -553,14 +549,20 @@ object OmarchyX11Overlay {
         private fun isLandscapeNow(): Boolean =
             activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-        private fun toggleOrientationLock() {
-            val nextPortrait = isLandscapeNow()
-            prefs.edit().putString("locked_orientation", if (nextPortrait) "portrait" else "landscape").apply()
-            activity.requestedOrientation = if (nextPortrait) {
+        private fun applyLockedOrientation(mode: String) {
+            val x11Prefs = activity.getSharedPreferences("${activity.packageName}_preferences", Context.MODE_PRIVATE)
+            x11Prefs.edit().putString("forceOrientation", mode).apply()
+            prefs.edit().putString("locked_orientation", mode).apply()
+            activity.requestedOrientation = if (mode == "portrait") {
                 ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             } else {
                 ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             }
+        }
+
+        private fun toggleOrientationLock() {
+            val nextMode = if (isLandscapeNow()) "portrait" else "landscape"
+            applyLockedOrientation(nextMode)
             collapseDock()
         }
 

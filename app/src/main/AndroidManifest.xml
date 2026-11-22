@@ -10,6 +10,10 @@
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <queries>
+        <package android:name="com.bytedance.android.doubaoime" />
+    </queries>
+
     <application
         android:name=".Tc4Application"
         android:allowBackup="true"
