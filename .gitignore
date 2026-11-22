@@ -1,0 +1,15 @@
+.DS_Store
+._*
+*.db
+*.sqlite
+*.env
+.env*
+auth.json
+*personal-backup*.tar.gz
+*.deb
+*.AppImage
+*.pkg.tar.zst
+*.img
+*.zip
+__pycache__/
+*.pyc

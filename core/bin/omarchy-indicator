@@ -1,0 +1,88 @@
+#!/bin/bash
+# Official Omarchy Top-Bar Indicators (1-click direct toggles, no popup menu)
+# Supports: dnd, night, awake, sudo, rec
+STATE_DIR="/root/.local/state/omarchy/indicators"
+mkdir -p "$STATE_DIR"
+
+ACTION="$1"
+ITEM="$2"
+
+case "$ACTION" in
+  status)
+    case "$ITEM" in
+      dnd)
+        if [[ -f "$STATE_DIR/dnd" ]]; then
+          echo '{"text":"󰂛","tooltip":"勿扰模式: 已开启 (点击关闭)","class":"active"}'
+        else
+          echo '{"text":"󰂚","tooltip":"勿扰模式: 关闭 (点击开启)","class":"inactive"}'
+        fi
+        ;;
+      night)
+        if [[ -f "$STATE_DIR/night" ]]; then
+          echo '{"text":"󰖔","tooltip":"夜览护眼: 已开启 (点击关闭)","class":"active"}'
+        else
+          echo '{"text":"󰖨","tooltip":"夜览护眼: 关闭 (点击开启)","class":"inactive"}'
+        fi
+        ;;
+      awake)
+        if [[ -f "$STATE_DIR/awake" ]]; then
+          echo '{"text":"󰅶","tooltip":"防休眠常亮: 已开启 (点击关闭)","class":"active"}'
+        else
+          echo '{"text":"󰛊","tooltip":"防休眠常亮: 关闭 (点击开启)","class":"inactive"}'
+        fi
+        ;;
+      sudo)
+        if [[ -f /etc/sudoers.d/omarchy-nopasswd ]]; then
+          echo '{"text":"󰌿","tooltip":"免密 Sudo: 已开启 (点击关闭)","class":"active"}'
+        else
+          echo '{"text":"󰌾","tooltip":"免密 Sudo: 关闭 (点击开启)","class":"inactive"}'
+        fi
+        ;;
+      rec)
+        echo '{"text":"󰑋","tooltip":"一键全屏截图 (保存至 /mnt/sdcard/Pictures/)","class":"inactive"}'
+        ;;
+    esac
+    ;;
+  toggle)
+    case "$ITEM" in
+      dnd)
+        if [[ -f "$STATE_DIR/dnd" ]]; then
+          rm -f "$STATE_DIR/dnd"
+          makoctl mode -r do-not-disturb 2>/dev/null || true
+        else
+          touch "$STATE_DIR/dnd"
+          makoctl mode -a do-not-disturb 2>/dev/null || true
+        fi
+        ;;
+      night)
+        if [[ -f "$STATE_DIR/night" ]]; then
+          rm -f "$STATE_DIR/night"
+        else
+          touch "$STATE_DIR/night"
+        fi
+        ;;
+      awake)
+        if [[ -f "$STATE_DIR/awake" ]]; then
+          rm -f "$STATE_DIR/awake"
+        else
+          touch "$STATE_DIR/awake"
+        fi
+        ;;
+      sudo)
+        if [[ -f /etc/sudoers.d/omarchy-nopasswd ]]; then
+          rm -f /etc/sudoers.d/omarchy-nopasswd
+        else
+          echo "ALL ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/omarchy-nopasswd
+          chmod 440 /etc/sudoers.d/omarchy-nopasswd
+        fi
+        ;;
+      rec)
+        mkdir -p /mnt/sdcard/Pictures
+        fname="/mnt/sdcard/Pictures/omarchy-$(date +%Y%m%d-%H%M%S).png"
+        XDG_RUNTIME_DIR=/tmp WAYLAND_DISPLAY=wayland-1 grim "$fname" 2>/dev/null || true
+        notify-send "已截屏" "$fname" 2>/dev/null || true
+        ;;
+    esac
+    pkill -RTMIN+10 waybar 2>/dev/null || true
+    ;;
+esac

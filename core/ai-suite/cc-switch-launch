@@ -1,0 +1,26 @@
+#!/bin/bash
+export WEBKIT_DISABLE_DMABUF_RENDERER=1
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
+export GDK_BACKEND=wayland
+export XDG_RUNTIME_DIR=/tmp
+export WAYLAND_DISPLAY=wayland-1
+python3 - << "PY"
+import socket, sqlite3
+s = socket.socket()
+s.settimeout(0.3)
+try:
+    s.connect(("127.0.0.1", 18888))
+    up = True
+except Exception:
+    up = False
+finally:
+    s.close()
+c = sqlite3.connect("/root/.cc-switch/cc-switch.db")
+if up:
+    c.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(\x27global_proxy_url\x27,\x27http://127.0.0.1:18888\x27)")
+else:
+    c.execute("DELETE FROM settings WHERE key=\x27global_proxy_url\x27")
+c.commit()
+c.close()
+PY
+exec /usr/bin/cc-switch "$@"

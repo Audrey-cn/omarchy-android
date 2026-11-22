@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""
+Inside-Ubuntu Chromium launcher client.
+Drops a JSON job into /tmp/omarchy-browser-queue/ so the host-side daemon
+launches native Termux Chromium 158 directly on Wayland (wayland-1).
+"""
+import os
+import sys
+import time
+import json
+
+QUEUE_DIR = "/tmp/omarchy-browser-queue"
+os.makedirs(QUEUE_DIR, exist_ok=True)
+job_file = f"{QUEUE_DIR}/job-{int(time.time()*1000000)}.json"
+with open(job_file, "w") as f:
+    json.dump({"args": sys.argv[1:]}, f)

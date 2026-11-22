@@ -1,0 +1,10 @@
+#!/bin/bash
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/omarchy-dbus.sock
+export XDG_RUNTIME_DIR=/tmp
+export WAYLAND_DISPLAY=wayland-1
+if ! pgrep -x fcitx5 >/dev/null 2>&1; then
+  nohup fcitx5 -d --replace </dev/null >/tmp/fcitx5.log 2>&1 &
+  sleep 0.5
+fi
+fcitx5-remote -t
+pkill -RTMIN+9 waybar 2>/dev/null || true

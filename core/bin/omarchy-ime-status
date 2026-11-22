@@ -1,0 +1,8 @@
+#!/bin/bash
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/omarchy-dbus.sock
+im=$(fcitx5-remote -n 2>/dev/null || echo keyboard-us)
+if [[ "$im" == *pinyin* || "$im" == *rime* || "$im" == *shuangpin* ]]; then
+  echo "{\"text\":\"拼\",\"tooltip\":\"中文拼音 (左键点击或 Super+I 切换英文)\",\"class\":\"pinyin\"}"
+else
+  echo "{\"text\":\"EN\",\"tooltip\":\"英文输入 (左键点击或 Super+I 切换拼音)\",\"class\":\"english\"}"
+fi

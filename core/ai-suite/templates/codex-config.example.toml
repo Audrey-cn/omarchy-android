@@ -1,0 +1,18 @@
+# Example Codex Desktop / CLI third-party provider routing config (sanitized template)
+# Copy to ~/.codex/config.toml (chmod 600) and replace YOUR_API_TOKEN_HERE.
+
+web_search = "disabled"
+
+model = "mimo-v2.6-pro"
+model_catalog_json = "/root/.codex/mimo-models.json"
+model_provider = "mimo"
+model_context_window = 1048576
+
+[model_providers.mimo]
+name = "Xiaomi MiMo (Token Plan)"
+base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+experimental_bearer_token = "YOUR_API_TOKEN_HERE"
+wire_api = "responses"
+
+[tools]
+web_search = false

@@ -1,0 +1,396 @@
+#!/usr/bin/env python3
+"""
+Omarchy Native AppGrid (1:1 visual & UX replica of official basecamp/omarchy AppGrid.qml)
+- 6-column centered icon-on-top, label-below grid (56px icons)
+- Live Omarchy theme colors (reads /root/.config/omarchy/current/theme/colors.toml or waybar.css)
+- Instant search, Arrow key navigation, Enter/Click launch, Esc close
+- Respects official launcher.hides
+"""
+import os
+import re
+import glob
+import shlex
+import subprocess
+import configparser
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gtk, Gdk, GdkPixbuf, Pango, GLib
+
+HIDES_FILE = "/root/.local/share/omarchy/default/omarchy/launcher.hides"
+EXTRA_HIDES = {
+    "picom", "rofi", "rofi-theme-selector", "display-im6.q16",
+    "thunar-settings", "thunar-bulk-rename", "thunar-volman-settings",
+    "foot-server", "footclient", "org.codeberg.dnkl.foot-server",
+    "org.codeberg.dnkl.footclient", "btop", "htop", "uxterm", "xterm",
+    "im-config", "cc-switch-handler",
+    "com.mitchellh.ghostty", "org.gnome.Evince-previewer",
+    "xfce4-about", "panel-desktop-handler", "exo-preferred-applications",
+}
+
+DESKTOP_DIRS = [
+    "/root/.local/share/applications",
+    "/usr/local/share/applications",
+    "/usr/share/applications",
+]
+
+
+def load_theme_colors():
+    bg = "#1a1b26"
+    fg = "#c0caf5"
+    accent = "#7aa2f7"
+    surface = "#24283b"
+    colors_toml = "/root/.config/omarchy/current/theme/colors.toml"
+    if os.path.exists(colors_toml):
+        try:
+            txt = open(colors_toml, "r", encoding="utf-8", errors="ignore").read()
+            m_bg = re.search(r'^\s*background\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
+            m_fg = re.search(r'^\s*foreground\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
+            m_ac = re.search(r'^\s*accent\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
+            m_c0 = re.search(r'^\s*color8\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
+            if m_bg: bg = m_bg.group(1)
+            if m_fg: fg = m_fg.group(1)
+            if m_ac: accent = m_ac.group(1)
+            if m_c0: surface = m_c0.group(1)
+        except Exception:
+            pass
+    return bg, fg, accent, surface
+
+
+def load_hidden_ids():
+    hides = set(EXTRA_HIDES)
+    if os.path.exists(HIDES_FILE):
+        try:
+            for line in open(HIDES_FILE, "r", encoding="utf-8", errors="ignore"):
+                s = line.strip()
+                if s and not s.startswith("#"):
+                    hides.add(s)
+        except Exception:
+            pass
+    return hides
+
+
+def load_desktop_apps():
+    hides = load_hidden_ids()
+    seen = {}
+    for d in DESKTOP_DIRS:
+        if not os.path.isdir(d):
+            continue
+        is_user_dir = (d == "/root/.local/share/applications")
+        for fpath in sorted(glob.glob(os.path.join(d, "*.desktop"))):
+            app_id = os.path.basename(fpath)[:-8]
+            if app_id in seen:
+                continue
+            if not is_user_dir and app_id in hides:
+                continue
+            if app_id in ("cc-switch-handler",):
+                continue
+            cp = configparser.ConfigParser(interpolation=None)
+            try:
+                cp.read(fpath, encoding="utf-8")
+            except Exception:
+                continue
+            if "Desktop Entry" not in cp:
+                continue
+            ent = cp["Desktop Entry"]
+            if ent.get("Type", "Application") != "Application":
+                continue
+            if ent.get("NoDisplay", "false").lower() == "true":
+                continue
+            if ent.get("Hidden", "false").lower() == "true":
+                continue
+            name = ent.get("Name[zh_CN]") or ent.get("Name")
+            exec_cmd = ent.get("Exec")
+            if not name or not exec_cmd:
+                continue
+            icon = ent.get("Icon", "application-x-executable")
+            terminal = ent.get("Terminal", "false").lower() == "true"
+            keywords = ent.get("Keywords", "") + " " + ent.get("Comment", "")
+            seen[app_id] = {
+                "id": app_id,
+                "name": name.strip(),
+                "exec": exec_cmd.strip(),
+                "icon": icon.strip(),
+                "terminal": terminal,
+                "search": f"{name} {app_id} {keywords}".lower(),
+            }
+    return sorted(seen.values(), key=lambda x: x["name"].lower())
+
+
+def load_pixbuf(icon_name, size=56):
+    if icon_name and os.path.isabs(icon_name) and os.path.exists(icon_name):
+        try:
+            return GdkPixbuf.Pixbuf.new_from_file_at_scale(icon_name, size, size, True)
+        except Exception:
+            pass
+    theme = Gtk.IconTheme.get_default()
+    candidates = [icon_name] if icon_name else []
+    if icon_name and "-" in icon_name:
+        candidates.append(icon_name.split("-")[0])
+    candidates.extend(["application-x-executable", "applications-other"])
+    for cand in candidates:
+        if not cand:
+            continue
+        try:
+            pb = theme.load_icon(cand, size, Gtk.IconLookupFlags.FORCE_SIZE)
+            if pb:
+                return pb
+        except Exception:
+            continue
+    return None
+
+
+def launch_app(app):
+    cmd = re.sub(r"%[fFuUdDnNickvm]", "", app["exec"]).strip()
+    if app["terminal"]:
+        full_cmd = ["alacritty", "-e", "bash", "-lc", cmd]
+    else:
+        full_cmd = ["bash", "-lc", cmd]
+    subprocess.Popen(
+        full_cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+class OmarchyAppGrid(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Omarchy App Grid")
+        self.set_wmclass("omarchy-app-grid", "omarchy-app-grid")
+        self.set_role("omarchy-app-grid")
+        self.set_decorated(False)
+        self.set_resizable(False)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.set_default_size(940, 560)
+        self.set_keep_above(True)
+
+        settings = Gtk.Settings.get_default()
+        if settings:
+            settings.set_property("gtk-icon-theme-name", "Papirus-Dark")
+            settings.set_property("gtk-application-prefer-dark-theme", True)
+
+        bg, fg, accent, surface = load_theme_colors()
+        css = f"""
+        window {{
+            background-color: {bg};
+            border: 2px solid {accent};
+            border-radius: 10px;
+        }}
+        .grid-root {{
+            padding: 20px 24px 18px 24px;
+            background-color: {bg};
+        }}
+        .search-entry {{
+            background-color: alpha({fg}, 0.06);
+            color: {fg};
+            border: 1px solid alpha({accent}, 0.45);
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 14px;
+            margin-bottom: 16px;
+            caret-color: {accent};
+        }}
+        .search-entry:focus {{
+            border-color: {accent};
+        }}
+        flowbox {{
+            background-color: transparent;
+        }}
+        flowboxchild {{
+            border-radius: 10px;
+            padding: 12px 8px;
+            border: 1px solid transparent;
+            transition: background-color 120ms ease;
+        }}
+        flowboxchild:hover {{
+            background-color: alpha({fg}, 0.08);
+        }}
+        flowboxchild:selected {{
+            background-color: alpha({accent}, 0.22);
+            border: 1px solid {accent};
+        }}
+        .app-label {{
+            color: {fg};
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            margin-top: 8px;
+        }}
+        scrollbar {{
+            background-color: transparent;
+        }}
+        scrollbar slider {{
+            background-color: alpha({fg}, 0.22);
+            border-radius: 4px;
+            min-width: 6px;
+        }}
+        """
+        provider = Gtk.CssProvider()
+        provider.load_from_data(css.encode("utf-8"))
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.apps = load_desktop_apps()
+        self.visible_children = []
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        vbox.get_style_context().add_class("grid-root")
+        self.add(vbox)
+
+        self.search = Gtk.Entry()
+        self.search.set_placeholder_text("搜索应用 (Type to filter, Enter to launch, Esc to close)...")
+        self.search.get_style_context().add_class("search-entry")
+        self.search.connect("changed", self.on_search_changed)
+        self.search.connect("activate", self.on_activate_selected)
+        vbox.pack_start(self.search, False, False, 0)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        vbox.pack_start(scrolled, True, True, 0)
+
+        self.flow = Gtk.FlowBox()
+        self.flow.set_valign(Gtk.Align.START)
+        self.flow.set_min_children_per_line(6)
+        self.flow.set_max_children_per_line(6)
+        self.flow.set_homogeneous(True)
+        self.flow.set_row_spacing(10)
+        self.flow.set_column_spacing(10)
+        self.flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.flow.set_activate_on_single_click(True)
+        self.flow.connect("child-activated", self.on_child_activated)
+        scrolled.add(self.flow)
+
+        for app in self.apps:
+            child = Gtk.FlowBoxChild()
+            child.app_data = app
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            box.set_halign(Gtk.Align.CENTER)
+            box.set_valign(Gtk.Align.CENTER)
+            box.set_size_request(126, 108)
+
+            pb = load_pixbuf(app["icon"], 56)
+            if pb:
+                img = Gtk.Image.new_from_pixbuf(pb)
+            else:
+                img = Gtk.Image.new_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG)
+            img.set_halign(Gtk.Align.CENTER)
+            box.pack_start(img, False, False, 0)
+
+            lbl = Gtk.Label(label=app["name"])
+            lbl.get_style_context().add_class("app-label")
+            lbl.set_justify(Gtk.Justification.CENTER)
+            lbl.set_line_wrap(True)
+            lbl.set_lines(2)
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            lbl.set_max_width_chars(14)
+            lbl.set_halign(Gtk.Align.CENTER)
+            box.pack_start(lbl, False, False, 0)
+
+            child.add(box)
+            self.flow.add(child)
+
+        self.flow.set_filter_func(self.filter_func)
+        self.connect("key-press-event", self.on_key_press)
+        self.connect("destroy", Gtk.main_quit)
+
+        self.show_all()
+        self.select_first_visible()
+        self.search.grab_focus()
+
+    def filter_func(self, child):
+        q = self.search.get_text().strip().lower()
+        if not q:
+            return True
+        return q in child.app_data["search"]
+
+    def get_visible_children(self):
+        return [c for c in self.flow.get_children() if self.filter_func(c)]
+
+    def select_first_visible(self):
+        vis = self.get_visible_children()
+        if vis:
+            self.flow.select_child(vis[0])
+
+    def on_search_changed(self, _entry):
+        self.flow.invalidate_filter()
+        self.select_first_visible()
+
+    def on_child_activated(self, _flow, child):
+        launch_app(child.app_data)
+        Gtk.main_quit()
+
+    def on_activate_selected(self, _entry):
+        sel = self.flow.get_selected_children()
+        if sel:
+            launch_app(sel[0].app_data)
+            Gtk.main_quit()
+
+    def move_selection(self, delta):
+        vis = self.get_visible_children()
+        if not vis:
+            return
+        sel = self.flow.get_selected_children()
+        idx = vis.index(sel[0]) if (sel and sel[0] in vis) else 0
+        new_idx = max(0, min(len(vis) - 1, idx + delta))
+        self.flow.select_child(vis[new_idx])
+
+    def on_key_press(self, _win, event):
+        key = event.keyval
+        if key == Gdk.KEY_Escape:
+            Gtk.main_quit()
+            return True
+        if key == Gdk.KEY_Return or key == Gdk.KEY_KP_Enter:
+            self.on_activate_selected(None)
+            return True
+        if key == Gdk.KEY_Right:
+            self.move_selection(1)
+            return True
+        if key == Gdk.KEY_Left:
+            self.move_selection(-1)
+            return True
+        if key == Gdk.KEY_Down:
+            self.move_selection(6)
+            return True
+        if key == Gdk.KEY_Up:
+            self.move_selection(-6)
+            return True
+        return False
+
+
+if __name__ == "__main__":
+    # Toggle behavior via PID file (safe from matching wrapper shells)
+    pidfile = "/tmp/omarchy-app-grid.pid"
+    if os.path.exists(pidfile):
+        try:
+            old_pid = int(open(pidfile).read().strip())
+            if old_pid != os.getpid():
+                os.kill(old_pid, 15)
+                os.remove(pidfile)
+                raise SystemExit(0)
+        except ProcessLookupError:
+            pass
+        except SystemExit:
+            raise
+        except Exception:
+            pass
+    try:
+        open(pidfile, "w").write(str(os.getpid()))
+    except Exception:
+        pass
+
+    GLib.set_prgname("omarchy-app-grid")
+    win = OmarchyAppGrid()
+    try:
+        Gtk.main()
+    finally:
+        try:
+            if os.path.exists(pidfile) and open(pidfile).read().strip() == str(os.getpid()):
+                os.remove(pidfile)
+        except Exception:
+            pass

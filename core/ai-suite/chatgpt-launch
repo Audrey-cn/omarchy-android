@@ -1,0 +1,20 @@
+#!/bin/bash
+export LANG=zh_CN.UTF-8
+export LC_ALL=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh
+export XDG_RUNTIME_DIR=/tmp
+export WAYLAND_DISPLAY=wayland-1
+export ELECTRON_OZONE_PLATFORM_HINT=wayland
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/omarchy-dbus.sock
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+export no_proxy=127.0.0.1,localhost
+export NO_PROXY=127.0.0.1,localhost
+export LIBGL_ALWAYS_SOFTWARE=1
+PROXY_FLAGS=""
+if bash -c "</dev/tcp/127.0.0.1/18888" 2>/dev/null; then
+  export http_proxy=http://127.0.0.1:18888 https_proxy=http://127.0.0.1:18888
+  PROXY_FLAGS="--proxy-server=http://127.0.0.1:18888 --proxy-bypass-list=127.0.0.1;localhost"
+fi
+exec /usr/bin/chatgpt   --no-sandbox   --disable-gpu   --disable-gpu-compositing   --disable-gpu-sandbox   --disable-software-rasterizer   --disable-dev-shm-usage   --ozone-platform=wayland   --enable-wayland-ime   --password-store=basic   --lang=zh-CN   $PROXY_FLAGS "$@"
