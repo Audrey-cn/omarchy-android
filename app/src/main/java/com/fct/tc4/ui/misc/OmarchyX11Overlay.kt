@@ -3,22 +3,25 @@ package com.fct.tc4.ui.misc
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
@@ -26,6 +29,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import org.json.JSONObject
+import java.io.File
 import java.net.Socket
 import java.util.WeakHashMap
 import java.util.concurrent.Executors
@@ -39,14 +44,16 @@ import kotlin.math.roundToInt
  * - Zero SYSTEM_ALERT_WINDOW permission required.
  * - Draggable floating pill (⌨ | 🎤 | 📱) with auto-hide when floating keyboard opens.
  * - Ergonomic 0.70x floating keyboard (workspace 1-5, opacity slider, drag handle, close).
- * - Completely invisible 1x1px EditText anchor for Android Doubao voice/text IME passthrough.
+ * - Custom ImeBridgeEditText (InputConnectionWrapper) so Doubao IME composing NEVER leaks
+ *   duplicate letters and ONLY finalized Chinese/English/Voice commitText() is sent to Linux.
+ * - Native queue watcher for WebApps (open_url), Nightlight amber filter (night_mode),
+ *   and Keep-Awake (keep_awake).
  * - Automatic Sway output resize sync on startup & Portrait/Landscape orientation changes.
  */
 object OmarchyX11Overlay {
     private val controllers = WeakHashMap<Activity, Controller>()
 
     fun register(app: Application) {
-        // Ensure clean Termux:X11 defaults on first launch (disable ugly built-in EKBar)
         try {
             val prefs = app.getSharedPreferences("${app.packageName}_preferences", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("omarchy_defaults_v1", false)) {
@@ -80,16 +87,108 @@ object OmarchyX11Overlay {
         })
     }
 
+    private class ImeBridgeEditText(
+        context: Context,
+        private val onCommit: (String) -> Unit,
+        private val onBackspace: () -> Unit,
+        private val onEnter: () -> Unit,
+        private val onDismiss: () -> Unit
+    ) : EditText(context) {
+
+        init {
+            alpha = 0f
+            setBackgroundColor(Color.TRANSPARENT)
+            setTextColor(Color.TRANSPARENT)
+            isCursorVisible = false
+            isSingleLine = true
+            imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            isFocusable = true
+            isFocusableInTouchMode = true
+        }
+
+        override fun onKeyPreIme(keyCode: Int, event: KeyEvent?): Boolean {
+            if (keyCode == KeyEvent.KEYCODE_BACK && event?.action == KeyEvent.ACTION_UP) {
+                onDismiss()
+                return false
+            }
+            return super.onKeyPreIme(keyCode, event)
+        }
+
+        override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+            val base = super.onCreateInputConnection(outAttrs) ?: return null
+            outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            return object : InputConnectionWrapper(base, true) {
+                override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                    val s = text?.toString() ?: ""
+                    if (s.isNotEmpty()) {
+                        onCommit(s)
+                        post { setText("") }
+                    }
+                    return true
+                }
+
+                override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+                    // Let Doubao IME manage its own Pinyin/English candidate bar without leaking partial letters!
+                    return super.setComposingText(text, newCursorPosition)
+                }
+
+                override fun finishComposingText(): Boolean {
+                    val ed = this@ImeBridgeEditText.text
+                    val remaining = ed?.toString() ?: ""
+                    val res = super.finishComposingText()
+                    if (remaining.isNotEmpty()) {
+                        onCommit(remaining)
+                        post { setText("") }
+                    }
+                    return res
+                }
+
+                override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
+                    val ed = this@ImeBridgeEditText.text
+                    val composing = ed != null && BaseInputConnection.getComposingSpanStart(ed) != -1
+                    if (!composing && (ed == null || ed.isEmpty()) && beforeLength > 0) {
+                        repeat(beforeLength) { onBackspace() }
+                        return true
+                    }
+                    return super.deleteSurroundingText(beforeLength, afterLength)
+                }
+
+                override fun sendKeyEvent(event: KeyEvent): Boolean {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        if (event.keyCode == KeyEvent.KEYCODE_DEL) {
+                            val ed = this@ImeBridgeEditText.text
+                            val composing = ed != null && BaseInputConnection.getComposingSpanStart(ed) != -1
+                            if (!composing && (ed == null || ed.isEmpty())) {
+                                onBackspace()
+                                return true
+                            }
+                        } else if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
+                            val ed = this@ImeBridgeEditText.text
+                            val remaining = ed?.toString() ?: ""
+                            if (remaining.isNotEmpty()) {
+                                onCommit(remaining)
+                                post { setText("") }
+                            }
+                            onEnter()
+                            return true
+                        }
+                    }
+                    return super.sendKeyEvent(event)
+                }
+            }
+        }
+    }
+
     private class Controller(private val activity: Activity) {
         private val mainHandler = Handler(Looper.getMainLooper())
         private val netExec = Executors.newSingleThreadExecutor()
 
         private var attached = false
         private var overlayHost: FrameLayout? = null
+        private var nightOverlay: View? = null
         private var fabView: View? = null
         private var oskView: View? = null
         private var imeAnchor: EditText? = null
-        private var autoSendTask: Runnable? = null
         private var resizeTask: Runnable? = null
 
         private var oskVisible = false
@@ -104,6 +203,14 @@ object OmarchyX11Overlay {
         private var modShift = false
         private val modBtns = HashMap<String, Button>()
 
+        private val queuePollTask = object : Runnable {
+            override fun run() {
+                if (!attached) return
+                pollQueue()
+                mainHandler.postDelayed(this, 300L)
+            }
+        }
+
         private val layoutListener = View.OnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
             val w = v.width
             val h = v.height
@@ -111,7 +218,6 @@ object OmarchyX11Overlay {
                 lastW = w
                 lastH = h
                 scheduleResize(w, h)
-                // Keep floating keyboard width adapted after rotation
                 if (oskVisible) {
                     hideOsk()
                     showOsk()
@@ -133,10 +239,26 @@ object OmarchyX11Overlay {
             content.addView(host)
             overlayHost = host
 
+            // Hardware-composited Nightlight warm amber filter (non-touchable, initially GONE)
+            val night = View(activity).apply {
+                setBackgroundColor(Color.argb(0x3C, 0xFF, 0x95, 0x00))
+                visibility = View.GONE
+                isClickable = false
+                isFocusable = false
+            }
+            host.addView(
+                night,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+            nightOverlay = night
+
             buildFab(host)
             content.addOnLayoutChangeListener(layoutListener)
+            mainHandler.postDelayed(queuePollTask, 500L)
 
-            // Sync initial screen size a few times while Sway + deck-bridge boot
             listOf(1200L, 3000L, 5500L).forEach { delay ->
                 mainHandler.postDelayed({
                     val w = content.width
@@ -151,17 +273,57 @@ object OmarchyX11Overlay {
         }
 
         fun detach() {
-            autoSendTask?.let { mainHandler.removeCallbacks(it) }
+            mainHandler.removeCallbacks(queuePollTask)
             resizeTask?.let { mainHandler.removeCallbacks(it) }
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
             content?.removeOnLayoutChangeListener(layoutListener)
             overlayHost?.let { content?.removeView(it) }
             overlayHost = null
+            nightOverlay = null
             fabView = null
             oskView = null
             imeAnchor = null
             attached = false
             netExec.shutdownNow()
+        }
+
+        private fun pollQueue() {
+            try {
+                val qdir = File(activity.filesDir, "tmp/omarchy-browser-queue")
+                val files = qdir.listFiles { f -> f.isFile && f.name.endsWith(".json") } ?: return
+                for (f in files.sortedBy { it.name }) {
+                    try {
+                        val txt = f.readText(Charsets.UTF_8)
+                        f.delete()
+                        val obj = JSONObject(txt)
+                        when (obj.optString("action")) {
+                            "open_url" -> {
+                                val url = obj.optString("url")
+                                if (url.startsWith("http://") || url.startsWith("https://")) {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    activity.startActivity(intent)
+                                }
+                            }
+                            "night_mode" -> {
+                                val on = obj.optBoolean("enabled", false)
+                                nightOverlay?.visibility = if (on) View.VISIBLE else View.GONE
+                            }
+                            "keep_awake" -> {
+                                val on = obj.optBoolean("enabled", true)
+                                if (on) {
+                                    activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                                } else {
+                                    activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {
+                        try { f.delete() } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
         }
 
         private fun scheduleResize(w: Int, h: Int) {
@@ -295,7 +457,6 @@ object OmarchyX11Overlay {
             }
 
         private fun hideIme() {
-            autoSendTask?.let { mainHandler.removeCallbacks(it) }
             imeAnchor?.let { ed ->
                 try {
                     val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
@@ -315,64 +476,25 @@ object OmarchyX11Overlay {
             hideOsk()
             val host = overlayHost ?: return
 
-            // Completely invisible 1x1px anchor so ONLY Android Doubao IME pops up (ZERO extra bar!)
-            val edit = EditText(activity).apply {
-                alpha = 0f
-                setBackgroundColor(Color.TRANSPARENT)
-                setTextColor(Color.TRANSPARENT)
-                isCursorVisible = false
-                isSingleLine = true
-                imeOptions = EditorInfo.IME_ACTION_SEND
-                isFocusable = true
-                isFocusableInTouchMode = true
-            }
-
-            val flushNow = Runnable {
-                autoSendTask?.let { mainHandler.removeCallbacks(it) }
-                val ed = edit.text ?: return@Runnable
-                if (ed.isEmpty()) return@Runnable
-                if (BaseInputConnection.getComposingSpanStart(ed) != -1) return@Runnable
-                val txt = ed.toString()
-                if (txt.isNotEmpty()) {
-                    sendText(txt)
-                    edit.setText("")
-                }
-            }
-
-            edit.setOnKeyListener { _, keyCode, event ->
-                if (keyCode == KeyEvent.KEYCODE_DEL && event.action == KeyEvent.ACTION_DOWN) {
-                    if (edit.text.isNullOrEmpty()) {
-                        sendKey("BackSpace")
-                        return@setOnKeyListener true
-                    }
-                }
-                if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                    hideIme()
-                    return@setOnKeyListener true
-                }
-                false
-            }
+            val edit = ImeBridgeEditText(
+                context = activity,
+                onCommit = { committed -> sendText(committed) },
+                onBackspace = { sendKey("BackSpace") },
+                onEnter = { sendKey("Return") },
+                onDismiss = { hideIme() }
+            )
 
             edit.setOnEditorActionListener { _, actionId, event ->
                 if (actionId == EditorInfo.IME_ACTION_SEND || (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER)) {
-                    flushNow.run()
+                    val rem = edit.text?.toString() ?: ""
+                    if (rem.isNotEmpty()) {
+                        sendText(rem)
+                        edit.setText("")
+                    }
                     sendKey("Return")
                     true
                 } else false
             }
-
-            edit.addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-                override fun afterTextChanged(s: Editable?) {
-                    autoSendTask?.let { mainHandler.removeCallbacks(it) }
-                    if (!s.isNullOrEmpty()) {
-                        val composing = BaseInputConnection.getComposingSpanStart(s) != -1
-                        autoSendTask = flushNow
-                        mainHandler.postDelayed(flushNow, if (composing) 900L else 180L)
-                    }
-                }
-            })
 
             host.addView(edit, FrameLayout.LayoutParams(1, 1, Gravity.BOTTOM or Gravity.START))
             imeAnchor = edit
@@ -418,7 +540,6 @@ object OmarchyX11Overlay {
                 alpha = max(0.38f, oskAlpha + 0.14f)
             }
 
-            // Top bar: [1][2][3][4][5]  [opacity]  [⠿ 拖动]  [✕]
             val bar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL

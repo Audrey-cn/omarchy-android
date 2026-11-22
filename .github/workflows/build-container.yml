@@ -44,7 +44,7 @@ jobs:
             alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
             imv zathura zathura-pdf-poppler mpv \
             git gh curl wget unzip zstd xz-utils webp imagemagick \
-            fonts-noto-cjk fonts-dejavu-core papirus-icon-theme \
+            fonts-noto-cjk fonts-noto-color-emoji fonts-dejavu-core papirus-icon-theme \
             python3 python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 \
             grim slurp \
             fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5 \
@@ -139,7 +139,6 @@ jobs:
           chmod 755 /usr/local/bin/omarchy-* /usr/local/bin/launch-waybar /usr/local/bin/*-launch
           rm -rf /tmp/omarchy-android
 
-          printf '\n[terminal.shell]\nprogram = "/bin/bash"\n' >> /root/.config/alacritty/alacritty.toml
           echo 'DPkg::Post-Invoke { "/usr/local/bin/omarchy-fix-desktops || true"; };' > /etc/apt/apt.conf.d/99-omarchy-desktop-guard
 
           # Deploy official Omarchy WebApps & lowercase icons
