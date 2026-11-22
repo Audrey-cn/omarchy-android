@@ -10,14 +10,21 @@ import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -36,6 +43,10 @@ public class DeckOverlayService extends Service {
     private WindowManager.LayoutParams fabLp;
     private View oskView;
     private WindowManager.LayoutParams oskLp;
+    private View imeBarView;
+    private boolean imeBarVisible = false;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private Runnable autoSendTask;
 
     private boolean oskVisible = false;
     private float oskAlpha = 0.78f;
@@ -98,13 +109,118 @@ public class DeckOverlayService extends Service {
         }
     }
 
+    private void sendText(String text) {
+        if (text == null || text.isEmpty()) return;
+        String esc = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "");
+        sendJson("{\"type\":\"text\",\"text\":\"" + esc + "\"}");
+    }
+
+    private void hideImeBar() {
+        if (autoSendTask != null) mainHandler.removeCallbacks(autoSendTask);
+        if (imeBarView != null) {
+            try {
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) imm.hideSoftInputFromWindow(imeBarView.getWindowToken(), 0);
+                wm.removeView(imeBarView);
+            } catch (Exception ignored) {}
+            imeBarView = null;
+        }
+        imeBarVisible = false;
+    }
+
     private void triggerAndroidIme() {
+        if (imeBarVisible) {
+            hideImeBar();
+            return;
+        }
         hideOsk();
-        sendCmd("toggle_android_ime");
-        try {
+
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setBackground(makeRounded("#E61a1b26", "#7aa2f7", 10, 2));
+        bar.setPadding(dp(8), dp(6), dp(8), dp(6));
+
+        EditText edit = new EditText(this);
+        edit.setHint("豆包语音/中文直输 (停顿 0.9 秒自动上屏 · 空框按退格删Linux文字)");
+        edit.setHintTextColor(Color.parseColor("#565f89"));
+        edit.setTextColor(Color.parseColor("#c0caf5"));
+        edit.setTextSize(13);
+        edit.setSingleLine(true);
+        edit.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        edit.setBackground(makeRounded("#24283b", "#414868", 8, 1));
+        edit.setPadding(dp(10), dp(6), dp(10), dp(6));
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        elp.rightMargin = dp(6);
+        bar.addView(edit, elp);
+
+        Runnable flushNow = () -> {
+            if (autoSendTask != null) mainHandler.removeCallbacks(autoSendTask);
+            String txt = edit.getText().toString();
+            if (!txt.isEmpty()) {
+                sendText(txt);
+                edit.setText("");
+            }
+        };
+
+        // Direct Backspace passthrough to Linux when box is empty!
+        edit.setOnKeyListener((v, keyCode, event) -> {
+            if (keyCode == KeyEvent.KEYCODE_DEL && event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (edit.getText().length() == 0) {
+                    sendKey("BackSpace");
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        edit.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEND || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                flushNow.run();
+                return true;
+            }
+            return false;
+        });
+
+        // Auto-commit 0.9s after Doubao voice/typing finishes!
+        edit.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (autoSendTask != null) mainHandler.removeCallbacks(autoSendTask);
+                if (s != null && s.length() > 0) {
+                    autoSendTask = flushNow;
+                    mainHandler.postDelayed(autoSendTask, 900);
+                }
+            }
+        });
+
+        bar.addView(makeBarBtn("⌫", false, v -> sendKey("BackSpace")));
+        bar.addView(makeBarBtn("⏎", false, v -> { flushNow.run(); sendKey("Return"); }));
+        bar.addView(makeBarBtn("✕", false, v -> hideImeBar()));
+
+        WindowManager.LayoutParams ilp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT);
+        ilp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        ilp.y = dp(32);
+        ilp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE;
+
+        imeBarView = bar;
+        wm.addView(imeBarView, ilp);
+        imeBarVisible = true;
+
+        edit.requestFocus();
+        edit.postDelayed(() -> {
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm != null) imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
-        } catch (Exception ignored) {}
+            if (imm != null) imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT);
+        }, 100);
     }
 
     private void showFab() {
@@ -422,6 +538,7 @@ public class DeckOverlayService extends Service {
     @Override
     public void onDestroy() {
         hideOsk();
+        hideImeBar();
         if (fabView != null) {
             try { wm.removeView(fabView); } catch (Exception ignored) {}
         }
