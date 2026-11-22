@@ -40,14 +40,41 @@ jobs:
           apt-get update -qq
           apt-get install -y --no-install-recommends \
             ca-certificates sudo locales dbus dbus-x11 \
-            sway waybar wofi swaybg mako-notifier libnotify-bin wl-clipboard wtype \
+            waybar wofi swaybg mako-notifier libnotify-bin wl-clipboard wtype \
             alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
             imv zathura zathura-pdf-poppler mpv \
             git gh curl wget unzip zstd webp imagemagick \
             fonts-noto-cjk fonts-dejavu-core papirus-icon-theme \
             python3 python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 \
             grim slurp \
-            fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
+            fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5 \
+            build-essential meson ninja-build pkg-config scdoc \
+            libwayland-dev wayland-protocols libpixman-1-dev libxkbcommon-dev \
+            libdrm-dev libinput-dev libudev-dev libseat-dev libgbm-dev \
+            libxcb1-dev libxcb-composite0-dev libxcb-render-util0-dev libxcb-xfixes0-dev \
+            libxcb-icccm4-dev libxcb-xinput-dev libxcb-shm0-dev libxcb-present-dev \
+            libxcb-dri3-dev libxcb-res0-dev libxcb-errors-dev libxcb-ewmh-dev \
+            libjson-c-dev libpcre2-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev
+
+          # Build modern wlroots 0.18.2 + sway 1.10.1 (works with pixman X11 backend WITHOUT DRI3!)
+          mkdir -p /tmp/build-sway
+          cd /tmp/build-sway
+          curl -fsSL "https://gitlab.freedesktop.org/wlroots/wlroots/-/releases/0.18.2/downloads/wlroots-0.18.2.tar.gz" | tar -xz
+          curl -fsSL "https://github.com/swaywm/sway/releases/download/1.10.1/sway-1.10.1.tar.gz" | tar -xz
+          cd wlroots-0.18.2
+          # Force pure SHM/Pixman X11 backend without DRI3 DRM FD (required for Android PRoot)
+          sed -i 's/x11->have_dri3 = true;/x11->have_dri3 = false;/g' backend/x11/backend.c || true
+          meson setup build --prefix=/usr/local -Dbackends=x11 -Drenderers= -Dallocators= -Dxwayland=disabled -Dexamples=false
+          ninja -C build -j$(nproc)
+          ninja -C build install
+          ldconfig
+          cd /tmp/build-sway/sway-1.10.1
+          PKG_CONFIG_PATH=/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig meson setup build --prefix=/usr/local -Dxwayland=disabled -Dman-pages=disabled
+          ninja -C build -j$(nproc)
+          ninja -C build install
+          cd /
+          rm -rf /tmp/build-sway
+          /usr/local/bin/sway --version
 
           sed -i 's/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen
           sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen

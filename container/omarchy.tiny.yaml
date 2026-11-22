@@ -17,11 +17,11 @@ feature:
     description: "自动挂载手机存储与外接 U 盘到 /mnt 目录。"
     enabled: false
   - type: "x11"
-    args: [":6", "+extension", "MIT-SHM"]
+    args: [":0", "+extension", "MIT-SHM"]
     name: "Omarchy Wayland (Termux:X11)"
     description: "使用内置 Termux:X11 启动 Omarchy Sway Wayland 桌面。"
     command: |
-      export DISPLAY=:6
+      export DISPLAY=:0
       export XDG_RUNTIME_DIR=/tmp
       export HOME=/root
       export SHELL=/bin/bash
@@ -34,7 +34,7 @@ feature:
       dbus-daemon --session --address="unix:path=/tmp/omarchy-dbus.sock" --nofork --nopidfile >/dev/null 2>&1 &
       sleep 0.3
       DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/omarchy-dbus.sock" fcitx5 -d >/dev/null 2>&1 &
-      sway -c /root/.config/sway/config >/tmp/sway.log 2>&1 &
+      /usr/local/bin/sway -c /root/.config/sway/config >/tmp/sway.log 2>&1 &
       for i in $(seq 1 40); do
         [ -S /tmp/wayland-1 ] && break
         sleep 0.2
@@ -67,6 +67,6 @@ boot_command: >
   /usr/bin/env -i HOME=/root USER=root SHELL=/bin/bash TERM=xterm-256color
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$EXTRA_PATH
   LD_LIBRARY_PATH=$EXTRA_LD_LIBRARY_PATH
-  DISPLAY=:6 XDG_RUNTIME_DIR=/tmp LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8
+  DISPLAY=:0 XDG_RUNTIME_DIR=/tmp LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8
   MOZ_FAKE_NO_SANDBOX=1 QTWEBENGINE_DISABLE_SANDBOX=1 ELECTRON_DISABLE_SANDBOX=1
   $EXTRA_ENV /bin/bash -l
