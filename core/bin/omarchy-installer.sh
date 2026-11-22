@@ -82,7 +82,7 @@ case "$KEY" in
     install.ai.doubao-say)
         echo "正在安装 Doubao Say (豆包说 · Wayland / Omarchy 语音输入)..."
         DEBIAN_FRONTEND=noninteractive apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-webkit-6.0 libportaudio2 libasound2-plugins python3-venv python3-pip
+        DEBIAN_FRONTEND=noninteractive apt-get install -y gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-webkit-6.0 python3-cairo python3-gi-cairo libportaudio2 libasound2-plugins python3-venv python3-pip
         rm -rf /opt/doubao-say
         git clone --depth 1 https://github.com/quanru/doubao-say.git /opt/doubao-say
         python3 -m venv --system-site-packages /opt/doubao-say/.venv
