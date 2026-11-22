@@ -133,6 +133,16 @@ def handle_cmd(msg):
     if action == "phone_toggle":
         toggle_phone_orientation()
         return
+    if action == "toggle_android_ime":
+        os.makedirs(QUEUE_DIR, exist_ok=True)
+        with open(f"{QUEUE_DIR}/ime_{int(time.time()*1000)}.json", "w") as f:
+            json.dump({"action": "toggle_android_ime"}, f)
+        return
+    if action.startswith("ws_"):
+        ws = action.split("_", 1)[1]
+        if ws in ("1", "2", "3", "4", "5"):
+            run_bg(f"swaymsg workspace number {ws}")
+        return
     mapping = {
         "apps": "/usr/local/bin/omarchy-menu-ui apps",
         "menu": "/usr/local/bin/omarchy-menu-ui",

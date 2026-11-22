@@ -166,6 +166,9 @@ def handle_action(action):
             "am start -a android.intent.action.MAIN -n com.termux.x11/.MainActivity",
             shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
+    elif action == "toggle_android_ime":
+        # Toggle Termux:X11 native soft keyboard (pops up Doubao IME directly into X11 with zero middle box!)
+        subprocess.Popen(["input", "keyevent", "4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif action == "refresh_status":
         refresh_host_status()
 

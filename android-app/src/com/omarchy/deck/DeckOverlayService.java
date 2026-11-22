@@ -13,15 +13,13 @@ import android.os.Build;
 import android.os.IBinder;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
-import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
 import java.io.OutputStream;
@@ -37,11 +35,14 @@ public class DeckOverlayService extends Service {
     private View fabView;
     private WindowManager.LayoutParams fabLp;
     private View oskView;
-    private View voiceBarView;
+    private WindowManager.LayoutParams oskLp;
 
-    private String oskMode = "docked"; // docked | compact | floating
+    private String oskMode = "floating"; // docked | compact | floating
     private boolean oskVisible = false;
-    private boolean voiceVisible = false;
+    private float oskAlpha = 0.82f;
+    private float oskScale = 1.0f;
+    private int oskPosX = 0;
+    private int oskPosY = 14;
 
     private boolean modSuper = false, modCtrl = false, modAlt = false, modShift = false;
     private final Map<String, Button> modBtns = new HashMap<>();
@@ -65,7 +66,7 @@ public class DeckOverlayService extends Service {
                 ? new Notification.Builder(this, CH_ID)
                 : new Notification.Builder(this);
         Notification n = nb.setContentTitle("Omarchy Deck 运行中")
-                .setContentText("原生悬浮球 · 虚拟键盘 · 安卓语音输入法穿透")
+                .setContentText("原生悬浮球 · 可缩放透明键盘 · 直呼豆包输入法")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .build();
         startForeground(1, n);
@@ -85,12 +86,6 @@ public class DeckOverlayService extends Service {
         sendJson("{\"type\":\"cmd\",\"cmd\":\"" + cmd + "\"}");
     }
 
-    private void sendText(String text) {
-        if (text == null || text.isEmpty()) return;
-        String esc = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "");
-        sendJson("{\"type\":\"text\",\"text\":\"" + esc + "\"}");
-    }
-
     private void sendKey(String key) {
         String j = "{\"type\":\"key\",\"key\":\"" + key + "\""
                 + ",\"super\":" + modSuper
@@ -102,6 +97,16 @@ public class DeckOverlayService extends Service {
             modSuper = modCtrl = modAlt = modShift = false;
             refreshModButtons();
         }
+    }
+
+    private void triggerAndroidIme() {
+        hideOsk();
+        // Ask host bridge to toggle Termux:X11 native IME (pops up Doubao IME directly with zero middle box!)
+        sendCmd("toggle_android_ime");
+        try {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
+        } catch (Exception ignored) {}
     }
 
     private void showFab() {
@@ -117,10 +122,10 @@ public class DeckOverlayService extends Service {
             toggleOsk();
         });
 
-        TextView bMic = makeFabIcon("🎤", "#9ece6a");
-        bMic.setOnClickListener(v -> {
+        TextView bIme = makeFabIcon("🎤", "#9ece6a");
+        bIme.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-            toggleVoiceBar();
+            triggerAndroidIme();
         });
 
         TextView bPhone = makeFabIcon("📱", "#7aa2f7");
@@ -130,7 +135,7 @@ public class DeckOverlayService extends Service {
         });
 
         pill.addView(bKb);
-        pill.addView(bMic);
+        pill.addView(bIme);
         pill.addView(bPhone);
 
         View.OnTouchListener drag = new View.OnTouchListener() {
@@ -183,101 +188,10 @@ public class DeckOverlayService extends Service {
         return tv;
     }
 
-    private void toggleVoiceBar() {
-        if (voiceVisible) {
-            hideVoiceBar();
-        } else {
-            hideOsk();
-            showVoiceBar();
-        }
-    }
-
-    private void hideVoiceBar() {
-        if (voiceBarView != null) {
-            try {
-                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-                if (imm != null) imm.hideSoftInputFromWindow(voiceBarView.getWindowToken(), 0);
-                wm.removeView(voiceBarView);
-            } catch (Exception ignored) {}
-            voiceBarView = null;
-        }
-        voiceVisible = false;
-    }
-
-    private void showVoiceBar() {
-        hideVoiceBar();
-
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setBackground(makeRounded("#F21a1b26", "#7aa2f7", 12, 2));
-        bar.setPadding(dp(10), dp(8), dp(10), dp(8));
-
-        EditText edit = new EditText(this);
-        edit.setHint("点击豆包输入法语音键说话，或直接打字…");
-        edit.setHintTextColor(Color.parseColor("#565f89"));
-        edit.setTextColor(Color.parseColor("#c0caf5"));
-        edit.setTextSize(14);
-        edit.setSingleLine(false);
-        edit.setMaxLines(3);
-        edit.setImeOptions(EditorInfo.IME_ACTION_SEND);
-        edit.setBackground(makeRounded("#24283b", "#414868", 8, 1));
-        edit.setPadding(dp(10), dp(8), dp(10), dp(8));
-        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        elp.rightMargin = dp(8);
-        bar.addView(edit, elp);
-
-        Runnable doSend = () -> {
-            String txt = edit.getText().toString();
-            if (!txt.isEmpty()) {
-                sendText(txt);
-                edit.setText("");
-                hideVoiceBar();
-            }
-        };
-
-        edit.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
-                doSend.run();
-                return true;
-            }
-            return false;
-        });
-
-        Button bSend = makeBarBtn("发送上屏", true, v -> doSend.run());
-        Button bClose = makeBarBtn("✕", false, v -> hideVoiceBar());
-        bar.addView(bSend);
-        bar.addView(bClose);
-
-        // Focusable overlay so Android Doubao IME pops up immediately!
-        WindowManager.LayoutParams vlp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                        : WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
-                PixelFormat.TRANSLUCENT);
-        vlp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        vlp.y = dp(36);
-        vlp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE;
-
-        voiceBarView = bar;
-        wm.addView(voiceBarView, vlp);
-        voiceVisible = true;
-
-        edit.requestFocus();
-        edit.postDelayed(() -> {
-            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            if (imm != null) imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT);
-        }, 120);
-    }
-
     private void toggleOsk() {
         if (oskVisible) {
             hideOsk();
         } else {
-            hideVoiceBar();
             showOsk(oskMode);
         }
     }
@@ -290,6 +204,11 @@ public class DeckOverlayService extends Service {
         oskVisible = false;
     }
 
+    private int bgWithAlpha(float alpha) {
+        int a = Math.max(40, Math.min(245, Math.round(alpha * 255f)));
+        return Color.argb(a, 0x1a, 0x1b, 0x26);
+    }
+
     private void showOsk(String mode) {
         hideOsk();
         oskMode = mode;
@@ -297,10 +216,14 @@ public class DeckOverlayService extends Service {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        String bg = "floating".equals(mode) ? "#D91a1b26" : "#F51a1b26";
-        root.setBackground(makeRounded(bg, "#7aa2f7", "floating".equals(mode) ? 14 : 0, 2));
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(bgWithAlpha(oskAlpha));
+        rootBg.setStroke(dp(2), Color.parseColor("#7aa2f7"));
+        rootBg.setCornerRadius(dp("floating".equals(mode) ? 12 : 0));
+        root.setBackground(rootBg);
         root.setPadding(dp(6), dp(6), dp(6), dp(8));
 
+        // Top toolbar (also acts as drag handle in floating mode!)
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
@@ -310,12 +233,70 @@ public class DeckOverlayService extends Service {
         bar.addView(makeBarBtn("精简条", "compact".equals(mode), v -> showOsk("compact")));
         bar.addView(makeBarBtn("悬浮", "floating".equals(mode), v -> showOsk("floating")));
 
+        // Workspace 1-5 quick switch buttons right after mode buttons!
+        for (int ws = 1; ws <= 5; ws++) {
+            final String w = String.valueOf(ws);
+            bar.addView(makeBarBtn(w, false, v -> sendCmd("ws_" + w)));
+        }
+
         View sp = new View(this);
         bar.addView(sp, new LinearLayout.LayoutParams(0, 1, 1f));
 
-        bar.addView(makeBarBtn("中/EN", false, v -> sendCmd("ime")));
-        bar.addView(makeBarBtn("🎤 豆包语音", false, v -> toggleVoiceBar()));
+        // Opacity slider (25% - 95%)
+        SeekBar alphaBar = new SeekBar(this);
+        alphaBar.setMax(70);
+        alphaBar.setProgress(Math.round((oskAlpha - 0.25f) * 100f));
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(dp(72), dp(26));
+        alp.setMargins(dp(4), 0, dp(4), 0);
+        alphaBar.setLayoutParams(alp);
+        alphaBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                oskAlpha = 0.25f + (progress / 100f);
+                rootBg.setColor(bgWithAlpha(oskAlpha));
+                root.setAlpha(Math.max(0.42f, oskAlpha + 0.12f));
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {}
+        });
+        bar.addView(alphaBar);
+
+        if ("floating".equals(mode)) {
+            bar.addView(makeBarBtn("A-", false, v -> {
+                oskScale = Math.max(0.70f, oskScale - 0.10f);
+                showOsk("floating");
+            }));
+            bar.addView(makeBarBtn("A+", false, v -> {
+                oskScale = Math.min(1.25f, oskScale + 0.10f);
+                showOsk("floating");
+            }));
+        }
+
+        bar.addView(makeBarBtn("🎤", false, v -> triggerAndroidIme()));
         bar.addView(makeBarBtn("✕", false, v -> hideOsk()));
+
+        if ("floating".equals(mode)) {
+            bar.setOnTouchListener(new View.OnTouchListener() {
+                int ix, iy; float tx, ty;
+                @Override
+                public boolean onTouch(View v, MotionEvent e) {
+                    switch (e.getAction()) {
+                        case MotionEvent.ACTION_DOWN:
+                            ix = oskLp.x; iy = oskLp.y;
+                            tx = e.getRawX(); ty = e.getRawY();
+                            return true;
+                        case MotionEvent.ACTION_MOVE:
+                            oskLp.x = ix + (int) (e.getRawX() - tx);
+                            oskLp.y = iy - (int) (e.getRawY() - ty);
+                            oskPosX = oskLp.x;
+                            oskPosY = oskLp.y;
+                            wm.updateViewLayout(oskView, oskLp);
+                            return true;
+                    }
+                    return false;
+                }
+            });
+        }
         root.addView(bar);
 
         String[][][] rows;
@@ -330,11 +311,12 @@ public class DeckOverlayService extends Service {
                 {{"1","1"},{"2","2"},{"3","3"},{"4","4"},{"5","5"},{"6","6"},{"7","7"},{"8","8"},{"9","9"},{"0","0"},{"-","minus"},{"=","equal"}},
                 {{"q","q"},{"w","w"},{"e","e"},{"r","r"},{"t","t"},{"y","y"},{"u","u"},{"i","i"},{"o","o"},{"p","p"},{"[","bracketleft"},{"]","bracketright"}},
                 {{"a","a"},{"s","s"},{"d","d"},{"f","f"},{"g","g"},{"h","h"},{"j","j"},{"k","k"},{"l","l"},{";","semicolon"},{"'","apostrophe"},{"⏎","Return"}},
-                {{"⇧","MOD:shift"},{"z","z"},{"x","x"},{"c","c"},{"v","v"},{"b","b"},{"n","n"},{"m","m"},{",","comma"},{".","period"},{"/","slash"},{"🎤","VOICE"}},
+                {{"⇧","MOD:shift"},{"z","z"},{"x","x"},{"c","c"},{"v","v"},{"b","b"},{"n","n"},{"m","m"},{",","comma"},{".","period"},{"/","slash"},{"中/EN","CMD:ime"}},
                 {{"应用","CMD:apps"},{"菜单","CMD:menu"},{"Space","space"},{"终端","CMD:terminal"},{"关窗","CMD:kill"}}
             };
         }
 
+        int keyH = dp(Math.round(36 * ("floating".equals(mode) ? oskScale : 1.0f)));
         for (String[][] r : rows) {
             LinearLayout rowView = new LinearLayout(this);
             rowView.setOrientation(LinearLayout.HORIZONTAL);
@@ -344,15 +326,15 @@ public class DeckOverlayService extends Service {
                 b.setText(label);
                 b.setAllCaps(false);
                 b.setTextSize(12);
-                b.setPadding(dp(2), dp(6), dp(2), dp(6));
+                b.setPadding(dp(2), dp(4), dp(2), dp(4));
                 b.setMinHeight(0);
-                b.setMinimumHeight(dp(36));
+                b.setMinimumHeight(keyH);
                 b.setMinWidth(0);
                 b.setMinimumWidth(0);
 
-                boolean isSpecial = code.startsWith("MOD:") || code.startsWith("CMD:") || "VOICE".equals(code);
+                boolean isSpecial = code.startsWith("MOD:") || code.startsWith("CMD:");
                 b.setTextColor(Color.parseColor(isSpecial ? "#7aa2f7" : "#c0caf5"));
-                b.setBackground(makeRounded(isSpecial ? "#283457" : "#24283b", isSpecial ? "#7aa2f7" : "#414868", 6, 1));
+                b.setBackground(makeRounded(isSpecial ? "#CC283457" : "#CC24283b", isSpecial ? "#7aa2f7" : "#414868", 6, 1));
 
                 if (code.startsWith("MOD:")) {
                     modBtns.put(code.substring(4), b);
@@ -360,9 +342,7 @@ public class DeckOverlayService extends Service {
 
                 b.setOnClickListener(v -> {
                     v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-                    if ("VOICE".equals(code)) {
-                        toggleVoiceBar();
-                    } else if (code.startsWith("MOD:")) {
+                    if (code.startsWith("MOD:")) {
                         String m = code.substring(4);
                         if ("super".equals(m)) modSuper = !modSuper;
                         else if ("ctrl".equals(m)) modCtrl = !modCtrl;
@@ -377,17 +357,18 @@ public class DeckOverlayService extends Service {
                 });
 
                 float w = "space".equals(code) ? 2.6f : 1f;
-                LinearLayout.LayoutParams klp = new LinearLayout.LayoutParams(0, dp(38), w);
+                LinearLayout.LayoutParams klp = new LinearLayout.LayoutParams(0, keyH, w);
                 klp.setMargins(dp(2), dp(2), dp(2), dp(2));
                 rowView.addView(b, klp);
             }
             root.addView(rowView);
         }
 
+        int screenW = getResources().getDisplayMetrics().widthPixels;
         int width = "floating".equals(mode)
-                ? (int) (getResources().getDisplayMetrics().widthPixels * 0.88f)
+                ? Math.min(screenW, Math.round(screenW * 0.80f * oskScale))
                 : WindowManager.LayoutParams.MATCH_PARENT;
-        WindowManager.LayoutParams oskLp = new WindowManager.LayoutParams(
+        oskLp = new WindowManager.LayoutParams(
                 width,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
@@ -396,8 +377,10 @@ public class DeckOverlayService extends Service {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT);
         oskLp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        oskLp.y = "floating".equals(mode) ? dp(14) : 0;
+        oskLp.x = "floating".equals(mode) ? oskPosX : 0;
+        oskLp.y = "floating".equals(mode) ? oskPosY : 0;
 
+        root.setAlpha(Math.max(0.42f, oskAlpha + 0.12f));
         oskView = root;
         wm.addView(oskView, oskLp);
         oskVisible = true;
@@ -409,15 +392,15 @@ public class DeckOverlayService extends Service {
         b.setAllCaps(false);
         b.setTextSize(11);
         b.setTextColor(Color.parseColor(active ? "#1a1b26" : "#c0caf5"));
-        b.setBackground(makeRounded(active ? "#7aa2f7" : "#24283b", "#7aa2f7", 6, 1));
-        b.setPadding(dp(10), dp(4), dp(10), dp(4));
+        b.setBackground(makeRounded(active ? "#7aa2f7" : "#CC24283b", "#7aa2f7", 6, 1));
+        b.setPadding(dp(7), dp(2), dp(7), dp(2));
         b.setMinHeight(0);
-        b.setMinimumHeight(dp(32));
+        b.setMinimumHeight(dp(28));
         b.setMinWidth(0);
         b.setMinimumWidth(0);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, dp(32));
-        lp.setMargins(dp(3), 0, dp(3), 0);
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(28));
+        lp.setMargins(dp(2), 0, dp(2), 0);
         b.setLayoutParams(lp);
         b.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
@@ -437,7 +420,7 @@ public class DeckOverlayService extends Service {
         Button b = modBtns.get(name);
         if (b == null) return;
         b.setTextColor(Color.parseColor(on ? "#1a1b26" : "#7aa2f7"));
-        b.setBackground(makeRounded(on ? "#7aa2f7" : "#283457", "#7aa2f7", 6, 1));
+        b.setBackground(makeRounded(on ? "#7aa2f7" : "#CC283457", "#7aa2f7", 6, 1));
     }
 
     private GradientDrawable makeRounded(String bgHex, String strokeHex, int radiusDp, int strokeDp) {
@@ -455,7 +438,6 @@ public class DeckOverlayService extends Service {
     @Override
     public void onDestroy() {
         hideOsk();
-        hideVoiceBar();
         if (fabView != null) {
             try { wm.removeView(fabView); } catch (Exception ignored) {}
         }
