@@ -220,36 +220,37 @@ white   = "{c[15]}"
         },
         "custom/agents": {
             "format": "󰚩",
-            "tooltip-format": "AI 智能体中心 (Agents)",
+            "tooltip": False,
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel agents"
         },
         "custom/bluetooth": {
             "format": "󰂯",
-            "tooltip-format": "蓝牙与 M15 键盘控制",
+            "tooltip": False,
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel bluetooth"
         },
         "custom/network": {
-            "exec": "ip -4 addr show wlan0 2>/dev/null | grep -q inet && echo 󰖩 || echo 󰤭",
+            "exec": "/usr/local/bin/omarchy-net-status",
+            "return-type": "json",
             "interval": 5,
             "signal": 7,
-            "tooltip-format": "网络状态 (Network)",
+            "tooltip": False,
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel network"
         },
         "custom/audio": {
             "format": "󰕾",
-            "tooltip-format": "音频控制 (Audio)",
+            "tooltip": False,
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel audio",
             "on-click-right": "PULSE_SERVER=127.0.0.1 pactl set-sink-mute @DEFAULT_SINK@ toggle"
         },
         "custom/monitor": {
             "format": "󰃠",
-            "tooltip-format": "显示与缩放 (Monitor)",
+            "tooltip": False,
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel monitor"
         },
         "custom/power": {
             "exec": "cap=$(cat /sys/class/power_supply/battery/capacity 2>/dev/null || echo 100); echo \"󰁹 ${cap}%\"",
             "interval": 15,
-            "tooltip-format": "电源与系统状态 (Power)",
+            "tooltip": False,
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel power"
         }
     }
@@ -450,11 +451,17 @@ default-timeout=4000
         f.write(mako_cfg)
 
     # 5. Update Sway Wayland Compositor Config (Matches Omarchy looknfeel.conf & tiling-v2.conf)
+    saved_scale = "1.25"
+    try:
+        if os.path.exists("/root/.config/omarchy/display-scale"):
+            saved_scale = open("/root/.config/omarchy/display-scale").read().strip() or "1.25"
+    except Exception:
+        pass
     sway_cfg = f"""set $mod Mod4
 set $alt Mod1
 
 font pango:JetBrainsMono Nerd Font 10
-output X11-1 mode 2336x1080 scale 1.25
+output X11-1 mode 2336x1080 scale {saved_scale}
 
 default_border pixel 2
 default_floating_border pixel 2

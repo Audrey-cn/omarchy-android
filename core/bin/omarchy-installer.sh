@@ -79,6 +79,19 @@ case "$KEY" in
         ;;
 
     # --- 2. AI Desktop & CLI Tools ---
+    install.ai.cc-switch)
+        echo "正在从 GitHub Releases 下载最新版 CC Switch (ARM64 .deb)..."
+        CC_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/farion1231/cc-switch/releases/latest" | sed 's|.*/tag/v||')
+        echo "检测到最新版本: v${CC_VER}"
+        curl -fSL -o /tmp/cc-switch_arm64.deb "https://github.com/farion1231/cc-switch/releases/download/v${CC_VER}/CC-Switch-v${CC_VER}-Linux-arm64.deb"
+        DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cc-switch_arm64.deb
+        rm -f /tmp/cc-switch_arm64.deb
+        for f in /usr/share/applications/*CC*Switch*.desktop /usr/share/applications/*cc-switch*.desktop; do
+            [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/cc-switch-launch|" "$f"
+        done
+        update-desktop-database /usr/share/applications "$APP_DIR" 2>/dev/null || true
+        echo "✓ CC Switch v${CC_VER} (ARM64) 已安装完成！已添加到应用网格 (Super + Space)。"
+        ;;
     install.ai.chatgpt)
         echo "正在安装 OpenAI 官方原生 ARM64 ChatGPT / Codex Desktop (.deb)..."
         curl -fSL -o /tmp/chatgpt_arm64.deb "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_arm64.deb"

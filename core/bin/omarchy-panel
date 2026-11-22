@@ -13,8 +13,12 @@ Replaces plain wofi text menus when clicking top-bar widgets:
 import os
 import re
 import sys
+import math
 import glob
 import json
+import fcntl
+import socket
+import struct
 import subprocess
 import gi
 
@@ -25,8 +29,39 @@ from gi.repository import Gtk, Gdk, GLib, GtkLayerShell
 
 PIDFILE = "/tmp/omarchy-panel.pid"
 MODIFIER_CFG = "/root/.config/omarchy/modifier.json"
+SCALE_FILE = "/root/.config/omarchy/display-scale"
+HOST_STATUS_FILE = "/tmp/omarchy-host-status.json"
+HOST_QUEUE_DIR = "/tmp/omarchy-browser-queue"
 KEYPROBE_FLAG = "/tmp/omarchy-keyprobe.active"
 KEYPROBE_OUT = "/tmp/omarchy-keyprobe.last"
+
+
+def send_host_action(action):
+    try:
+        os.makedirs(HOST_QUEUE_DIR, exist_ok=True)
+        with open(f"{HOST_QUEUE_DIR}/act_{os.getpid()}_{action}.json", "w") as f:
+            json.dump({"action": action}, f)
+    except Exception:
+        pass
+
+
+def load_host_status():
+    try:
+        if os.path.exists(HOST_STATUS_FILE):
+            return json.load(open(HOST_STATUS_FILE, encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def get_iface_ip(ifname):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        return socket.inet_ntoa(
+            fcntl.ioctl(s.fileno(), 0x8915, struct.pack("256s", ifname.encode()))[20:24]
+        )
+    except Exception:
+        return ""
 
 
 def load_theme():
@@ -220,7 +255,10 @@ class OmarchyPanel(Gtk.Window):
 
         self.connect("key-press-event", self.on_key)
         self.connect("destroy", Gtk.main_quit)
-        self.show_all()
+        # Pre-layout & realize before mapping so Wayland commits ONE final-size frame (zero small-window flash!)
+        self.box.show_all()
+        self.realize()
+        self.show()
 
     def add_title(self, text):
         l = Gtk.Label(label=text, xalign=0)
@@ -242,7 +280,7 @@ class OmarchyPanel(Gtk.Window):
         return b
 
     def build_calendar(self):
-        self.set_default_size(320, 270)
+        self.set_size_request(320, -1)
         self.add_title("󰃭  日历 (Calendar)")
         cal = Gtk.Calendar()
         cal.set_display_options(
@@ -253,7 +291,7 @@ class OmarchyPanel(Gtk.Window):
         self.box.pack_start(cal, True, True, 0)
 
     def build_audio(self):
-        self.set_default_size(300, 180)
+        self.set_size_request(310, -1)
         self.add_title("󰕾  音频控制 (Audio)")
         cur_vol = 60
         out = sh("PULSE_SERVER=127.0.0.1 pactl get-sink-volume @DEFAULT_SINK@")
@@ -279,29 +317,146 @@ class OmarchyPanel(Gtk.Window):
 
         self.add_btn("󰝟  静音 / 取消静音", on_mute)
 
+    def detect_display(self):
+        out_name, pw, ph, cur_scale = "X11-1", 2336, 1080, 1.25
+        try:
+            raw = sh(f"SWAYSOCK={get_swaysock()} swaymsg -t get_outputs")
+            outs = json.loads(raw)
+            if outs:
+                o = outs[0]
+                out_name = o.get("name", out_name)
+                cm = o.get("current_mode") or {}
+                pw = int(cm.get("width", pw))
+                ph = int(cm.get("height", ph))
+                cur_scale = float(o.get("scale", cur_scale))
+        except Exception:
+            pass
+        # Compute human-readable aspect ratio
+        short_s, long_s = min(pw, ph), max(pw, ph)
+        ratio = round(long_s / short_s, 2) if short_s else 1.78
+        if abs(ratio - 1.78) < 0.06:
+            ar_str = "16:9"
+        elif abs(ratio - 1.60) < 0.06:
+            ar_str = "16:10"
+        elif abs(ratio - 1.33) < 0.06:
+            ar_str = "4:3"
+        elif abs(ratio - 2.16) < 0.08:
+            ar_str = "19.5:9"
+        elif abs(ratio - 2.22) < 0.08:
+            ar_str = "20:9"
+        else:
+            ar_str = f"{ratio}:1"
+        # Smart recommended scale
+        if short_s <= 1080 and long_s >= 2100:
+            rec = 1.25
+        elif short_s >= 1400:
+            rec = 1.50
+        else:
+            rec = 1.00
+        return out_name, pw, ph, ar_str, cur_scale, rec
+
+    def apply_scale(self, val):
+        val = max(0.70, min(2.50, round(float(val), 2)))
+        os.makedirs(os.path.dirname(SCALE_FILE), exist_ok=True)
+        open(SCALE_FILE, "w").write(f"{val:.2f}")
+        launch_bg(f"swaymsg 'output {self._out_name} scale {val:.2f}'")
+        self._cur_scale = val
+        self.refresh_monitor_ui()
+
     def build_monitor(self):
-        self.set_default_size(300, 220)
+        self.set_size_request(360, -1)
+        self._out_name, self._pw, self._ph, self._ar, self._cur_scale, self._rec = self.detect_display()
         self.add_title("󰃠  显示与缩放 (Monitor)")
-        self.add_row("当前分辨率: 2336 × 1080 (Wayland)", dim=True)
-        for label, sc in [("1.0x 精细视野 (更多内容)", "1.0"), ("1.25x 默认推荐", "1.25"), ("1.5x 舒适大字", "1.5")]:
-            self.add_btn(f"󰍹  缩放 {label}", lambda _, s=sc: (launch_bg(f"swaymsg 'output X11-1 scale {s}'"), Gtk.main_quit()))
+        self.mon_info = self.add_row("")
+        self.mon_logical = self.add_row("", dim=True)
+
+        grid = Gtk.Grid(column_spacing=6, row_spacing=6)
+        grid.set_column_homogeneous(True)
+        self.scale_btns = {}
+        presets = [0.85, 1.00, 1.15, 1.25, 1.35, 1.50, 1.75, 2.00]
+        for i, sc in enumerate(presets):
+            tag = " ★" if abs(sc - self._rec) < 0.01 else ""
+            b = Gtk.Button(label=f"{sc:g}x{tag}")
+            b.connect("clicked", lambda _, s=sc: self.apply_scale(s))
+            grid.attach(b, i % 4, i // 4, 1, 1)
+            self.scale_btns[sc] = b
+        self.box.pack_start(grid, False, False, 4)
+
+        fbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        b_dec = Gtk.Button(label="− 0.05x")
+        b_dec.get_style_context().add_class("om-btn")
+        b_dec.connect("clicked", lambda _: self.apply_scale(self._cur_scale - 0.05))
+        b_rec = Gtk.Button(label=f"恢复推荐 ({self._rec:g}x)")
+        b_rec.get_style_context().add_class("om-btn")
+        b_rec.connect("clicked", lambda _: self.apply_scale(self._rec))
+        b_inc = Gtk.Button(label="+ 0.05x")
+        b_inc.get_style_context().add_class("om-btn")
+        b_inc.connect("clicked", lambda _: self.apply_scale(self._cur_scale + 0.05))
+        fbox.pack_start(b_dec, True, True, 0)
+        fbox.pack_start(b_rec, True, True, 0)
+        fbox.pack_start(b_inc, True, True, 0)
+        self.box.pack_start(fbox, False, False, 0)
+        self.refresh_monitor_ui()
+
+    def refresh_monitor_ui(self):
+        lw = int(round(self._pw / self._cur_scale))
+        lh = int(round(self._ph / self._cur_scale))
+        self.mon_info.set_text(f"屏幕: {self._pw} × {self._ph} ({self._ar}) · 当前 {self._cur_scale:g}x")
+        self.mon_logical.set_text(f"等效逻辑分辨率: {lw} × {lh} · 推荐 {self._rec:g}x (★)")
+        for sc, b in self.scale_btns.items():
+            bsc = b.get_style_context()
+            bsc.remove_class("om-btn")
+            bsc.remove_class("om-btn-active")
+            bsc.add_class("om-btn-active" if abs(sc - self._cur_scale) < 0.015 else "om-btn")
 
     def build_network(self):
-        self.set_default_size(310, 210)
+        self.set_size_request(340, -1)
         self.add_title("󰖩  网络状态 (Network)")
-        wlan = sh("ip -4 addr show wlan0 | awk '/inet / {print $2}'")
+        host = load_host_status()
+        wlan_ip = get_iface_ip("wlan0")
+        cell_ip = ""
+        try:
+            for name in sorted(os.listdir("/sys/class/net")):
+                if name.startswith(("rmnet", "ccmni", "wwan")):
+                    cell_ip = get_iface_ip(name)
+                    if cell_ip:
+                        break
+        except Exception:
+            pass
         proxy_ok = sh("bash -c '</dev/tcp/127.0.0.1/18888' && echo OK") == "OK"
-        self.add_row(f"Wi-Fi (wlan0): {wlan if wlan else '未连接'}")
+
+        if wlan_ip:
+            ssid = host.get("wifi_ssid") or "已连接"
+            spd = host.get("wifi_speed") or ""
+            rssi = host.get("wifi_rssi") or ""
+            extra = " · ".join([x for x in (spd, rssi) if x])
+            self.add_row(f"Wi-Fi: {ssid}")
+            self.add_row(f"局域网 IP: {wlan_ip}" + (f" ({extra})" if extra else ""), dim=True)
+        else:
+            self.add_row("Wi-Fi: 未连接", dim=True)
+
+        if cell_ip:
+            self.add_row(f"移动数据: 已连接 ({cell_ip})", dim=True)
         self.add_row(f"USB 代理隧道: {'已连接 (127.0.0.1:18888)' if proxy_ok else '未连接'}", dim=not proxy_ok)
-        self.add_btn("󰑓  刷新网络状态", lambda _: (launch_bg("pkill -RTMIN+7 waybar"), Gtk.main_quit()))
+
+        self.add_btn("󰖩  切换 Wi-Fi (打开系统 Wi-Fi 设置)", lambda _: (send_host_action("wifi_settings"), Gtk.main_quit()))
+        self.add_btn("󰑓  刷新状态栏网络状态", lambda _: (send_host_action("refresh_status"), launch_bg("pkill -RTMIN+7 waybar"), Gtk.main_quit()))
 
     def build_bluetooth(self):
-        self.set_default_size(320, 250)
-        self.add_title("󰂯  蓝牙与 M15 键盘 (Bluetooth)")
+        self.set_size_request(340, -1)
+        self.add_title("󰂯  蓝牙与外设管理 (Bluetooth)")
+        host = load_host_status()
+        bt_on = bool(host.get("bt_enabled", True))
         m15 = sh("grep -q 'M15' /proc/bus/input/devices && echo '已连接 (evdev 已接管)' || echo '未检测到'")
         rot = sh("cat /root/.config/omarchy/touchpad-rotation 2>/dev/null || echo 0")
-        self.add_row(f"M15 键盘/触控板: {m15}")
+        self.add_row(f"系统蓝牙状态: {'已开启 (ON)' if bt_on else '已关闭 (OFF)'}")
+        self.add_row(f"外接键盘/触控板: {m15}", dim=True)
         self.add_row(f"触控板旋转角度: {rot}°", dim=True)
+        self.add_btn(
+            "󰂲  关闭系统蓝牙" if bt_on else "󰂯  开启系统蓝牙",
+            lambda _: (send_host_action("bt_disable" if bt_on else "bt_enable"), Gtk.main_quit())
+        )
+        self.add_btn("󰂰  扫描 / 配对新设备 (系统蓝牙)", lambda _: (send_host_action("bt_settings"), Gtk.main_quit()))
         self.add_btn("  修饰键与按键冲突设置", lambda _: (launch_bg("GDK_BACKEND=wayland /usr/local/bin/omarchy-panel keyboard"), Gtk.main_quit()))
         self.add_btn("󰑐  切换触控板方向 (0/90/180/270°)", lambda _: (launch_bg("python3 -c \"p='/root/.config/omarchy/touchpad-rotation'; c=int(open(p).read().strip()) if __import__('os').path.exists(p) else 0; n={0:90,90:270,270:180,180:0}.get(c,0); open(p,'w').write(str(n))\""), Gtk.main_quit()))
 
@@ -328,7 +483,7 @@ class OmarchyPanel(Gtk.Window):
         launch_bg("swaymsg reload")
 
     def build_keyboard(self):
-        self.set_default_size(480, 500)
+        self.set_size_request(480, -1)
         self.mod_cfg = self.load_mod_cfg()
         self.has_keygrab = bool(sh("pgrep -f omarchy-keygrab.py"))
         self._last_probe_ts = 0
@@ -470,7 +625,7 @@ class OmarchyPanel(Gtk.Window):
         return True
 
     def build_power(self):
-        self.set_default_size(310, 260)
+        self.set_size_request(310, -1)
         self.add_title("󰁹  电源与系统状态 (Power)")
         cap = sh("cat /sys/class/power_supply/battery/capacity 2>/dev/null || echo 100")
         stat = sh("cat /sys/class/power_supply/battery/status 2>/dev/null || echo Charging")
@@ -481,7 +636,7 @@ class OmarchyPanel(Gtk.Window):
         self.add_btn("󰐥  打开 Omarchy 系统菜单", lambda _: (launch_bg("/usr/local/bin/omarchy-menu-ui system"), Gtk.main_quit()))
 
     def build_agents(self):
-        self.set_default_size(320, 270)
+        self.set_size_request(320, -1)
         self.add_title("󰚩  AI 智能体中心 (Agents)")
         cc_up = "运行中 (127.0.0.1:15721)" if sh("pgrep -x cc-switch") else "未启动"
         self.add_row(f"CC Switch 网关: {cc_up}")

@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""
+Dependency-free Network Status Reporter for Waybar (Ubuntu chroot & proot)
+Reads real kernel interfaces via SIOCGIFADDR + Android host status JSON.
+"""
+import os
+import json
+import fcntl
+import socket
+import struct
+
+
+def get_iface_ip(ifname):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        return socket.inet_ntoa(
+            fcntl.ioctl(s.fileno(), 0x8915, struct.pack("256s", ifname.encode()))[20:24]
+        )
+    except Exception:
+        return ""
+
+
+def get_cellular_ip():
+    try:
+        for name in sorted(os.listdir("/sys/class/net")):
+            if name.startswith(("rmnet", "ccmni", "wwan")):
+                ip = get_iface_ip(name)
+                if ip:
+                    return name, ip
+    except Exception:
+        pass
+    return "", ""
+
+
+def main():
+    wlan_ip = get_iface_ip("wlan0")
+    cell_if, cell_ip = get_cellular_ip()
+
+    host = {}
+    try:
+        if os.path.exists("/tmp/omarchy-host-status.json"):
+            host = json.load(open("/tmp/omarchy-host-status.json", encoding="utf-8"))
+    except Exception:
+        pass
+
+    if wlan_ip:
+        ssid = host.get("wifi_ssid") or "Wi-Fi"
+        spd = host.get("wifi_speed") or ""
+        tip = f"Wi-Fi: {ssid} ({wlan_ip})" + (f" · {spd}" if spd else "")
+        out = {"text": "󰖩", "tooltip": tip, "class": "wifi"}
+    elif cell_ip:
+        out = {"text": "󰀂", "tooltip": f"移动数据 ({cell_if}): {cell_ip}", "class": "cellular"}
+    else:
+        out = {"text": "󰤭", "tooltip": "网络未连接", "class": "disconnected"}
+
+    print(json.dumps(out, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

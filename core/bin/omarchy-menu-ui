@@ -229,7 +229,12 @@ def execute_item_action(key, item, zh_label):
         subprocess.Popen(["alacritty", "-e", "btop", "--utf-force"], env=wl_env())
         return
     if key in ("system.logout", "system.lock", "system.suspend", "system.hibernate"):
-        subprocess.Popen(["am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME"])
+        try:
+            os.makedirs("/tmp/omarchy-browser-queue", exist_ok=True)
+            with open(f"/tmp/omarchy-browser-queue/act_{os.getpid()}.json", "w") as f:
+                json.dump({"action": "go_home"}, f)
+        except Exception:
+            subprocess.Popen(["am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME"])
         return
     if key == "system.reboot":
         subprocess.Popen(["/data/adb/start-omarchy.sh"])
@@ -250,6 +255,8 @@ def execute_item_action(key, item, zh_label):
             cmd = "DEBIAN_FRONTEND=noninteractive apt-get remove -y chatgpt && echo '✓ 已卸载 Codex / ChatGPT Desktop'"
         elif key == "remove.ai.hermes":
             cmd = "rm -rf /opt/hermes-desktop /usr/share/applications/hermes-desktop.desktop /usr/local/bin/hermes-desktop-launch && echo '✓ 已卸载 Hermes Desktop'"
+        elif key == "remove.ai.cc-switch":
+            cmd = "DEBIAN_FRONTEND=noninteractive apt-get remove -y cc-switch && echo '✓ 已卸载 CC Switch'"
         else:
             cmd = f"echo '正在检查移除项: {zh_label} ({key})'; f=$(ls /root/.local/share/applications/*.desktop 2>/dev/null | fzf --prompt='选择要移除的应用 > '); [ -n \"$f\" ] && rm -f \"$f\" && echo \"✓ 已移除 $f\""
         run_in_terminal(f"移除 (Remove): {zh_label}", cmd)
@@ -308,6 +315,10 @@ def navigate_menu(route="root"):
                 rem = k[len(prefix):]
                 if "." not in rem:
                     children.append((k, v))
+        if route == "install.ai" and not any(k == "install.ai.cc-switch" for k, _ in children):
+            children.insert(0, ("install.ai.cc-switch", {"label": "CC Switch", "icon": "󰣆"}))
+        if route == "remove.ai" and not any(k == "remove.ai.cc-switch" for k, _ in children):
+            children.insert(0, ("remove.ai.cc-switch", {"label": "CC Switch", "icon": "󰣆"}))
         ztitle = zh.get(route, {}).get("title") or zh.get(route, {}).get("label") or menu.get(route, {}).get("label", route)
         prompt = f"{ztitle}…"
 
