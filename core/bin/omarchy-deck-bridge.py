@@ -162,6 +162,21 @@ def handle_cmd(msg):
         run_bg(mapping[action])
 
 
+def handle_resize(msg):
+    w = int(msg.get("w", 0))
+    h = int(msg.get("h", 0))
+    if w < 300 or h < 300:
+        return
+    saved_scale = "1.25"
+    try:
+        if os.path.exists("/root/.config/omarchy/display-scale"):
+            saved_scale = open("/root/.config/omarchy/display-scale").read().strip() or "1.25"
+    except Exception:
+        pass
+    scale = "1.35" if h > w else saved_scale
+    run_bg(f"swaymsg 'output X11-1 mode {w}x{h} scale {scale}'")
+
+
 def cmd_server():
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -189,6 +204,8 @@ def cmd_server():
                             handle_text(msg)
                         elif t == "cmd":
                             handle_cmd(msg)
+                        elif t == "resize":
+                            handle_resize(msg)
                     except Exception:
                         pass
         except Exception:

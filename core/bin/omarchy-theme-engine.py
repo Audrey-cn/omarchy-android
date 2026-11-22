@@ -462,11 +462,33 @@ default-timeout=4000
             saved_scale = open("/root/.config/omarchy/display-scale").read().strip() or "1.25"
     except Exception:
         pass
+
+    output_line = f"output X11-1 scale {saved_scale}"
+    try:
+        xr = subprocess.check_output(["xrandr"], env={**os.environ, "DISPLAY": os.environ.get("DISPLAY", ":0")}, text=True, stderr=subprocess.DEVNULL, timeout=2)
+        m = re.search(r"current\s+(\d+)\s+x\s+(\d+)", xr)
+        if m:
+            w, h = int(m.group(1)), int(m.group(2))
+            if w >= 300 and h >= 300:
+                sc = "1.35" if h > w else saved_scale
+                output_line = f"output X11-1 mode {w}x{h} scale {sc}"
+    except Exception:
+        pass
+
+    if os.path.exists("/data/adb/ubuntu-chroot.sh"):
+        exec_term = "/data/adb/ubuntu-chroot.sh 'WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=/tmp alacritty'"
+        exec_apps = "/data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui apps'"
+        exec_menu = "/data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui'"
+    else:
+        exec_term = "alacritty"
+        exec_apps = "/usr/local/bin/omarchy-menu-ui apps"
+        exec_menu = "/usr/local/bin/omarchy-menu-ui"
+
     sway_cfg = f"""set $mod Mod4
 set $alt Mod1
 
 font pango:JetBrainsMono Nerd Font 10
-output X11-1 mode 2336x1080 scale {saved_scale}
+{output_line}
 
 default_border pixel 2
 default_floating_border pixel 2
@@ -482,9 +504,9 @@ client.urgent           {c[1]}    {c[1]}    {bg}    {c[1]}    {c[1]}
 floating_modifier $mod normal
 
 # Official Omarchy Keybindings
-bindsym $mod+Return exec /data/adb/ubuntu-chroot.sh 'WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=/tmp alacritty'
-bindsym $mod+space exec /data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui apps'
-bindsym $mod+$alt+space exec /data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui'
+bindsym $mod+Return exec {exec_term}
+bindsym $mod+space exec {exec_apps}
+bindsym $mod+$alt+space exec {exec_menu}
 bindsym $mod+w kill
 bindsym $mod+q kill
 bindsym $mod+j layout toggle split
