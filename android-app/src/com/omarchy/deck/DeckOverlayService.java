@@ -4,22 +4,23 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ServiceInfo;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
-import android.media.AudioFormat;
-import android.media.AudioRecord;
-import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.IBinder;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -36,19 +37,15 @@ public class DeckOverlayService extends Service {
     private View fabView;
     private WindowManager.LayoutParams fabLp;
     private View oskView;
-    private WindowManager.LayoutParams oskLp;
+    private View voiceBarView;
 
     private String oskMode = "docked"; // docked | compact | floating
     private boolean oskVisible = false;
-    private volatile boolean micStreaming = true;
-    private volatile boolean running = true;
+    private boolean voiceVisible = false;
 
     private boolean modSuper = false, modCtrl = false, modAlt = false, modShift = false;
     private final Map<String, Button> modBtns = new HashMap<>();
-    private TextView fabMicBtn;
-
     private final ExecutorService netExec = Executors.newSingleThreadExecutor();
-    private Thread micThread;
 
     @Override
     public void onCreate() {
@@ -56,7 +53,6 @@ public class DeckOverlayService extends Service {
         startFg();
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         showFab();
-        startMicStreamer();
     }
 
     private void startFg() {
@@ -69,62 +65,10 @@ public class DeckOverlayService extends Service {
                 ? new Notification.Builder(this, CH_ID)
                 : new Notification.Builder(this);
         Notification n = nb.setContentTitle("Omarchy Deck 运行中")
-                .setContentText("原生虚拟键盘悬浮球 + 手机麦克风直通 (16kHz)")
+                .setContentText("原生悬浮球 · 虚拟键盘 · 安卓语音输入法穿透")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .build();
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
-        } else {
-            startForeground(1, n);
-        }
-    }
-
-    private void startMicStreamer() {
-        micThread = new Thread(() -> {
-            int rate = 16000;
-            int minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-            int bufSize = Math.max(minBuf, 3200);
-            byte[] buf = new byte[1600];
-
-            while (running) {
-                if (!micStreaming) {
-                    try { Thread.sleep(200); } catch (Exception ignored) {}
-                    continue;
-                }
-                AudioRecord rec = null;
-                Socket sock = null;
-                try {
-                    rec = new AudioRecord(
-                            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                            rate, AudioFormat.CHANNEL_IN_MONO,
-                            AudioFormat.ENCODING_PCM_16BIT, bufSize);
-                    if (rec.getState() != AudioRecord.STATE_INITIALIZED) {
-                        Thread.sleep(1000);
-                        continue;
-                    }
-                    sock = new Socket("127.0.0.1", 18900);
-                    OutputStream out = sock.getOutputStream();
-                    rec.startRecording();
-                    while (running && micStreaming) {
-                        int n = rec.read(buf, 0, buf.length);
-                        if (n > 0) {
-                            out.write(buf, 0, n);
-                        }
-                    }
-                } catch (Exception e) {
-                    try { Thread.sleep(1000); } catch (Exception ignored) {}
-                } finally {
-                    if (rec != null) {
-                        try { rec.stop(); } catch (Exception ignored) {}
-                        try { rec.release(); } catch (Exception ignored) {}
-                    }
-                    if (sock != null) {
-                        try { sock.close(); } catch (Exception ignored) {}
-                    }
-                }
-            }
-        }, "OmarchyMicStreamer");
-        micThread.start();
+        startForeground(1, n);
     }
 
     private void sendJson(String jsonLine) {
@@ -139,6 +83,12 @@ public class DeckOverlayService extends Service {
 
     private void sendCmd(String cmd) {
         sendJson("{\"type\":\"cmd\",\"cmd\":\"" + cmd + "\"}");
+    }
+
+    private void sendText(String text) {
+        if (text == null || text.isEmpty()) return;
+        String esc = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "");
+        sendJson("{\"type\":\"text\",\"text\":\"" + esc + "\"}");
     }
 
     private void sendKey(String key) {
@@ -167,16 +117,10 @@ public class DeckOverlayService extends Service {
             toggleOsk();
         });
 
-        fabMicBtn = makeFabIcon("🎤", "#9ece6a");
-        fabMicBtn.setOnClickListener(v -> {
+        TextView bMic = makeFabIcon("🎤", "#9ece6a");
+        bMic.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-            sendCmd("voice");
-        });
-        fabMicBtn.setOnLongClickListener(v -> {
-            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-            micStreaming = !micStreaming;
-            fabMicBtn.setTextColor(Color.parseColor(micStreaming ? "#9ece6a" : "#f7768e"));
-            return true;
+            toggleVoiceBar();
         });
 
         TextView bPhone = makeFabIcon("📱", "#7aa2f7");
@@ -186,10 +130,9 @@ public class DeckOverlayService extends Service {
         });
 
         pill.addView(bKb);
-        pill.addView(fabMicBtn);
+        pill.addView(bMic);
         pill.addView(bPhone);
 
-        // Allow dragging the floating pill anywhere on screen
         View.OnTouchListener drag = new View.OnTouchListener() {
             int ix, iy; float tx, ty; boolean moved;
             @Override
@@ -240,10 +183,101 @@ public class DeckOverlayService extends Service {
         return tv;
     }
 
+    private void toggleVoiceBar() {
+        if (voiceVisible) {
+            hideVoiceBar();
+        } else {
+            hideOsk();
+            showVoiceBar();
+        }
+    }
+
+    private void hideVoiceBar() {
+        if (voiceBarView != null) {
+            try {
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) imm.hideSoftInputFromWindow(voiceBarView.getWindowToken(), 0);
+                wm.removeView(voiceBarView);
+            } catch (Exception ignored) {}
+            voiceBarView = null;
+        }
+        voiceVisible = false;
+    }
+
+    private void showVoiceBar() {
+        hideVoiceBar();
+
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setBackground(makeRounded("#F21a1b26", "#7aa2f7", 12, 2));
+        bar.setPadding(dp(10), dp(8), dp(10), dp(8));
+
+        EditText edit = new EditText(this);
+        edit.setHint("点击豆包输入法语音键说话，或直接打字…");
+        edit.setHintTextColor(Color.parseColor("#565f89"));
+        edit.setTextColor(Color.parseColor("#c0caf5"));
+        edit.setTextSize(14);
+        edit.setSingleLine(false);
+        edit.setMaxLines(3);
+        edit.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        edit.setBackground(makeRounded("#24283b", "#414868", 8, 1));
+        edit.setPadding(dp(10), dp(8), dp(10), dp(8));
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        elp.rightMargin = dp(8);
+        bar.addView(edit, elp);
+
+        Runnable doSend = () -> {
+            String txt = edit.getText().toString();
+            if (!txt.isEmpty()) {
+                sendText(txt);
+                edit.setText("");
+                hideVoiceBar();
+            }
+        };
+
+        edit.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEND || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                doSend.run();
+                return true;
+            }
+            return false;
+        });
+
+        Button bSend = makeBarBtn("发送上屏", true, v -> doSend.run());
+        Button bClose = makeBarBtn("✕", false, v -> hideVoiceBar());
+        bar.addView(bSend);
+        bar.addView(bClose);
+
+        // Focusable overlay so Android Doubao IME pops up immediately!
+        WindowManager.LayoutParams vlp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                PixelFormat.TRANSLUCENT);
+        vlp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        vlp.y = dp(36);
+        vlp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE;
+
+        voiceBarView = bar;
+        wm.addView(voiceBarView, vlp);
+        voiceVisible = true;
+
+        edit.requestFocus();
+        edit.postDelayed(() -> {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (imm != null) imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT);
+        }, 120);
+    }
+
     private void toggleOsk() {
         if (oskVisible) {
             hideOsk();
         } else {
+            hideVoiceBar();
             showOsk(oskMode);
         }
     }
@@ -267,7 +301,6 @@ public class DeckOverlayService extends Service {
         root.setBackground(makeRounded(bg, "#7aa2f7", "floating".equals(mode) ? 14 : 0, 2));
         root.setPadding(dp(6), dp(6), dp(6), dp(8));
 
-        // Top toolbar
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
@@ -281,7 +314,7 @@ public class DeckOverlayService extends Service {
         bar.addView(sp, new LinearLayout.LayoutParams(0, 1, 1f));
 
         bar.addView(makeBarBtn("中/EN", false, v -> sendCmd("ime")));
-        bar.addView(makeBarBtn("🎤 语音", false, v -> sendCmd("voice")));
+        bar.addView(makeBarBtn("🎤 豆包语音", false, v -> toggleVoiceBar()));
         bar.addView(makeBarBtn("✕", false, v -> hideOsk()));
         root.addView(bar);
 
@@ -297,7 +330,7 @@ public class DeckOverlayService extends Service {
                 {{"1","1"},{"2","2"},{"3","3"},{"4","4"},{"5","5"},{"6","6"},{"7","7"},{"8","8"},{"9","9"},{"0","0"},{"-","minus"},{"=","equal"}},
                 {{"q","q"},{"w","w"},{"e","e"},{"r","r"},{"t","t"},{"y","y"},{"u","u"},{"i","i"},{"o","o"},{"p","p"},{"[","bracketleft"},{"]","bracketright"}},
                 {{"a","a"},{"s","s"},{"d","d"},{"f","f"},{"g","g"},{"h","h"},{"j","j"},{"k","k"},{"l","l"},{";","semicolon"},{"'","apostrophe"},{"⏎","Return"}},
-                {{"⇧","MOD:shift"},{"z","z"},{"x","x"},{"c","c"},{"v","v"},{"b","b"},{"n","n"},{"m","m"},{",","comma"},{".","period"},{"/","slash"},{"🎤","CMD:voice"}},
+                {{"⇧","MOD:shift"},{"z","z"},{"x","x"},{"c","c"},{"v","v"},{"b","b"},{"n","n"},{"m","m"},{",","comma"},{".","period"},{"/","slash"},{"🎤","VOICE"}},
                 {{"应用","CMD:apps"},{"菜单","CMD:menu"},{"Space","space"},{"终端","CMD:terminal"},{"关窗","CMD:kill"}}
             };
         }
@@ -317,7 +350,7 @@ public class DeckOverlayService extends Service {
                 b.setMinWidth(0);
                 b.setMinimumWidth(0);
 
-                boolean isSpecial = code.startsWith("MOD:") || code.startsWith("CMD:");
+                boolean isSpecial = code.startsWith("MOD:") || code.startsWith("CMD:") || "VOICE".equals(code);
                 b.setTextColor(Color.parseColor(isSpecial ? "#7aa2f7" : "#c0caf5"));
                 b.setBackground(makeRounded(isSpecial ? "#283457" : "#24283b", isSpecial ? "#7aa2f7" : "#414868", 6, 1));
 
@@ -327,7 +360,9 @@ public class DeckOverlayService extends Service {
 
                 b.setOnClickListener(v -> {
                     v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-                    if (code.startsWith("MOD:")) {
+                    if ("VOICE".equals(code)) {
+                        toggleVoiceBar();
+                    } else if (code.startsWith("MOD:")) {
                         String m = code.substring(4);
                         if ("super".equals(m)) modSuper = !modSuper;
                         else if ("ctrl".equals(m)) modCtrl = !modCtrl;
@@ -352,7 +387,7 @@ public class DeckOverlayService extends Service {
         int width = "floating".equals(mode)
                 ? (int) (getResources().getDisplayMetrics().widthPixels * 0.88f)
                 : WindowManager.LayoutParams.MATCH_PARENT;
-        oskLp = new WindowManager.LayoutParams(
+        WindowManager.LayoutParams oskLp = new WindowManager.LayoutParams(
                 width,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
@@ -375,14 +410,14 @@ public class DeckOverlayService extends Service {
         b.setTextSize(11);
         b.setTextColor(Color.parseColor(active ? "#1a1b26" : "#c0caf5"));
         b.setBackground(makeRounded(active ? "#7aa2f7" : "#24283b", "#7aa2f7", 6, 1));
-        b.setPadding(dp(8), dp(2), dp(8), dp(2));
+        b.setPadding(dp(10), dp(4), dp(10), dp(4));
         b.setMinHeight(0);
-        b.setMinimumHeight(dp(28));
+        b.setMinimumHeight(dp(32));
         b.setMinWidth(0);
         b.setMinimumWidth(0);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, dp(28));
-        lp.setMargins(dp(2), 0, dp(2), 0);
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(32));
+        lp.setMargins(dp(3), 0, dp(3), 0);
         b.setLayoutParams(lp);
         b.setOnClickListener(v -> {
             v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
@@ -419,8 +454,8 @@ public class DeckOverlayService extends Service {
 
     @Override
     public void onDestroy() {
-        running = false;
         hideOsk();
+        hideVoiceBar();
         if (fabView != null) {
             try { wm.removeView(fabView); } catch (Exception ignored) {}
         }

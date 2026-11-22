@@ -153,9 +153,19 @@ def handle_action(action):
     elif action == "go_home":
         subprocess.Popen(["am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif action == "rotate_portrait":
-        subprocess.run("settings put system accelerometer_rotation 0; settings put system user_rotation 0", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            "sed -i 's|<string name=\"forceOrientation\">[^<]*</string>|<string name=\"forceOrientation\">portrait</string>|' /data/data/com.termux.x11/shared_prefs/com.termux.x11_preferences.xml 2>/dev/null || true; "
+            "settings put system accelerometer_rotation 0; settings put system user_rotation 0; "
+            "am start -a android.intent.action.MAIN -n com.termux.x11/.MainActivity",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
     elif action == "rotate_landscape":
-        subprocess.run("settings put system accelerometer_rotation 0; settings put system user_rotation 1", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            "sed -i 's|<string name=\"forceOrientation\">[^<]*</string>|<string name=\"forceOrientation\">landscape</string>|' /data/data/com.termux.x11/shared_prefs/com.termux.x11_preferences.xml 2>/dev/null || true; "
+            "settings put system accelerometer_rotation 0; settings put system user_rotation 1; "
+            "am start -a android.intent.action.MAIN -n com.termux.x11/.MainActivity",
+            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
     elif action == "refresh_status":
         refresh_host_status()
 
