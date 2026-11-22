@@ -57,6 +57,9 @@ android {
             path = file("src/main/cpp/CMakeLists.txt")
         }
     }
+    androidResources {
+        noCompress += "zst"
+    }
     packaging {
         jniLibs {
             useLegacyPackaging = true

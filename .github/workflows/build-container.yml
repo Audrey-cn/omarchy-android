@@ -107,12 +107,43 @@ jobs:
           sudo umount -lf "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
           sudo cp container/omarchy.tiny.yaml "$ROOTFS/.tiny.yaml"
 
-          echo "Packing omarchy-ubuntu24-arm64.tar.zst..."
-          sudo tar --numeric-owner -C "$ROOTFS" -cf - . | zstd -T0 -6 -o /tmp/omarchy-ubuntu24-arm64.tar.zst
-          ls -lh /tmp/omarchy-ubuntu24-arm64.tar.zst
+          echo "Packing rootfs.tar.zst with top-level .tiny.yaml FIRST (no ./ prefix)..."
+          sudo tar --numeric-owner -C "$ROOTFS" -cf - .tiny.yaml --exclude='./.tiny.yaml' --transform='s|^\./||' . | zstd -T0 -6 -o /tmp/rootfs.tar.zst
+          tar --zstd -tf /tmp/rootfs.tar.zst | head -n 5
+          ls -lh /tmp/rootfs.tar.zst
 
       - name: Upload Container Artifact
         uses: actions/upload-artifact@v4
         with:
           name: omarchy-ubuntu24-arm64-container
-          path: /tmp/omarchy-ubuntu24-arm64.tar.zst
+          path: /tmp/rootfs.tar.zst
+
+  build-all-in-one-apk:
+    needs: build-rootfs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: omarchy-ubuntu24-arm64-container
+          path: app/src/main/assets
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android SDK 37 & NDK/CMake
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0" "cmake;3.22.1" "ndk;27.2.12479018" >/dev/null || true
+      - name: Assemble All-in-One OmarchyAndroid APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
+          ls -lh app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
+      - name: Upload All-in-One APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmarchyAndroid-AllInOne-apk
+          path: app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
