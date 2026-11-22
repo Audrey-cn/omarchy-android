@@ -94,24 +94,33 @@ def handle_special_route(route):
         subprocess.Popen(["/usr/local/bin/omarchy-image-picker", "background"], env=env)
         return True
     if route == "learn.keybindings":
+        mod_label = "Alt / Super"
+        try:
+            mc = json.load(open("/root/.config/omarchy/modifier.json", encoding="utf-8"))
+            m = mc.get("mode", "super+alt")
+            mod_label = {"super": "Super", "alt": "Alt", "super+alt": "Alt / Super"}.get(m, "Alt / Super")
+            if mc.get("caps_as_super"):
+                mod_label += " / Caps"
+        except Exception:
+            pass
         binds = [
-            "Alt / Super + Space          →  原生 6 列应用网格 (App Grid)",
-            "Alt + M / Super+Alt+Space    →  Omarchy 中文主菜单 (前往…)",
-            "Alt / Super + I              →  切换中英文拼音输入法 (EN ↔ 拼)",
-            "Alt / Super + Enter          →  打开 Alacritty 终端",
-            "Alt / Super + W / Q          →  关闭当前窗口 (Close Window)",
-            "Alt / Super + K              →  快捷键速查表 (Keybindings)",
-            "Alt / Super + J              →  切换分屏方向 (Toggle Split)",
-            "Alt / Super + T              →  切换浮动 / 平铺 (Toggle Floating)",
-            "Alt / Super + F              →  切换全屏 (Fullscreen)",
-            "Alt / Super + 方向键         →  切换窗口焦点 (加 Shift 移动窗口)",
-            "Alt / Super + 1..5           →  切换工作区 1..5 (加 Shift 移动窗口)",
-            "Alt / Super + Tab            →  切换下一个工作区",
-            "Alt / Super + Ctrl + R       →  循环切换触控板方向 (0/90/180/270°)",
-            "Alt / Super + Shift + Space  →  切换下一张主题壁纸",
-            "Alt / Super + Escape         →  系统菜单 (System)"
+            f"{mod_label} + Space          →  原生 6 列应用网格 (App Grid)",
+            f"{mod_label} + M              →  Omarchy 中文主菜单 (前往…)",
+            f"{mod_label} + I              →  切换中英文拼音输入法 (EN ↔ 拼)",
+            f"{mod_label} + Enter          →  打开 Alacritty 终端",
+            f"{mod_label} + W / Q          →  关闭当前窗口 (Close Window)",
+            f"{mod_label} + K              →  快捷键速查表 (Keybindings)",
+            f"{mod_label} + J              →  切换分屏方向 (Toggle Split)",
+            f"{mod_label} + T              →  切换浮动 / 平铺 (Toggle Floating)",
+            f"{mod_label} + F              →  切换全屏 (Fullscreen)",
+            f"{mod_label} + 方向键         →  切换窗口焦点 (加 Shift 移动窗口)",
+            f"{mod_label} + 1..5           →  切换工作区 1..5 (加 Shift 移动窗口)",
+            f"{mod_label} + Tab            →  切换下一个工作区",
+            f"{mod_label} + Ctrl + R       →  循环切换触控板方向 (0/90/180/270°)",
+            f"{mod_label} + Shift + Space  →  切换下一张主题壁纸",
+            f"{mod_label} + Escape         →  系统菜单 (System)"
         ]
-        wofi_pick("  快捷键 (Keybindings)…", binds, 540, 440)
+        wofi_pick(f"  快捷键 (当前主修饰键: {mod_label})…", binds, 580, 440)
         return True
     return False
 
@@ -154,7 +163,7 @@ def execute_item_action(key, item, zh_label):
         subprocess.Popen(["/usr/local/bin/omarchy-panel", "monitor"], env={**wl_env(), "GDK_BACKEND": "wayland"})
         return
     if key.startswith("setup.keyboard") or key.startswith("setup.input"):
-        subprocess.Popen(["fcitx5-configtool"], env={**wl_env(), "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/omarchy-dbus.sock"})
+        subprocess.Popen(["/usr/local/bin/omarchy-panel", "keyboard"], env={**wl_env(), "GDK_BACKEND": "wayland"})
         return
 
     # 2. Trigger (Capture / Toggles)

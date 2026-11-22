@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import glob
+import json
 import subprocess
 import gi
 
@@ -23,6 +24,9 @@ gi.require_version("GtkLayerShell", "0.1")
 from gi.repository import Gtk, Gdk, GLib, GtkLayerShell
 
 PIDFILE = "/tmp/omarchy-panel.pid"
+MODIFIER_CFG = "/root/.config/omarchy/modifier.json"
+KEYPROBE_FLAG = "/tmp/omarchy-keyprobe.active"
+KEYPROBE_OUT = "/tmp/omarchy-keyprobe.last"
 
 
 def load_theme():
@@ -75,11 +79,15 @@ class OmarchyPanel(Gtk.Window):
         GtkLayerShell.init_for_window(self)
         GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
         GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
-        GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
-        GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, 0)
-        if mode != "calendar":
-            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
-            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, 8)
+        if mode == "keyboard":
+            # Centered settings card
+            pass
+        else:
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, 0)
+            if mode != "calendar":
+                GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+                GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, 8)
 
         settings = Gtk.Settings.get_default()
         if settings:
@@ -130,6 +138,35 @@ class OmarchyPanel(Gtk.Window):
             background-color: alpha({accent}, 0.28);
             border-color: {accent};
         }}
+        button.om-btn-active {{
+            background-image: none;
+            box-shadow: none;
+            background-color: alpha({accent}, 0.30);
+            color: {fg};
+            border: 2px solid {accent};
+            border-radius: 7px;
+            padding: 7px 12px;
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 12px;
+            font-weight: bold;
+        }}
+        .probe-box {{
+            background-color: alpha({fg}, 0.06);
+            border: 1px dashed alpha({accent}, 0.65);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin: 4px 0;
+        }}
+        .warn-text {{
+            color: #e0af68;
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 11px;
+        }}
+        .ok-text {{
+            color: #9ece6a;
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 11px;
+        }}
         calendar {{
             background-color: {bg};
             color: {fg};
@@ -172,6 +209,8 @@ class OmarchyPanel(Gtk.Window):
             self.build_network()
         elif mode == "bluetooth":
             self.build_bluetooth()
+        elif mode == "keyboard":
+            self.build_keyboard()
         elif mode == "power":
             self.build_power()
         elif mode == "agents":
@@ -257,13 +296,178 @@ class OmarchyPanel(Gtk.Window):
         self.add_btn("󰑓  刷新网络状态", lambda _: (launch_bg("pkill -RTMIN+7 waybar"), Gtk.main_quit()))
 
     def build_bluetooth(self):
-        self.set_default_size(310, 220)
+        self.set_default_size(320, 250)
         self.add_title("󰂯  蓝牙与 M15 键盘 (Bluetooth)")
         m15 = sh("grep -q 'M15' /proc/bus/input/devices && echo '已连接 (evdev 已接管)' || echo '未检测到'")
         rot = sh("cat /root/.config/omarchy/touchpad-rotation 2>/dev/null || echo 0")
         self.add_row(f"M15 键盘/触控板: {m15}")
         self.add_row(f"触控板旋转角度: {rot}°", dim=True)
+        self.add_btn("  修饰键与按键冲突设置", lambda _: (launch_bg("GDK_BACKEND=wayland /usr/local/bin/omarchy-panel keyboard"), Gtk.main_quit()))
         self.add_btn("󰑐  切换触控板方向 (0/90/180/270°)", lambda _: (launch_bg("python3 -c \"p='/root/.config/omarchy/touchpad-rotation'; c=int(open(p).read().strip()) if __import__('os').path.exists(p) else 0; n={0:90,90:270,270:180,180:0}.get(c,0); open(p,'w').write(str(n))\""), Gtk.main_quit()))
+
+    def load_mod_cfg(self):
+        cfg = {"mode": "super+alt", "caps_as_super": False}
+        try:
+            if os.path.exists(MODIFIER_CFG):
+                cfg.update(json.load(open(MODIFIER_CFG, encoding="utf-8")))
+        except Exception:
+            pass
+        return cfg
+
+    def save_mod_cfg(self, cfg):
+        os.makedirs(os.path.dirname(MODIFIER_CFG), exist_ok=True)
+        with open(MODIFIER_CFG, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        # Sync Sway $mod for non-root proot fallback too
+        sway_mod = "Mod1" if cfg["mode"] == "alt" else "Mod4"
+        for p in ("/root/.config/sway/config", "/tmp/omarchy-sway.conf"):
+            if os.path.exists(p):
+                txt = open(p, encoding="utf-8").read()
+                txt = re.sub(r"^set \$mod .*$", f"set $mod {sway_mod}", txt, flags=re.M)
+                open(p, "w", encoding="utf-8").write(txt)
+        launch_bg("swaymsg reload")
+
+    def build_keyboard(self):
+        self.set_default_size(480, 500)
+        self.mod_cfg = self.load_mod_cfg()
+        self.has_keygrab = bool(sh("pgrep -f omarchy-keygrab.py"))
+        self._last_probe_ts = 0
+
+        try:
+            open(KEYPROBE_FLAG, "w").write("1")
+        except Exception:
+            pass
+
+        self.add_title("  键盘主修饰键与冲突检测 (Keyboard & Modifier)")
+        env_txt = "Root 硬件接管 (omarchy-keygrab 运行中)" if self.has_keygrab else "非 Root 模式 (Sway 原生接管)"
+        self.add_row(f"当前键盘链路: {env_txt}", dim=True)
+
+        # 1. Primary Modifier Mode Buttons
+        self.add_row("1. 选择主功能修饰键 (点击立即生效，无需重启):")
+        self.mode_btns = {}
+        modes = [
+            ("super+alt", "Super + Alt 双主修饰键 (便携键盘推荐)"),
+            ("super", "仅 Super (原版 Omarchy · 释放 Alt 给终端/IDE)"),
+            ("alt", "仅 Alt (适合无 Super/Win 键的迷你键盘)"),
+        ]
+        for key, label in modes:
+            b = Gtk.Button(label=label)
+            b.connect("clicked", lambda _, k=key: self.on_select_mode(k))
+            self.box.pack_start(b, False, False, 0)
+            self.mode_btns[key] = b
+
+        self.caps_btn = Gtk.Button()
+        self.caps_btn.connect("clicked", self.on_toggle_caps)
+        self.box.pack_start(self.caps_btn, False, False, 2)
+
+        # 2. Automatic Conflict Diagnostics
+        self.diag_lbl = Gtk.Label(xalign=0)
+        self.diag_lbl.set_line_wrap(True)
+        self.box.pack_start(self.diag_lbl, False, False, 4)
+
+        # 3. Live Key Probe Box
+        self.add_row("2. 实时按键探测 (直接按下 Win / Alt / CapsLock 检测):")
+        pbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        pbox.get_style_context().add_class("probe-box")
+        self.probe_lbl = Gtk.Label(label="等待按键输入…（若按下 Win 键无反应，说明被 Android 拦截或键盘无此键）", xalign=0)
+        self.probe_lbl.get_style_context().add_class("panel-dim")
+        self.probe_lbl.set_line_wrap(True)
+        pbox.pack_start(self.probe_lbl, False, False, 0)
+        self.box.pack_start(pbox, False, False, 0)
+
+        # 4. Touchpad Rotation + Fcitx5
+        self.add_row("3. 触控板方向与输入法:")
+        rbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.rot_btns = {}
+        for deg in (0, 90, 180, 270):
+            rb = Gtk.Button(label=f"{deg}°")
+            rb.connect("clicked", lambda _, d=deg: self.on_select_rot(d))
+            rbox.pack_start(rb, True, True, 0)
+            self.rot_btns[deg] = rb
+        self.box.pack_start(rbox, False, False, 0)
+
+        self.add_btn("󰌌  打开 Fcitx5 中文输入法配置", lambda _: (launch_bg("fcitx5-configtool"), Gtk.main_quit()))
+
+        self.refresh_keyboard_ui()
+        self._probe_timer = GLib.timeout_add(120, self.poll_keyprobe)
+
+    def refresh_keyboard_ui(self):
+        cur_m = self.mod_cfg.get("mode", "super+alt")
+        caps = bool(self.mod_cfg.get("caps_as_super", False))
+        for k, b in self.mode_btns.items():
+            sc = b.get_style_context()
+            sc.remove_class("om-btn")
+            sc.remove_class("om-btn-active")
+            sc.add_class("om-btn-active" if k == cur_m else "om-btn")
+
+        sc = self.caps_btn.get_style_context()
+        sc.remove_class("om-btn")
+        sc.remove_class("om-btn-active")
+        sc.add_class("om-btn-active" if caps else "om-btn")
+        self.caps_btn.set_label(f"{'☑' if caps else '☐'}  附加映射：将 CapsLock 映射为主修饰键 (Super)")
+
+        # Conflict analysis
+        dsc = self.diag_lbl.get_style_context()
+        dsc.remove_class("warn-text")
+        dsc.remove_class("ok-text")
+        if cur_m == "super" and not self.has_keygrab:
+            dsc.add_class("warn-text")
+            self.diag_lbl.set_text("⚠ 冲突提示：当前非 Root 模式下 Android 可能会截获 Super+Space / Tab，建议改用「仅 Alt」或开启 CapsLock 映射。")
+        elif cur_m in ("super+alt", "alt"):
+            dsc.add_class("ok-text")
+            self.diag_lbl.set_text("✓ 已启用 Alt 替代支持（已屏蔽 Electron 菜单栏误触；若在 Neovim/tmux 中频繁使用 Alt 组合键，可切换为「仅 Super」）。")
+        else:
+            dsc.add_class("ok-text")
+            self.diag_lbl.set_text("✓ 纯净原版模式：Alt 键已完全释放给终端与 IDE，由 Root evdev 独占接管 Super 键，无系统冲突。")
+
+        cur_rot = 0
+        try:
+            cur_rot = int(open("/root/.config/omarchy/touchpad-rotation").read().strip())
+        except Exception:
+            pass
+        for deg, rb in self.rot_btns.items():
+            rsc = rb.get_style_context()
+            rsc.remove_class("om-btn")
+            rsc.remove_class("om-btn-active")
+            rsc.add_class("om-btn-active" if deg == cur_rot else "om-btn")
+
+    def on_select_mode(self, mode_key):
+        self.mod_cfg["mode"] = mode_key
+        self.save_mod_cfg(self.mod_cfg)
+        self.refresh_keyboard_ui()
+
+    def on_toggle_caps(self, _):
+        self.mod_cfg["caps_as_super"] = not self.mod_cfg.get("caps_as_super", False)
+        self.save_mod_cfg(self.mod_cfg)
+        self.refresh_keyboard_ui()
+
+    def on_select_rot(self, deg):
+        os.makedirs("/root/.config/omarchy", exist_ok=True)
+        open("/root/.config/omarchy/touchpad-rotation", "w").write(str(deg))
+        self.refresh_keyboard_ui()
+
+    def poll_keyprobe(self):
+        try:
+            if os.path.exists(KEYPROBE_OUT):
+                d = json.load(open(KEYPROBE_OUT, encoding="utf-8"))
+                ts = d.get("ts", 0)
+                if ts > self._last_probe_ts:
+                    self._last_probe_ts = ts
+                    kname = d.get("name", "")
+                    dev = d.get("dev", "evdev")
+                    cur_m = self.mod_cfg.get("mode", "super+alt")
+                    caps = self.mod_cfg.get("caps_as_super", False)
+                    role = "普通键"
+                    if kname in ("KEY_LEFTMETA", "KEY_RIGHTMETA"):
+                        role = "当前主修饰键 ✓" if cur_m in ("super", "super+alt") else "透传给应用"
+                    elif kname in ("KEY_LEFTALT", "KEY_RIGHTALT"):
+                        role = "当前主修饰键 ✓" if cur_m in ("alt", "super+alt") else "已释放给终端/IDE"
+                    elif kname == "KEY_CAPSLOCK":
+                        role = "映射为主修饰键 ✓" if caps else "映射为 Escape"
+                    self.probe_lbl.set_text(f"硬件事件: {kname} ({dev})\n状态: {role}")
+        except Exception:
+            pass
+        return True
 
     def build_power(self):
         self.set_default_size(310, 260)
@@ -291,6 +495,9 @@ class OmarchyPanel(Gtk.Window):
         if ev.keyval == Gdk.KEY_Escape:
             Gtk.main_quit()
             return True
+        if self.mode == "keyboard" and hasattr(self, "probe_lbl"):
+            kname = Gdk.keyval_name(ev.keyval) or str(ev.keyval)
+            self.probe_lbl.set_text(f"Wayland 事件: {kname} (keyval={ev.keyval})\n提示: 该按键已正常送达桌面环境")
         return False
 
 
@@ -319,6 +526,11 @@ if __name__ == "__main__":
     try:
         Gtk.main()
     finally:
+        try:
+            if mode == "keyboard" and os.path.exists(KEYPROBE_FLAG):
+                os.remove(KEYPROBE_FLAG)
+        except Exception:
+            pass
         try:
             if os.path.exists(PIDFILE) and open(PIDFILE).read().startswith(f"{os.getpid()}:"):
                 os.remove(PIDFILE)

@@ -22,12 +22,30 @@ Matches official basecamp/omarchy tiling-v2.conf & utilities.conf keybindings:
 """
 import os
 import sys
+import json
 import time
 import signal
 import select
 import subprocess
 import evdev
 from evdev import ecodes
+
+MODIFIER_CFG = "/root/.config/omarchy/modifier.json"
+KEYPROBE_FLAG = "/tmp/omarchy-keyprobe.active"
+KEYPROBE_OUT = "/tmp/omarchy-keyprobe.last"
+_mod_cache = {"mtime": -1, "mode": "super+alt", "caps_as_super": False}
+
+def get_modifier_cfg():
+    try:
+        st = os.stat(MODIFIER_CFG)
+        if st.st_mtime != _mod_cache["mtime"]:
+            data = json.load(open(MODIFIER_CFG, encoding="utf-8"))
+            _mod_cache["mtime"] = st.st_mtime
+            _mod_cache["mode"] = data.get("mode", "super+alt")
+            _mod_cache["caps_as_super"] = bool(data.get("caps_as_super", False))
+    except Exception:
+        pass
+    return _mod_cache["mode"], _mod_cache["caps_as_super"]
 
 INTERNAL_DEVICES = {
     "goodix_ts", "uinput-goodix", "gpio-keys", "qpnp_pon",
@@ -93,8 +111,14 @@ def run_cmd(cmd):
     }
     subprocess.Popen(cmd.replace("i3-msg", "swaymsg"), shell=True, env=env)
 
-def handle_omarchy_hotkey(code, super_held, alt_held, ctrl_held, shift_held):
-    mod = super_held or alt_held
+def handle_omarchy_hotkey(code, super_held, alt_held, ctrl_held, shift_held, caps_held=False):
+    mode, caps_as_super = get_modifier_cfg()
+    if mode == "super":
+        mod = super_held or (caps_as_super and caps_held)
+    elif mode == "alt":
+        mod = alt_held or (caps_as_super and caps_held)
+    else:
+        mod = super_held or alt_held or (caps_as_super and caps_held)
     if not mod:
         return False
 
@@ -220,6 +244,7 @@ def watch_and_grab():
     alt_held = False
     ctrl_held = False
     shift_held = False
+    caps_held = False
 
     def toggle_grab_signal(signum, frame):
         nonlocal grabbed_state
@@ -304,11 +329,35 @@ def watch_and_grab():
                                 subprocess.Popen(["xdotool", "mouseup", btn])
                             continue
 
+                        mode, caps_as_super = get_modifier_cfg()
+
+                        # Live Key Probe reporting when Keyboard Settings panel is open
+                        if val == 1 and os.path.exists(KEYPROBE_FLAG):
+                            try:
+                                kname = ecodes.KEY.get(code, f"CODE_{code}")
+                                if isinstance(kname, list):
+                                    kname = kname[0]
+                                with open(KEYPROBE_OUT, "w", encoding="utf-8") as pf:
+                                    json.dump({"ts": time.time(), "code": code, "name": kname, "dev": dev.name}, pf)
+                            except Exception:
+                                pass
+
                         if code in (ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA):
                             super_held = (val != 0)
+                            if mode == "alt" and grabbed_state:
+                                ksym = "Super_L" if code == ecodes.KEY_LEFTMETA else "Super_R"
+                                if val == 1: subprocess.Popen(["xdotool", "keydown", ksym])
+                                elif val == 0: subprocess.Popen(["xdotool", "keyup", ksym])
                             continue
                         if code in (ecodes.KEY_LEFTALT, ecodes.KEY_RIGHTALT):
                             alt_held = (val != 0)
+                            if mode == "super" and grabbed_state:
+                                ksym = "Alt_L" if code == ecodes.KEY_LEFTALT else "Alt_R"
+                                if val == 1: subprocess.Popen(["xdotool", "keydown", ksym])
+                                elif val == 0: subprocess.Popen(["xdotool", "keyup", ksym])
+                            continue
+                        if code == ecodes.KEY_CAPSLOCK and caps_as_super:
+                            caps_held = (val != 0)
                             continue
                         if code in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
                             ctrl_held = (val != 0)
@@ -324,12 +373,12 @@ def watch_and_grab():
                             continue
 
                         # Direct hardware hotkey toggle for grab mode: Super + Ctrl + Esc
-                        if val == 1 and super_held and ctrl_held and code in (ecodes.KEY_ESC, ecodes.KEY_CAPSLOCK):
+                        if val == 1 and (super_held or (caps_as_super and caps_held)) and ctrl_held and code in (ecodes.KEY_ESC, ecodes.KEY_CAPSLOCK):
                             toggle_grab_signal(None, None)
                             continue
 
-                        if val == 1 and (super_held or alt_held):
-                            if handle_omarchy_hotkey(code, super_held, alt_held, ctrl_held, shift_held):
+                        if val == 1 and (super_held or alt_held or (caps_as_super and caps_held)):
+                            if handle_omarchy_hotkey(code, super_held, alt_held, ctrl_held, shift_held, caps_held):
                                 continue
 
                         if not grabbed_state:
