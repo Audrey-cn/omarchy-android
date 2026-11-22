@@ -129,6 +129,8 @@ DESKTOP
       esac
     done
     cp -rf /root/.local/share/omarchy/config/fcitx5/* /root/.config/fcitx5/ 2>/dev/null || true
+    echo 'DPkg::Post-Invoke { "/usr/local/bin/omarchy-fix-desktops || true"; };' > /etc/apt/apt.conf.d/99-omarchy-desktop-guard
+    /usr/local/bin/omarchy-fix-desktops || true
     /usr/local/bin/omarchy-theme-engine.py set tokyo-night
   '
 
@@ -211,6 +213,8 @@ DESKTOP
           ;;
       esac
     done
+    echo 'DPkg::Post-Invoke { "/usr/local/bin/omarchy-fix-desktops || true"; };' > /etc/apt/apt.conf.d/99-omarchy-desktop-guard
+    /usr/local/bin/omarchy-fix-desktops || true
     /usr/local/bin/omarchy-theme-engine.py set tokyo-night
   '
 

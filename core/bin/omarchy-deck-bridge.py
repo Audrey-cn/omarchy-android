@@ -27,6 +27,10 @@ def get_swaysock():
 def wl_env():
     return {
         **os.environ,
+        "SHELL": "/bin/bash",
+        "HOME": "/root",
+        "USER": "root",
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "XDG_RUNTIME_DIR": "/tmp",
         "WAYLAND_DISPLAY": "wayland-1",
         "SWAYSOCK": get_swaysock(),

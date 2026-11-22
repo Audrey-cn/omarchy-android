@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Permanent Desktop Entry & Wrapper Guard (also invoked automatically via APT DPkg::Post-Invoke)
+# Ensures apt upgrades NEVER revert Electron/Wayland wrappers or WebApp launchers.
+set -u
+
+APP_DIR="/root/.local/share/applications"
+mkdir -p "$APP_DIR"
+
+pin_desktop() {
+  local pattern="$1"
+  local new_exec="$2"
+  for f in /usr/share/applications/$pattern; do
+    [[ -f "$f" ]] || continue
+    sed -i "s|^Exec=.*|Exec=$new_exec|" "$f"
+    cp -f "$f" "$APP_DIR/$(basename "$f")"
+  done
+}
+
+pin_desktop "*claude*.desktop" "/usr/local/bin/claude-desktop-launch %u"
+pin_desktop "*Claude*.desktop" "/usr/local/bin/claude-desktop-launch %u"
+pin_desktop "*chatgpt*.desktop" "/usr/local/bin/chatgpt-launch %u"
+pin_desktop "*codex*.desktop" "/usr/local/bin/chatgpt-launch %u"
+pin_desktop "*hermes*.desktop" "/usr/local/bin/hermes-desktop-launch %u"
+pin_desktop "*CC*Switch*.desktop" "/usr/local/bin/cc-switch-launch"
+pin_desktop "*cc-switch*.desktop" "/usr/local/bin/cc-switch-launch"
+
+for f in "$APP_DIR"/*.desktop; do
+  [[ -f "$f" ]] || continue
+  sed -i 's|^Exec=omarchy-launch-webapp |Exec=/usr/local/bin/omarchy-launch-webapp |' "$f"
+  sed -i 's|^Exec=omarchy-webapp-handler-hey.*|Exec=/usr/local/bin/omarchy-launch-webapp https://app.hey.com/|' "$f"
+  sed -i 's|^Exec=omarchy-webapp-handler-zoom.*|Exec=/usr/local/bin/omarchy-launch-webapp https://app.zoom.us/wc|' "$f"
+done
+
+update-desktop-database /usr/share/applications "$APP_DIR" 2>/dev/null || true
