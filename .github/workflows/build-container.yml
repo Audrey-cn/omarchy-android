@@ -53,7 +53,7 @@ jobs:
             libdrm-dev libinput-dev libudev-dev libseat-dev libgbm-dev \
             libxcb1-dev libxcb-composite0-dev libxcb-render-util0-dev libxcb-xfixes0-dev \
             libxcb-icccm4-dev libxcb-xinput-dev libxcb-shm0-dev libxcb-present-dev \
-            libxcb-dri3-dev libxcb-res0-dev libxcb-errors-dev libxcb-ewmh-dev \
+            libxcb-dri3-dev libxcb-res0-dev libxcb-ewmh-dev \
             libjson-c-dev libpcre2-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev
 
           # Build modern wlroots 0.18.2 + sway 1.10.1 (works with pixman X11 backend WITHOUT DRI3!)
