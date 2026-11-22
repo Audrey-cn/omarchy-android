@@ -1,0 +1,28 @@
+name: Build OmarchyDeck APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Build OmarchyDeck.apk
+        run: |
+          chmod +x android-app/build.sh
+          ANDROID_HOME="$ANDROID_SDK_ROOT" ./android-app/build.sh
+      - name: Upload OmarchyDeck.apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmarchyDeck-apk
+          path: android-app/OmarchyDeck.apk

@@ -34,7 +34,6 @@ case "${1:-status}" in
     export GDK_BACKEND=wayland
     if [[ "$cur" == "portrait" ]]; then
       echo "landscape" > "$STATE_FILE"
-      /usr/local/bin/omarchy-osk close-all >/dev/null 2>&1 || true
       send_host "rotate_landscape"
       sleep 0.7
       saved="1.25"
@@ -45,7 +44,6 @@ case "${1:-status}" in
       send_host "rotate_portrait"
       sleep 0.7
       swaymsg "output X11-1 scale 1.35" >/dev/null 2>&1 || true
-      setsid /usr/local/bin/omarchy-osk fab </dev/null >/tmp/osk-fab.log 2>&1 &
     fi
     pkill -RTMIN+12 waybar 2>/dev/null || true
     ;;
