@@ -137,6 +137,7 @@ white   = "{c[15]}"
             "custom/update"
         ],
         "modules-right": [
+            "tray",
             "custom/ime",
             "custom/agents",
             "custom/bluetooth",
@@ -209,6 +210,10 @@ white   = "{c[15]}"
             "interval": 1800,
             "signal": 11,
             "on-click": "/usr/local/bin/omarchy-menu-ui update"
+        },
+        "tray": {
+            "icon-size": 15,
+            "spacing": 8
         },
         "custom/ime": {
             "exec": "/usr/local/bin/omarchy-ime-status",

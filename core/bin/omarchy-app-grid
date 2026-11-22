@@ -143,6 +143,36 @@ def load_pixbuf(icon_name, size=56):
 
 
 def launch_app(app):
+    socks = sorted(glob.glob("/tmp/sway-ipc.*.sock"), key=os.path.getmtime, reverse=True)
+    env = {
+        **os.environ,
+        "XDG_RUNTIME_DIR": "/tmp",
+        "WAYLAND_DISPLAY": "wayland-1",
+        "SWAYSOCK": socks[0] if socks else "/tmp/sway-ipc.sock",
+        "DISPLAY": ":0",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/omarchy-dbus.sock",
+    }
+    name = app.get("name", "")
+    # Smart focus: if heavy desktop app already has a Sway window, jump straight to it!
+    try:
+        raw = subprocess.check_output(["swaymsg", "-t", "get_tree"], env=env, text=True, stderr=subprocess.DEVNULL)
+        import json as _json
+        stack = [_json.loads(raw)]
+        nl = name.lower()
+        while stack:
+            n = stack.pop()
+            aid = (n.get("app_id") or "").lower()
+            wname = (n.get("name") or "").lower()
+            if n.get("id") and aid and (nl in aid or (nl == "hermes" and aid == "hermes") or (nl == "claude" and "claude" in aid) or (nl == "chatgpt" and "chatgpt" in aid)):
+                subprocess.Popen(["swaymsg", f"[con_id={n['id']}] focus"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            stack.extend(n.get("nodes", []) + n.get("floating_nodes", []))
+    except Exception:
+        pass
+
+    # Instant visual feedback toast for cold-starting desktop apps
+    subprocess.Popen(["notify-send", "-t", "2500", "正在启动应用", name], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     cmd = re.sub(r"%[fFuUdDnNickvm]", "", app["exec"]).strip()
     if app["terminal"]:
         full_cmd = ["alacritty", "-e", "bash", "-lc", cmd]
@@ -150,6 +180,7 @@ def launch_app(app):
         full_cmd = ["bash", "-lc", cmd]
     subprocess.Popen(
         full_cmd,
+        env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
