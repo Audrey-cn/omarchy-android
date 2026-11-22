@@ -82,102 +82,168 @@ def handle_special_route(route):
         show_app_grid()
         return True
     if route == "appearance.theme":
-        cur = open(f"{STATE_DIR}/theme.name").read().strip() if os.path.exists(f"{STATE_DIR}/theme.name") else "tokyo-night"
-        themes = sorted(os.listdir(f"{OMARCHY_PATH}/themes"))
-        themes = [t for t in themes if os.path.isdir(f"{OMARCHY_PATH}/themes/{t}")]
-        rows = [f"󰏘  {t}  ✓" if t == cur else f"󰏘  {t}" for t in themes]
-        ans = wofi_pick("主题 (Theme)…", rows, 340, 420)
-        if ans:
-            tname = ans.split()[1]
-            subprocess.Popen(["/usr/local/bin/omarchy-theme-engine.py", "set", tname], env=wl_env())
+        kill_wofi()
+        env = wl_env()
+        env["GDK_BACKEND"] = "wayland"
+        subprocess.Popen(["/usr/local/bin/omarchy-image-picker", "theme"], env=env)
         return True
     if route == "appearance.background":
-        cur = open(f"{STATE_DIR}/theme.name").read().strip() if os.path.exists(f"{STATE_DIR}/theme.name") else "tokyo-night"
-        bgs = sorted(glob.glob(f"{OMARCHY_PATH}/themes/{cur}/backgrounds/*"))
-        rows = ["󰸉  切换下一张壁纸 (Next Wallpaper)"] + [f"  {os.path.basename(b)}" for b in bgs]
-        ans = wofi_pick("背景 (Background)…", rows, 360, 380)
-        if "Next Wallpaper" in ans:
-            subprocess.Popen(["/usr/local/bin/omarchy-theme-engine.py", "next-bg"], env=wl_env())
-        elif ans:
-            bname = ans.split()[1]
-            subprocess.Popen(["/usr/local/bin/omarchy-theme-engine.py", "set", cur, f"{OMARCHY_PATH}/themes/{cur}/backgrounds/{bname}"], env=wl_env())
+        kill_wofi()
+        env = wl_env()
+        env["GDK_BACKEND"] = "wayland"
+        subprocess.Popen(["/usr/local/bin/omarchy-image-picker", "background"], env=env)
         return True
     if route == "learn.keybindings":
         binds = [
-            "Super + Return         →  打开终端 (Alacritty Wayland)",
-            "Super + Space          →  应用网格启动器 (App Grid)",
-            "Super + Alt + Space    →  Omarchy 主控菜单 (前往…)",
-            "Super + W              →  关闭当前窗口 (Close Window)",
-            "Super + K              →  快捷键速查表 (Keybindings)",
-            "Super + J              →  切换分屏方向 (Toggle Split)",
-            "Super + T              →  切换浮动 / 平铺 (Toggle Floating)",
-            "Super + F              →  切换全屏 (Fullscreen)",
-            "Super + 方向键         →  移动窗口焦点 (Focus)",
-            "Super + Shift + 方向键 →  交换 / 移动窗口 (Move)",
-            "Alt + Tab              →  循环切换窗口 (Cycle Window)",
-            "Super + 1..5           →  切换工作区 1..5",
-            "Super + Shift + 1..5   →  移动窗口到工作区 1..5",
-            "Super + Ctrl + T       →  系统资源监控 (Btop)",
-            "Super + Shift + N      →  Neovim 编辑器",
-            "Super + Shift + F      →  文件管理器 (Thunar)",
-            "Super + Ctrl + Space   →  切换下一张主题壁纸",
-            "Super + Escape         →  系统电源与锁定菜单"
+            "Alt / Super + Space          →  原生 6 列应用网格 (App Grid)",
+            "Alt + M / Super+Alt+Space    →  Omarchy 中文主菜单 (前往…)",
+            "Alt / Super + I              →  切换中英文拼音输入法 (EN ↔ 拼)",
+            "Alt / Super + Enter          →  打开 Alacritty 终端",
+            "Alt / Super + W / Q          →  关闭当前窗口 (Close Window)",
+            "Alt / Super + K              →  快捷键速查表 (Keybindings)",
+            "Alt / Super + J              →  切换分屏方向 (Toggle Split)",
+            "Alt / Super + T              →  切换浮动 / 平铺 (Toggle Floating)",
+            "Alt / Super + F              →  切换全屏 (Fullscreen)",
+            "Alt / Super + 方向键         →  切换窗口焦点 (加 Shift 移动窗口)",
+            "Alt / Super + 1..5           →  切换工作区 1..5 (加 Shift 移动窗口)",
+            "Alt / Super + Tab            →  切换下一个工作区",
+            "Alt / Super + Ctrl + R       →  循环切换触控板方向 (0/90/180/270°)",
+            "Alt / Super + Shift + Space  →  切换下一张主题壁纸",
+            "Alt / Super + Escape         →  系统菜单 (System)"
         ]
-        ans = wofi_pick("  快捷键 (Keybindings)…", binds, 520, 420)
+        wofi_pick("  快捷键 (Keybindings)…", binds, 540, 440)
         return True
     return False
 
 def execute_item_action(key, item, zh_label):
     action = item.get("action", "")
-    # Smart handlers for phone environment so every official Omarchy action works out-of-the-box!
+    # 1. Security & Setup (Unified with Waybar indicator!)
     if key == "setup.security.passwordless-sudo":
         os.makedirs("/etc/sudoers.d", exist_ok=True)
-        pfile = "/etc/sudoers.d/99-omarchy-nopasswd"
+        pfile = "/etc/sudoers.d/omarchy-nopasswd"
         if os.path.exists(pfile):
             os.remove(pfile)
-            run_in_terminal("免密 sudo (Passwordless Sudo)", "echo '已关闭免密 sudo (Passwordless Sudo Disabled).' && ls -la /etc/sudoers.d/")
+            subprocess.run("pkill -RTMIN+10 waybar 2>/dev/null || true", shell=True)
+            run_in_terminal("免密 sudo (Passwordless Sudo)", "echo '已关闭免密 sudo (Passwordless Sudo Disabled).'")
         else:
             with open(pfile, "w") as f:
                 f.write("ALL ALL=(ALL) NOPASSWD: ALL\n")
             os.chmod(pfile, 0o440)
-            run_in_terminal("免密 sudo (Passwordless Sudo)", "echo '✓ 已启用免密 sudo (/etc/sudoers.d/99-omarchy-nopasswd)!' && cat /etc/sudoers.d/99-omarchy-nopasswd")
+            subprocess.run("pkill -RTMIN+10 waybar 2>/dev/null || true", shell=True)
+            run_in_terminal("免密 sudo (Passwordless Sudo)", "echo '✓ 已启用免密 sudo (/etc/sudoers.d/omarchy-nopasswd)!'")
         return
     if key == "setup.security.sudoless-docker":
-        run_in_terminal("免 sudo Docker (Sudoless Docker)", "groupadd -f docker && usermod -aG docker root && echo '✓ 已配置免 sudo Docker 用户组 (docker group enabled)!'")
+        run_in_terminal("免 sudo Docker (Sudoless Docker)", "groupadd -f docker && usermod -aG docker root && echo '✓ 已配置免 sudo Docker 用户组!'")
         return
     if key == "setup.security.sshd":
-        run_in_terminal("SSHD 服务管理", "mkdir -p /run/sshd && /usr/sbin/sshd && echo '✓ OpenSSH Server (SSHD) 已启动! 端口: 22' && ps aux | grep sshd")
+        run_in_terminal("SSHD 服务管理", "mkdir -p /run/sshd && /usr/sbin/sshd 2>/dev/null || true; echo '✓ SSHD 状态:'; ps aux | grep sshd | grep -v grep")
         return
     if key == "setup.security.ssh-agent":
         run_in_terminal("SSH Agent", "eval $(ssh-agent -s) && ssh-add -l || true")
         return
-    if key == "trigger.capture.screenshot":
-        out = f"/mnt/sdcard/Pictures/Omarchy-{int(os.times().elapsed)}.png"
-        subprocess.Popen(["grim", out], env=wl_env())
+    if key.startswith("setup.network") or key.startswith("trigger.hardware.network"):
+        subprocess.Popen(["/usr/local/bin/omarchy-panel", "network"], env={**wl_env(), "GDK_BACKEND": "wayland"})
         return
+    if key.startswith("setup.audio") or key.startswith("trigger.hardware.audio"):
+        subprocess.Popen(["/usr/local/bin/omarchy-panel", "audio"], env={**wl_env(), "GDK_BACKEND": "wayland"})
+        return
+    if key.startswith("setup.bluetooth") or key.startswith("trigger.hardware.bluetooth"):
+        subprocess.Popen(["/usr/local/bin/omarchy-panel", "bluetooth"], env={**wl_env(), "GDK_BACKEND": "wayland"})
+        return
+    if key.startswith("setup.monitor") or key.startswith("trigger.hardware.display"):
+        subprocess.Popen(["/usr/local/bin/omarchy-panel", "monitor"], env={**wl_env(), "GDK_BACKEND": "wayland"})
+        return
+    if key.startswith("setup.keyboard") or key.startswith("setup.input"):
+        subprocess.Popen(["fcitx5-configtool"], env={**wl_env(), "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/omarchy-dbus.sock"})
+        return
+
+    # 2. Trigger (Capture / Toggles)
+    if key.startswith("trigger.capture.screenshot"):
+        os.makedirs("/mnt/sdcard/Pictures", exist_ok=True)
+        out = f"/mnt/sdcard/Pictures/omarchy-$(date +%Y%m%d-%H%M%S).png"
+        if "region" in key or "area" in key:
+            subprocess.Popen(["bash", "-c", f'g=$(slurp); [ -n "$g" ] && grim -g "$g" "{out}" && notify-send "已区域截屏" "{out}"'], env=wl_env())
+        else:
+            subprocess.Popen(["bash", "-c", f'grim "{out}" && notify-send "已全屏截屏" "{out}"'], env=wl_env())
+        return
+    if key.startswith("trigger.toggle.notifications"):
+        subprocess.Popen(["/usr/local/bin/omarchy-indicator", "toggle", "dnd"], env=wl_env())
+        return
+    if key.startswith("trigger.toggle.nightlight"):
+        subprocess.Popen(["/usr/local/bin/omarchy-indicator", "toggle", "night"], env=wl_env())
+        return
+    if key.startswith("trigger.toggle.idle"):
+        subprocess.Popen(["/usr/local/bin/omarchy-indicator", "toggle", "awake"], env=wl_env())
+        return
+
+    # 3. Appearance (Top Bar Background / Position / Hide / Gaps)
     if key.startswith("appearance.top-bar.hide") or key.startswith("appearance.top-bar.show"):
         if subprocess.run("pidof waybar", shell=True, stdout=subprocess.DEVNULL).returncode == 0:
             subprocess.run("for p in $(pidof waybar); do kill -9 $p; done", shell=True)
         else:
             subprocess.Popen(["/usr/local/bin/launch-waybar"], env=wl_env())
         return
+    if key.startswith("appearance.top-bar.background."):
+        style_mode = key.rsplit(".", 1)[-1]
+        css_p = "/root/.config/waybar/style.css"
+        if os.path.exists(css_p):
+            css = open(css_p, encoding="utf-8").read()
+            css = re.sub(r"\n/\* BAR_BG_OVERRIDE \*/[\s\S]*?/\* END_BAR_BG_OVERRIDE \*/", "", css)
+            if style_mode == "clear":
+                bg_rule = "window#waybar { background-color: transparent; }"
+            elif style_mode == "glassy":
+                bg_rule = "window#waybar { background-color: alpha(@background, 0.72); }"
+            else:
+                bg_rule = "window#waybar { background-color: @background; }"
+            css += f"\n/* BAR_BG_OVERRIDE */\n{bg_rule}\n/* END_BAR_BG_OVERRIDE */\n"
+            open(css_p, "w", encoding="utf-8").write(css)
+            subprocess.Popen(["/usr/local/bin/launch-waybar"], env=wl_env())
+        return
+    if key.startswith("appearance.top-bar.position."):
+        pos = "bottom" if "bottom" in key else "top"
+        wb_p = "/root/.config/waybar/config.jsonc"
+        if os.path.exists(wb_p):
+            wb = json.load(open(wb_p, encoding="utf-8"))
+            wb["position"] = pos
+            json.dump(wb, open(wb_p, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+            subprocess.Popen(["/usr/local/bin/launch-waybar"], env=wl_env())
+        return
     if key.startswith("appearance.windows.gaps"):
         subprocess.run(["swaymsg", "gaps inner all toggle 5; gaps outer all toggle 10"], env=wl_env())
         return
+
+    # 4. System Actions (Android-safe)
     if key == "system.about":
         run_in_terminal("关于 Omarchy (About)", f"cat {OMARCHY_PATH}/logo.txt; echo ''; fastfetch")
         return
     if key == "system.screensaver":
         subprocess.Popen(["alacritty", "-e", "btop", "--utf-force"], env=wl_env())
         return
-    if key == "system.logout":
+    if key in ("system.logout", "system.lock", "system.suspend", "system.hibernate"):
         subprocess.Popen(["am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME"])
         return
     if key == "system.reboot":
         subprocess.Popen(["/data/adb/start-omarchy.sh"])
         return
+
+    # 5. Install, Update, Remove (Native Ubuntu ARM64!)
     if key.startswith("install."):
         run_in_terminal(f"安装 (Install): {zh_label}", f"/usr/local/bin/omarchy-installer.sh '{key}' '{zh_label}'")
+        return
+    if key.startswith("remove."):
+        if key == "remove.package":
+            cmd = "pkg=$(dpkg-query -W -f='${Package}\\n' | sort | fzf --prompt='选择要卸载的软件包 > '); [ -n \"$pkg\" ] && DEBIAN_FRONTEND=noninteractive apt-get remove -y \"$pkg\" && echo \"✓ 已卸载 $pkg\""
+        elif key == "remove.webapp":
+            cmd = "f=$(ls /root/.local/share/applications/*.desktop 2>/dev/null | fzf --prompt='选择要移除的桌面应用 > '); [ -n \"$f\" ] && rm -f \"$f\" && echo \"✓ 已移除 $f\""
+        elif key == "remove.ai.claude":
+            cmd = "DEBIAN_FRONTEND=noninteractive apt-get remove -y claude-desktop && echo '✓ 已卸载 Claude Desktop'"
+        elif key == "remove.ai.chatgpt":
+            cmd = "DEBIAN_FRONTEND=noninteractive apt-get remove -y chatgpt && echo '✓ 已卸载 Codex / ChatGPT Desktop'"
+        elif key == "remove.ai.hermes":
+            cmd = "rm -rf /opt/hermes-desktop /usr/share/applications/hermes-desktop.desktop /usr/local/bin/hermes-desktop-launch && echo '✓ 已卸载 Hermes Desktop'"
+        else:
+            cmd = f"echo '正在检查移除项: {zh_label} ({key})'; f=$(ls /root/.local/share/applications/*.desktop 2>/dev/null | fzf --prompt='选择要移除的应用 > '); [ -n \"$f\" ] && rm -f \"$f\" && echo \"✓ 已移除 $f\""
+        run_in_terminal(f"移除 (Remove): {zh_label}", cmd)
         return
     if key.startswith("update."):
         upd_cmd = (
@@ -193,16 +259,23 @@ def execute_item_action(key, item, zh_label):
         )
         run_in_terminal(f"更新 (Update): {zh_label}", upd_cmd)
         return
+
+    # 6. Learn / WebApps / Manual
+    if key == "learn.omarchy":
+        subprocess.Popen(["/usr/local/bin/omarchy-chromium", "--app=https://learn.omacom.io/2/the-omarchy-manual"], env=wl_env())
+        return
     if action:
+        if "omarchy-launch-webapp" in action:
+            m = re.search(r"https?://[^\s'\"]+", action)
+            if m:
+                subprocess.Popen(["/usr/local/bin/omarchy-chromium", f"--app={m.group(0)}"], env=wl_env())
+                return
         if "omarchy-launch-floating-terminal" in action or "xdg-terminal-exec" in action:
             inner = action.replace("omarchy-launch-floating-terminal-with-presentation", "").replace("xdg-terminal-exec --app-id=org.omarchy.terminal", "").strip().strip("'").strip('"')
             run_in_terminal(zh_label, inner)
         elif "omarchy-launch-editor" in action:
             target = action.replace("omarchy-launch-editor", "").strip().strip('"').strip("'")
             subprocess.Popen(["alacritty", "-e", "nvim", os.path.expandvars(target)], env=wl_env())
-        elif "omarchy-launch-webapp" in action:
-            url = action.split()[-1].strip('"').strip("'")
-            run_in_terminal(zh_label, f"echo '打开网页应用: {url}'; xdg-open '{url}' 2>/dev/null || w3m '{url}'")
         else:
             run_in_terminal(zh_label, action)
 
@@ -245,7 +318,7 @@ def navigate_menu(route="root"):
         else:
             disp = f"{icon}  {zh_label}"
         # Append checkmark if passwordless sudo is active
-        if k == "setup.security.passwordless-sudo" and os.path.exists("/etc/sudoers.d/99-omarchy-nopasswd"):
+        if k == "setup.security.passwordless-sudo" and os.path.exists("/etc/sudoers.d/omarchy-nopasswd"):
             disp += "  ✓"
         rows.append(disp)
         row_map[disp] = (k, v, zh_label)

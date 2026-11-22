@@ -359,12 +359,13 @@ tooltip {{
     with open("/root/.config/waybar/style.css", "w") as f:
         f.write(waybar_css)
 
-    # 3. Native Wayland Wofi CSS (Matches Official Omarchy Walker 295px narrow card!)
+    # 3. Native Wayland Wofi CSS (Matches Official Omarchy Menu.qml dark card + crisp accent bar!)
     wofi_css = f"""window {{
     margin: 0px;
     border: 2px solid {accent};
+    border-radius: 8px;
     background-color: {bg};
-    font-family: 'JetBrainsMono Nerd Font', 'Noto Sans CJK SC';
+    font-family: 'JetBrainsMono Nerd Font', 'Noto Sans CJK SC', sans-serif;
     font-size: 13px;
 }}
 
@@ -376,17 +377,18 @@ tooltip {{
 
 #input {{
     margin: 0px 0px 10px 0px;
-    padding: 8px 10px;
-    border: 1px solid {c[8]};
-    border-radius: 0px;
-    color: {cursor};
-    background-color: {c[0]};
+    padding: 8px 12px;
+    border: 1px solid alpha({accent}, 0.45);
+    border-radius: 6px;
+    color: {fg};
+    background-color: alpha({fg}, 0.06);
+    caret-color: {accent};
 }}
 
 #input:focus {{
     border: 1px solid {accent};
-    color: {cursor};
-    background-color: {c[0]};
+    color: {fg};
+    background-color: alpha({fg}, 0.09);
 }}
 
 #inner-box {{
@@ -408,17 +410,18 @@ tooltip {{
 
 #entry {{
     padding: 7px 10px;
-    border: 1px solid transparent;
-    background-color: {bg};
+    border-radius: 6px;
+    border-left: 3px solid transparent;
+    background-color: transparent;
 }}
 
 #entry:selected {{
-    background-color: {c[0]};
-    border: 1px solid {accent};
+    background-color: alpha({accent}, 0.20);
+    border-left: 3px solid {accent};
 }}
 
 #entry:selected #text {{
-    color: {cursor};
+    color: {fg};
     font-weight: bold;
 }}
 """
@@ -527,7 +530,8 @@ bindsym $mod+Shift+5 move container to workspace number 5
     if os.path.exists(out_png):
         subprocess.Popen(["swaybg", "-i", out_png, "-m", "fill"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # Restart Official Waybar on Wayland
+    # Restart Official Waybar & reload Mako on Wayland
+    subprocess.run(["makoctl", "reload"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.Popen(["/usr/local/bin/launch-waybar"], env=env)
     return True
 
