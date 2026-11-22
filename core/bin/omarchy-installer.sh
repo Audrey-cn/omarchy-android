@@ -89,7 +89,7 @@ case "$KEY" in
         /opt/doubao-say/.venv/bin/pip install --no-cache-dir "PyJWT[crypto]>=2.10,<3" "websockets>=12" "sounddevice>=0.4.6" "evdev>=1.4"
         cat > /usr/local/bin/doubao-say-launch <<'LAUNCH'
 #!/usr/bin/env bash
-export XDG_RUNTIME_DIR=/tmp WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland PULSE_SERVER=127.0.0.1
+export XDG_RUNTIME_DIR=/tmp WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland GSK_RENDERER=cairo WEBKIT_DISABLE_DMABUF_RENDERER=1 PULSE_SERVER=127.0.0.1
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/omarchy-dbus.sock"
 export PYTHONPATH="/opt/doubao-say/src${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRITEBYTECODE=1
 exec /opt/doubao-say/.venv/bin/python -m doubao_input "$@"
