@@ -1,8 +1,12 @@
 #!/bin/bash
 # Official Omarchy Top-Bar Indicators (1-click direct toggles, no popup menu)
 # Supports: dnd, night, awake, sudo, rec
+export XDG_RUNTIME_DIR=/tmp
+export WAYLAND_DISPLAY=wayland-1
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/omarchy-dbus.sock"
 STATE_DIR="/root/.local/state/omarchy/indicators"
-mkdir -p "$STATE_DIR"
+QUEUE_DIR="/tmp/omarchy-browser-queue"
+mkdir -p "$STATE_DIR" "$QUEUE_DIR"
 
 ACTION="$1"
 ITEM="$2"
@@ -49,6 +53,7 @@ case "$ACTION" in
         if [[ -f "$STATE_DIR/dnd" ]]; then
           rm -f "$STATE_DIR/dnd"
           makoctl mode -r do-not-disturb 2>/dev/null || true
+          notify-send -t 2000 "勿扰模式" "已关闭，恢复弹窗通知" 2>/dev/null || true
         else
           touch "$STATE_DIR/dnd"
           makoctl mode -a do-not-disturb 2>/dev/null || true
@@ -57,30 +62,48 @@ case "$ACTION" in
       night)
         if [[ -f "$STATE_DIR/night" ]]; then
           rm -f "$STATE_DIR/night"
+          printf '{"action":"night_mode","enabled":false}\n' > "$QUEUE_DIR/night_$(date +%s%N).json"
+          notify-send -t 2000 "夜览护眼" "已关闭暖色滤镜" 2>/dev/null || true
         else
           touch "$STATE_DIR/night"
+          printf '{"action":"night_mode","enabled":true}\n' > "$QUEUE_DIR/night_$(date +%s%N).json"
+          notify-send -t 2000 "夜览护眼" "已开启暖色护眼滤镜" 2>/dev/null || true
         fi
         ;;
       awake)
         if [[ -f "$STATE_DIR/awake" ]]; then
           rm -f "$STATE_DIR/awake"
+          printf '{"action":"keep_awake","enabled":false}\n' > "$QUEUE_DIR/awake_$(date +%s%N).json"
+          notify-send -t 2000 "防休眠常亮" "已关闭（恢复自动息屏）" 2>/dev/null || true
         else
           touch "$STATE_DIR/awake"
+          printf '{"action":"keep_awake","enabled":true}\n' > "$QUEUE_DIR/awake_$(date +%s%N).json"
+          notify-send -t 2000 "防休眠常亮" "已开启（屏幕保持常亮）" 2>/dev/null || true
         fi
         ;;
       sudo)
         if [[ -f /etc/sudoers.d/omarchy-nopasswd ]]; then
           rm -f /etc/sudoers.d/omarchy-nopasswd
+          notify-send -t 2000 "免密 Sudo" "已关闭" 2>/dev/null || true
         else
           echo "ALL ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/omarchy-nopasswd
           chmod 440 /etc/sudoers.d/omarchy-nopasswd
+          notify-send -t 2000 "免密 Sudo" "已开启" 2>/dev/null || true
         fi
         ;;
       rec)
-        mkdir -p /mnt/sdcard/Pictures
-        fname="/mnt/sdcard/Pictures/omarchy-$(date +%Y%m%d-%H%M%S).png"
-        XDG_RUNTIME_DIR=/tmp WAYLAND_DISPLAY=wayland-1 grim "$fname" 2>/dev/null || true
-        notify-send "已截屏" "$fname" 2>/dev/null || true
+        out_dir="/mnt/sdcard/Pictures"
+        mkdir -p "$out_dir" 2>/dev/null || true
+        if [[ ! -w "$out_dir" ]]; then
+          out_dir="/root/Pictures"
+          mkdir -p "$out_dir"
+        fi
+        fname="$out_dir/omarchy-$(date +%Y%m%d-%H%M%S).png"
+        if grim "$fname" 2>/dev/null; then
+          notify-send -t 3000 "已截屏" "$fname" 2>/dev/null || true
+        else
+          notify-send -t 3000 "截屏失败" "请检查存储权限或 grim 状态" 2>/dev/null || true
+        fi
         ;;
     esac
     pkill -RTMIN+10 waybar 2>/dev/null || true

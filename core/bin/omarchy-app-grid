@@ -187,12 +187,16 @@ def launch_app(app):
         full_cmd = ["alacritty", "-e", "/bin/bash", "-lc", cmd]
     else:
         full_cmd = ["/bin/bash", "-lc", cmd]
+    try:
+        logf = open("/tmp/omarchy-app-grid.log", "a", encoding="utf-8")
+    except Exception:
+        logf = subprocess.DEVNULL
     subprocess.Popen(
         full_cmd,
         env=env,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=logf,
+        stderr=logf,
         start_new_session=True,
     )
 
@@ -309,6 +313,10 @@ class OmarchyAppGrid(Gtk.Window):
         for app in self.apps:
             child = Gtk.FlowBoxChild()
             child.app_data = app
+            btn = Gtk.Button()
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.set_can_focus(False)
+            btn.connect("clicked", lambda _b, a=app: self._launch_and_quit(a))
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
             box.set_halign(Gtk.Align.CENTER)
             box.set_valign(Gtk.Align.CENTER)
@@ -332,7 +340,8 @@ class OmarchyAppGrid(Gtk.Window):
             lbl.set_halign(Gtk.Align.CENTER)
             box.pack_start(lbl, False, False, 0)
 
-            child.add(box)
+            btn.add(box)
+            child.add(btn)
             self.flow.add(child)
 
         self.flow.set_filter_func(self.filter_func)
@@ -361,15 +370,17 @@ class OmarchyAppGrid(Gtk.Window):
         self.flow.invalidate_filter()
         self.select_first_visible()
 
-    def on_child_activated(self, _flow, child):
-        launch_app(child.app_data)
+    def _launch_and_quit(self, app_data):
+        launch_app(app_data)
         Gtk.main_quit()
+
+    def on_child_activated(self, _flow, child):
+        self._launch_and_quit(child.app_data)
 
     def on_activate_selected(self, _entry):
         sel = self.flow.get_selected_children()
         if sel:
-            launch_app(sel[0].app_data)
-            Gtk.main_quit()
+            self._launch_and_quit(sel[0].app_data)
 
     def move_selection(self, delta):
         vis = self.get_visible_children()
