@@ -204,9 +204,11 @@ white   = "{c[15]}"
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel calendar"
         },
         "custom/update": {
-            "format": "",
-            "on-click": "/usr/local/bin/omarchy-menu-ui update",
-            "tooltip-format": "检查与更新 Omarchy"
+            "exec": "/usr/local/bin/omarchy-update-check",
+            "return-type": "json",
+            "interval": 1800,
+            "signal": 11,
+            "on-click": "/usr/local/bin/omarchy-menu-ui update"
         },
         "custom/ime": {
             "exec": "/usr/local/bin/omarchy-ime-status",

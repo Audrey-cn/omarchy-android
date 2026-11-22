@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Native Ubuntu ARM64 + Omarchy update availability checker for Waybar
+# Matches official Omarchy behavior:
+#   - Shows icon ONLY when real updates are available (git upstream or apt upgradable)
+#   - Hides icon (empty text) when system is already up to date
+set -u
+
+OMARCHY_DIR="/root/.local/share/omarchy"
+
+# Auto-detect local USB proxy if present
+if bash -c '</dev/tcp/127.0.0.1/18888' 2>/dev/null; then
+  export http_proxy="http://127.0.0.1:18888"
+  export https_proxy="http://127.0.0.1:18888"
+fi
+
+omarchy_behind=0
+if [[ -d "$OMARCHY_DIR/.git" ]]; then
+  upstream=$(git -C "$OMARCHY_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+  if [[ -n "$upstream" ]]; then
+    GIT_TERMINAL_PROMPT=0 timeout 8 git -C "$OMARCHY_DIR" fetch --quiet 2>/dev/null || true
+    omarchy_behind=$(git -C "$OMARCHY_DIR" rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)
+  fi
+fi
+
+apt_updates=$(apt list --upgradable 2>/dev/null | grep -c 'upgradable' || true)
+apt_updates=${apt_updates:-0}
+
+total=$((omarchy_behind + apt_updates))
+
+if (( total > 0 )); then
+  printf '{"text": "", "tooltip": "有 %d 项可用更新 (Omarchy: %d, 系统包: %d) · 点击立即更新", "class": "has-updates"}\n' \
+    "$total" "$omarchy_behind" "$apt_updates"
+else
+  printf '{"text": "", "tooltip": "Omarchy 与系统包已是最新", "class": "up-to-date"}\n'
+fi

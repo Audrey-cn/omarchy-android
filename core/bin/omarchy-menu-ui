@@ -253,7 +253,8 @@ def execute_item_action(key, item, zh_label):
             "git -C /root/.local/share/omarchy pull --ff-only || true; "
             "echo ''; echo '[2/3] 更新 Ubuntu 24.04 ARM64 软件包...'; "
             "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && apt-get autoremove -y; "
-            "echo ''; echo '[3/3] 刷新桌面状态栏...'; "
+            "echo ''; echo '[3/3] 刷新桌面状态栏与更新状态...'; "
+            "pkill -RTMIN+11 waybar 2>/dev/null || true; "
             "/usr/local/bin/launch-waybar >/dev/null 2>&1 & "
             "echo '✓ Omarchy (Ubuntu ARM64) 更新完成！'"
         )

@@ -68,17 +68,28 @@ if [[ "$MODE" == "chroot" ]]; then
   cp -f "$REPO_DIR/runtime/chroot/omarchy-keygrab.py" /data/ubuntu/usr/local/bin/omarchy-keygrab.py
   chmod 755 /data/ubuntu/usr/local/bin/omarchy-keygrab.py
 
-  echo "[3/3] Provisioning Ubuntu 24.04 packages, basecamp/omarchy & zh_CN locale ..."
+  echo "[3/3] Provisioning Ubuntu 24.04 base apps (Git/gh, Neovim, Chromium wrapper, Thunar), basecamp/omarchy & zh_CN locale ..."
   /data/adb/ubuntu-chroot.sh '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y waybar wofi swaybg mako-notifier alacritty kitty neovim tmux btop fzf ripgrep jq \
+    apt-get install -y waybar wofi swaybg mako-notifier alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
+      git gh curl wget unzip zstd locales webp imagemagick \
       python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 papirus-icon-theme \
-      python3-evdev xdotool grim slurp wtype zstd locales git curl unzip \
+      python3-evdev xdotool grim slurp wtype \
       fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
     sed -i "s/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/" /etc/locale.gen
     locale-gen zh_CN.UTF-8 >/dev/null
-    mkdir -p /root/.local/share
+    mkdir -p /root/.local/share/applications
+    cat > /root/.local/share/applications/Chromium.desktop <<DESKTOP
+[Desktop Entry]
+Name=Chromium Browser
+Comment=Native Termux Chromium on Wayland
+Exec=/usr/local/bin/omarchy-chromium %U
+Icon=chromium
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+DESKTOP
     if [[ ! -d /root/.local/share/omarchy/.git ]]; then
       git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
     fi
@@ -107,17 +118,28 @@ else
   cp -f "$REPO_DIR/runtime/proot/start-omarchy-proot.sh" "$HOME/start-omarchy.sh"
   chmod 755 "$HOME/start-omarchy.sh"
 
-  echo "[3/3] Provisioning Ubuntu packages & basecamp/omarchy inside proot ..."
+  echo "[3/3] Provisioning Ubuntu base apps (Git/gh, Neovim, Chromium, Thunar) & basecamp/omarchy inside proot ..."
   proot-distro login ubuntu -- bash -lc '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y waybar wofi swaybg mako-notifier alacritty neovim tmux btop fzf ripgrep jq \
+    apt-get install -y waybar wofi swaybg mako-notifier alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
+      git gh curl wget unzip zstd locales webp imagemagick \
       python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 papirus-icon-theme \
-      grim slurp zstd locales git curl unzip \
+      grim slurp \
       fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
     sed -i "s/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/" /etc/locale.gen
     locale-gen zh_CN.UTF-8 >/dev/null
-    mkdir -p /root/.local/share
+    mkdir -p /root/.local/share/applications
+    cat > /root/.local/share/applications/Chromium.desktop <<DESKTOP
+[Desktop Entry]
+Name=Chromium Browser
+Comment=Native Termux Chromium on Wayland
+Exec=/usr/local/bin/omarchy-chromium %U
+Icon=chromium
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+DESKTOP
     [[ -d /root/.local/share/omarchy/.git ]] || git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
     /usr/local/bin/omarchy-theme-engine.py set tokyo-night
   '
