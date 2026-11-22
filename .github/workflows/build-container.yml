@@ -49,7 +49,7 @@ jobs:
             grim slurp \
             fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5 \
             build-essential ninja-build pkg-config scdoc python3-pip \
-            libexpat1-dev libffi-dev \
+            libexpat1-dev libffi-dev libevdev-dev libmtdev-dev \
             libwayland-dev wayland-protocols libpixman-1-dev libxkbcommon-dev \
             libdrm-dev libinput-dev libudev-dev libseat-dev libgbm-dev \
             libxcb1-dev libxcb-composite0-dev libxcb-render-util0-dev libxcb-xfixes0-dev \
@@ -80,6 +80,14 @@ jobs:
           meson setup build --prefix=/usr/local -Dtests=false
           ninja -C build -j$(nproc)
           ninja -C build install
+
+          cd /tmp/build-sway
+          curl -fsSL "https://gitlab.freedesktop.org/libinput/libinput/-/archive/1.26.2/libinput-1.26.2.tar.gz" | tar -xz
+          cd libinput-1.26.2
+          meson setup build --prefix=/usr/local -Dlibwacom=false -Ddebug-gui=false -Dtests=false -Ddocumentation=false -Dzshcompletiondir=no -Dudev-dir=/usr/local/lib/udev
+          ninja -C build -j$(nproc)
+          ninja -C build install
+          ldconfig
 
           cd /tmp/build-sway
           curl -fsSL "https://gitlab.freedesktop.org/wlroots/wlroots/-/releases/0.18.2/downloads/wlroots-0.18.2.tar.gz" | tar -xz
