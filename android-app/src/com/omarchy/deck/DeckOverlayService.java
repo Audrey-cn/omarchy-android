@@ -40,7 +40,7 @@ public class DeckOverlayService extends Service {
     private String oskMode = "floating"; // docked | compact | floating
     private boolean oskVisible = false;
     private float oskAlpha = 0.82f;
-    private float oskScale = 1.0f;
+    private static final float FLOATING_SCALE = 0.70f;
     private int oskPosX = 0;
     private int oskPosY = 14;
 
@@ -233,10 +233,15 @@ public class DeckOverlayService extends Service {
         bar.addView(makeBarBtn("精简条", "compact".equals(mode), v -> showOsk("compact")));
         bar.addView(makeBarBtn("悬浮", "floating".equals(mode), v -> showOsk("floating")));
 
-        // Workspace 1-5 quick switch buttons right after mode buttons!
+        // Workspace 1-5 square chunky buttons right after mode buttons!
         for (int ws = 1; ws <= 5; ws++) {
             final String w = String.valueOf(ws);
-            bar.addView(makeBarBtn(w, false, v -> sendCmd("ws_" + w)));
+            Button wb = makeBarBtn(w, false, v -> sendCmd("ws_" + w));
+            LinearLayout.LayoutParams wlp = new LinearLayout.LayoutParams(dp(32), dp(30));
+            wlp.setMargins(dp(2), 0, dp(2), 0);
+            wb.setLayoutParams(wlp);
+            wb.setPadding(0, 0, 0, 0);
+            bar.addView(wb);
         }
 
         View sp = new View(this);
@@ -262,21 +267,18 @@ public class DeckOverlayService extends Service {
         bar.addView(alphaBar);
 
         if ("floating".equals(mode)) {
-            bar.addView(makeBarBtn("A-", false, v -> {
-                oskScale = Math.max(0.70f, oskScale - 0.10f);
-                showOsk("floating");
-            }));
-            bar.addView(makeBarBtn("A+", false, v -> {
-                oskScale = Math.min(1.25f, oskScale + 0.10f);
-                showOsk("floating");
-            }));
-        }
-
-        bar.addView(makeBarBtn("🎤", false, v -> triggerAndroidIme()));
-        bar.addView(makeBarBtn("✕", false, v -> hideOsk()));
-
-        if ("floating".equals(mode)) {
-            bar.setOnTouchListener(new View.OnTouchListener() {
+            TextView dragHandle = new TextView(this);
+            dragHandle.setText("⠿ 拖动");
+            dragHandle.setTextSize(11);
+            dragHandle.setTextColor(Color.parseColor("#7aa2f7"));
+            dragHandle.setGravity(Gravity.CENTER);
+            dragHandle.setBackground(makeRounded("#CC283457", "#7aa2f7", 6, 1));
+            dragHandle.setPadding(dp(8), dp(4), dp(8), dp(4));
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
+            dlp.setMargins(dp(3), 0, dp(3), 0);
+            dragHandle.setLayoutParams(dlp);
+            dragHandle.setOnTouchListener(new View.OnTouchListener() {
                 int ix, iy; float tx, ty;
                 @Override
                 public boolean onTouch(View v, MotionEvent e) {
@@ -296,7 +298,11 @@ public class DeckOverlayService extends Service {
                     return false;
                 }
             });
+            bar.addView(dragHandle);
         }
+
+        bar.addView(makeBarBtn("🎤", false, v -> triggerAndroidIme()));
+        bar.addView(makeBarBtn("✕", false, v -> hideOsk()));
         root.addView(bar);
 
         String[][][] rows;
@@ -316,7 +322,7 @@ public class DeckOverlayService extends Service {
             };
         }
 
-        int keyH = dp(Math.round(36 * ("floating".equals(mode) ? oskScale : 1.0f)));
+        int keyH = dp(Math.round(36 * ("floating".equals(mode) ? FLOATING_SCALE : 1.0f)));
         for (String[][] r : rows) {
             LinearLayout rowView = new LinearLayout(this);
             rowView.setOrientation(LinearLayout.HORIZONTAL);
@@ -366,7 +372,7 @@ public class DeckOverlayService extends Service {
 
         int screenW = getResources().getDisplayMetrics().widthPixels;
         int width = "floating".equals(mode)
-                ? Math.min(screenW, Math.round(screenW * 0.80f * oskScale))
+                ? Math.min(screenW, Math.round(screenW * 0.80f * FLOATING_SCALE))
                 : WindowManager.LayoutParams.MATCH_PARENT;
         oskLp = new WindowManager.LayoutParams(
                 width,
