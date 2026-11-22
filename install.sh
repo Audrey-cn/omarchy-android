@@ -68,18 +68,24 @@ if [[ "$MODE" == "chroot" ]]; then
   cp -f "$REPO_DIR/runtime/chroot/omarchy-keygrab.py" /data/ubuntu/usr/local/bin/omarchy-keygrab.py
   chmod 755 /data/ubuntu/usr/local/bin/omarchy-keygrab.py
 
-  echo "[3/3] Provisioning Ubuntu 24.04 base apps (Git/gh, Neovim, Chromium wrapper, Thunar), basecamp/omarchy & zh_CN locale ..."
+  echo "[3/3] Provisioning Ubuntu 24.04 base apps (Git/gh/lazygit, Neovim, Chromium, Thunar, imv, zathura, mpv), official WebApps & zh_CN locale ..."
   /data/adb/ubuntu-chroot.sh '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
     apt-get install -y waybar wofi swaybg mako-notifier alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
+      imv zathura zathura-pdf-poppler mpv \
       git gh curl wget unzip zstd locales webp imagemagick \
       python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 papirus-icon-theme \
       python3-evdev xdotool grim slurp wtype \
       fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
     sed -i "s/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/" /etc/locale.gen
     locale-gen zh_CN.UTF-8 >/dev/null
-    mkdir -p /root/.local/share/applications
+    if ! command -v lazygit >/dev/null 2>&1; then
+      LG_VER=$(curl -fsSLI -o /dev/null -w "%{url_effective}" "https://github.com/jesseduffield/lazygit/releases/latest" | sed "s|.*/tag/v||")
+      curl -fsSL "https://github.com/jesseduffield/lazygit/releases/download/v${LG_VER}/lazygit_${LG_VER}_Linux_arm64.tar.gz" -o /tmp/lazygit.tar.gz && \
+      tar -xzf /tmp/lazygit.tar.gz -C /usr/local/bin lazygit && chmod 755 /usr/local/bin/lazygit && rm -f /tmp/lazygit.tar.gz || true
+    fi
+    mkdir -p /root/.local/share/applications /root/.local/share/icons/hicolor/256x256/apps /usr/share/pixmaps
     cat > /root/.local/share/applications/Chromium.desktop <<DESKTOP
 [Desktop Entry]
 Name=Chromium Browser
@@ -90,9 +96,28 @@ Terminal=false
 Type=Application
 Categories=Network;WebBrowser;
 DESKTOP
+    cat > /root/.local/share/applications/lazygit.desktop <<DESKTOP
+[Desktop Entry]
+Name=Lazygit
+Comment=Terminal UI for Git
+Exec=alacritty -e lazygit
+Icon=git
+Terminal=false
+Type=Application
+Categories=Development;
+DESKTOP
     if [[ ! -d /root/.local/share/omarchy/.git ]]; then
       git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
     fi
+    cp -f /root/.local/share/omarchy/applications/icons/* /root/.local/share/icons/hicolor/256x256/apps/ 2>/dev/null || true
+    cp -f /root/.local/share/omarchy/applications/icons/* /usr/share/pixmaps/ 2>/dev/null || true
+    for f in /root/.local/share/omarchy/applications/*.desktop; do
+      b=$(basename "$f")
+      case "$b" in
+        "foot.desktop"|"Activity Monitor.desktop"|omarchy-*.desktop) continue ;;
+        *) cp -f "$f" "/root/.local/share/applications/$b" ;;
+      esac
+    done
     cp -rf /root/.local/share/omarchy/config/fcitx5/* /root/.config/fcitx5/ 2>/dev/null || true
     /usr/local/bin/omarchy-theme-engine.py set tokyo-night
   '
@@ -118,18 +143,24 @@ else
   cp -f "$REPO_DIR/runtime/proot/start-omarchy-proot.sh" "$HOME/start-omarchy.sh"
   chmod 755 "$HOME/start-omarchy.sh"
 
-  echo "[3/3] Provisioning Ubuntu base apps (Git/gh, Neovim, Chromium, Thunar) & basecamp/omarchy inside proot ..."
+  echo "[3/3] Provisioning Ubuntu base apps (Git/gh/lazygit, Neovim, Chromium, Thunar, imv, zathura, mpv) & official WebApps inside proot ..."
   proot-distro login ubuntu -- bash -lc '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
     apt-get install -y waybar wofi swaybg mako-notifier alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
+      imv zathura zathura-pdf-poppler mpv \
       git gh curl wget unzip zstd locales webp imagemagick \
       python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 papirus-icon-theme \
       grim slurp \
       fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
     sed -i "s/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/" /etc/locale.gen
     locale-gen zh_CN.UTF-8 >/dev/null
-    mkdir -p /root/.local/share/applications
+    if ! command -v lazygit >/dev/null 2>&1; then
+      LG_VER=$(curl -fsSLI -o /dev/null -w "%{url_effective}" "https://github.com/jesseduffield/lazygit/releases/latest" | sed "s|.*/tag/v||")
+      curl -fsSL "https://github.com/jesseduffield/lazygit/releases/download/v${LG_VER}/lazygit_${LG_VER}_Linux_arm64.tar.gz" -o /tmp/lazygit.tar.gz && \
+      tar -xzf /tmp/lazygit.tar.gz -C /usr/local/bin lazygit && chmod 755 /usr/local/bin/lazygit && rm -f /tmp/lazygit.tar.gz || true
+    fi
+    mkdir -p /root/.local/share/applications /root/.local/share/icons/hicolor/256x256/apps /usr/share/pixmaps
     cat > /root/.local/share/applications/Chromium.desktop <<DESKTOP
 [Desktop Entry]
 Name=Chromium Browser
@@ -140,7 +171,26 @@ Terminal=false
 Type=Application
 Categories=Network;WebBrowser;
 DESKTOP
+    cat > /root/.local/share/applications/lazygit.desktop <<DESKTOP
+[Desktop Entry]
+Name=Lazygit
+Comment=Terminal UI for Git
+Exec=alacritty -e lazygit
+Icon=git
+Terminal=false
+Type=Application
+Categories=Development;
+DESKTOP
     [[ -d /root/.local/share/omarchy/.git ]] || git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
+    cp -f /root/.local/share/omarchy/applications/icons/* /root/.local/share/icons/hicolor/256x256/apps/ 2>/dev/null || true
+    cp -f /root/.local/share/omarchy/applications/icons/* /usr/share/pixmaps/ 2>/dev/null || true
+    for f in /root/.local/share/omarchy/applications/*.desktop; do
+      b=$(basename "$f")
+      case "$b" in
+        "foot.desktop"|"Activity Monitor.desktop"|omarchy-*.desktop) continue ;;
+        *) cp -f "$f" "/root/.local/share/applications/$b" ;;
+      esac
+    done
     /usr/local/bin/omarchy-theme-engine.py set tokyo-night
   '
 
