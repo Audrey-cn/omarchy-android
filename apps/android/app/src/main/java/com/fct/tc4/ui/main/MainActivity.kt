@@ -260,11 +260,9 @@ class MainActivity : AppCompatActivity() {
         // 已完成初始导航，不再重复导航（singleTask 下 onNewIntent 可能再次触发 ACTION_MAIN）
         if (viewModel.screen.value !is MainViewModel.Screen.Init) return
 
-        if (!Global.isFirstLaunchDone && Global.hasBuiltInRootfs() && Global.installedContainers.isEmpty()) {
-            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            val containerViewModel: ContainerManageViewModel by viewModels()
-            containerViewModel.autoInstallBuiltInContainer()
-            viewModel.navigateTo(MainViewModel.Screen.ContainerManage)
+        if (Global.installedContainers.isEmpty()) {
+            startActivity(Intent(this, com.fct.tc4.ui.page.DesktopSetupActivity::class.java))
+            finish()
             return
         }
 

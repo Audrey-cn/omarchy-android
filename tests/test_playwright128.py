@@ -89,7 +89,7 @@ exec "$TEST_NODE" "$@"
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
         self.assertFalse(self.arguments.exists())
-        self.assertIn("更新 Omarchy Android 一体包", result.stderr)
+        self.assertIn("APK 更新不会修复镜像内文件，请按配套版本恢复运行时。", result.stderr)
 
     def test_changed_node_sdk_or_source_receipt_is_rejected(self):
         result = self.invoke("check", env=dict(self.env, TEST_NODE_VERSION="25.0.0"))

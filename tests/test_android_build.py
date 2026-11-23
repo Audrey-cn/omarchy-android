@@ -3,6 +3,7 @@
 
 import base64
 import hashlib
+import gzip
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tarfile
 import unittest
 import zipfile
 
@@ -236,6 +238,88 @@ class AndroidBuildTests(unittest.TestCase):
         self.assertNotEqual(mismatch.returncode, 0)
         self.assertIn("certificate", mismatch.stderr)
         self.assertFalse(json.loads(metadata_path.read_text())["upgradeable"])
+
+    def test_online_installer_verifies_catalog_native_and_excludes_guest_payload(self):
+        apk, metadata_path, args = self.apk_fixture(native=True)
+        catalog = b'{"schemaVersion":1,"images":[]}'
+        bundled = self.repo / "apps/android/app/src/main/assets/initial-images.json"
+        bundled.parent.mkdir(parents=True)
+        bundled.write_bytes(catalog)
+        with zipfile.ZipFile(apk) as archive:
+            natives = {name: archive.read(name) for name in archive.namelist() if name.startswith("lib/")}
+        files = {**natives, "assets/initial-images.json": catalog,
+                 "lib/arm64-v8a/libx11.so": b"\x7fELFexample Android library",
+                 "assets/docs/reference.gz": gzip.compress(b"reference data"),
+                 "assets/help/files.tar": tarfile.TarInfo("readme.txt").tobuf() + bytes(1024),
+                 "res/raw/large_media": bytes(1024 * 1024)}
+        member = tarfile.TarInfo(".tiny.yaml")
+        tar_header = member.tobuf()
+        # A single raw block in a standard zstd frame, with two-byte frame size.
+        frame = bytes.fromhex("28b52ffd60") + (len(tar_header) - 256).to_bytes(2, "little")
+        zstd_tar = frame + ((len(tar_header) << 3) | 1).to_bytes(3, "little") + tar_header
+        if shutil.which("zstd"):
+            files["assets/help/manual.dat"] = subprocess.check_output(
+                ["zstd", "-qc"], input=files["assets/help/files.tar"])
+        tar_with_guest = tarfile.TarInfo("readme").tobuf() + tar_header + bytes(1024)
+
+        def verify_contents(entries):
+            with zipfile.ZipFile(apk, "w") as archive:
+                for name, payload in entries.items():
+                    archive.writestr(name, payload)
+            return self.run_script(*args, "--delivery", "online-installer")
+
+        valid = verify_contents(files)
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        verified = json.loads(metadata_path.read_text())
+        self.assertEqual(verified["delivery"], "online-installer")
+        self.assertEqual(verified["nativeLibraryCount"], 3)
+        self.assertEqual(verified["managedPayloadBytes"], 0)
+        self.assertEqual(verified["catalogSha256"], hashlib.sha256(catalog).hexdigest())
+        cases = [
+            {**files, "assets/rootfs.tar.zst": b"image"},
+            {**files, "res/raw/rootfs.tar.zst": b"image"},
+            {**files, "assets/desktop/usr/local/bin/omarchy-playwright128": b"command"},
+            {**files, "res/raw/staging/managed-core/session": b"guest"},
+            {**files, "res/raw/data.dat": b"\x7fELF" + bytes(240)},
+            {**files, "lib/desktop/libnode.so": b"\x7fELF" + bytes(240)},
+            {**files, "assets/misc/archive.bin": tar_header + bytes(1024)},
+            {**files, "assets/misc/zstd.bin": zstd_tar},
+            {**files, "assets/misc/gz.bin": gzip.compress(tar_header + bytes(1024))},
+            {**files, "res/raw/doc": tar_with_guest},
+            {**files, "assets/managed-core/files/opt/omarchy-node/bin/node": b"payload"},
+            {**files, "assets/omarchy/../managed-core": b"ambiguous"},
+            {**files, "assets/opt/omarchy-chromium128/chrome": b"browser"},
+            {**files, "assets/usr/local/bin/omarchy-one": b"guest command"},
+            {**files, "assets/initial-images.json": b"{}"},
+            {**files, next(iter(natives)): b"replaced"},
+            natives,
+        ]
+        for contents in cases:
+            with self.subTest(modified=sorted(key for key in set(contents) | set(files) if contents.get(key) != files.get(key))):
+                rejected = verify_contents(contents)
+                self.assertNotEqual(rejected.returncode, 0)
+                receipt = json.loads(metadata_path.read_text())
+                self.assertNotIn("catalogSha256", receipt)
+                self.assertFalse(receipt["upgradeable"])
+
+    def test_gradle_source_guard_rejects_ignored_all_in_one_image_without_deleting_it(self):
+        assets = self.repo / "apps/android/app/src/main/assets"
+        assets.mkdir(parents=True)
+        (assets / "ordinary.txt").write_text("bundled application asset")
+        guard = ("check-installer-inputs",)
+        valid = self.run_script(*guard)
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        legacy = assets / "rootfs.tar.zst"
+        (self.repo / ".gitignore").write_text("apps/android/app/src/main/assets/rootfs.tar.zst\n")
+        legacy.write_bytes(b"old locally built desktop image")
+        self.assertEqual(self.git("check-ignore", str(legacy)), str(legacy))
+        rejected = self.run_script(*guard)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("assets/rootfs.tar.zst", rejected.stderr)
+        self.assertEqual(legacy.read_bytes(), b"old locally built desktop image")
+        gradle = (SCRIPT.parents[1] / "apps/android/app/build.gradle.kts").read_text()
+        self.assertIn('"check-installer-inputs"', gradle)
+        self.assertIn('tasks.named("preBuild")', gradle)
 
     def test_managed_manifest_and_every_apk_payload_are_checked_before_success(self):
         apk, metadata_path, args = self.apk_fixture()

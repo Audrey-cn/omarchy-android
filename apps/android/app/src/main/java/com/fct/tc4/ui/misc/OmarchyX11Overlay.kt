@@ -22,6 +22,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
@@ -46,6 +47,12 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import com.termux.x11.MainActivity as X11Activity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 import java.net.Socket
@@ -74,6 +81,8 @@ object OmarchyX11Overlay {
     private val controllers = WeakHashMap<Activity, Controller>()
     private const val DOUBAO_PKG = "com.bytedance.android.doubaoime"
     private const val DOUBAO_URL = "https://shurufa.doubao.com/"
+    private const val ONBOARDING_COMPLETE = "onboarding_v2_done"
+    private const val ONBOARDING_OPT_OUT = "onboarding_v2_opted_out"
 
     fun register(app: Application) {
         try {
@@ -95,7 +104,7 @@ object OmarchyX11Overlay {
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
             override fun onActivityStarted(activity: Activity) {}
             override fun onActivityResumed(activity: Activity) {
-                if (activity.javaClass.name == "com.termux.x11.MainActivity") {
+                if (activity is X11Activity) {
                     val ctrl = controllers.getOrPut(activity) { Controller(activity) }
                     ctrl.attachIfNeeded()
                 }
@@ -351,7 +360,7 @@ object OmarchyX11Overlay {
         }
     }
 
-    private class Controller(private val activity: Activity) {
+    private class Controller(private val activity: X11Activity) {
         private val mainHandler = Handler(Looper.getMainLooper())
         private val netExec = Executors.newSingleThreadExecutor()
         private val prefs = activity.getSharedPreferences("omarchy_overlay_prefs", Context.MODE_PRIVATE)
@@ -363,6 +372,9 @@ object OmarchyX11Overlay {
         private var expandedDockView: View? = null
         private var quickMenuOverlay: View? = null
         private var onboardingOverlay: View? = null
+        private var onboardingStatus: View? = null
+        private var onboardingProbeJob: Job? = null
+        private var onboardingReadiness: OnboardingReadiness? = null
         private var oskView: View? = null
         private var imeAnchor: EditText? = null
 
@@ -476,12 +488,14 @@ object OmarchyX11Overlay {
                 }, delay)
             }
 
-            if (!prefs.getBoolean("onboarding_v2_done", false)) {
-                mainHandler.postDelayed({ showOnboardingStep(0) }, 2200L)
+            if (onboardingProgress().shouldShowAutomatically) {
+                waitForOnboardingDesktop()
             }
         }
 
         fun detach() {
+            attached = false
+            cancelOnboardingProbe()
             mainHandler.removeCallbacks(queuePollTask)
             resizeTask?.let { mainHandler.removeCallbacks(it) }
             autoCollapseTask?.let { mainHandler.removeCallbacks(it) }
@@ -497,7 +511,6 @@ object OmarchyX11Overlay {
             onboardingOverlay = null
             oskView = null
             imeAnchor = null
-            attached = false
             netExec.shutdownNow()
         }
 
@@ -959,7 +972,7 @@ object OmarchyX11Overlay {
             }
 
             addMenuItem("查看新手引导", "重播箭头指引教程（缩放、悬浮手柄、Super+K、豆包输入法）", "#a9b1d6") {
-                showOnboardingStep(0)
+                waitForOnboardingDesktop()
             }
 
             val scroll = ScrollView(activity).apply { addView(card) }
@@ -976,13 +989,125 @@ object OmarchyX11Overlay {
 
         // ==================== Interactive 4-Step Arrow-Guided Onboarding ====================
 
+        private fun waitForOnboardingDesktop() {
+            cancelOnboardingProbe()
+            hideOnboarding()
+            val readiness = OnboardingReadiness(SystemClock.elapsedRealtime())
+            onboardingReadiness = readiness
+            showOnboardingStatus(timedOut = false)
+            val desktopProbe = SwayDesktopProbe(File(activity.filesDir, "tmp"))
+            onboardingProbeJob = CoroutineScope(Dispatchers.Main).launch {
+                while (attached) {
+                    val viewport = onboardingViewport()
+                    val desktop = if (viewport != null) {
+                        val remaining = readiness.remainingMillis(SystemClock.elapsedRealtime())
+                        desktopProbe.sample(remaining.coerceAtMost(1_200))
+                    } else {
+                        null
+                    }
+                    val currentViewport = onboardingViewport()
+                    val currentDesktop = desktop.takeIf { viewport == currentViewport }
+                    when (readiness.observe(SystemClock.elapsedRealtime(), currentViewport, currentDesktop)) {
+                        OnboardingReadiness.State.READY -> {
+                            hideOnboardingStatus()
+                            showOnboardingStep(0)
+                            return@launch
+                        }
+                        OnboardingReadiness.State.TIMED_OUT -> {
+                            showOnboardingStatus(timedOut = true)
+                            return@launch
+                        }
+                        OnboardingReadiness.State.WAITING ->
+                            delay(readiness.remainingMillis(SystemClock.elapsedRealtime()).coerceAtMost(450))
+                        else -> return@launch
+                    }
+                }
+            }
+        }
+
+        private fun onboardingViewport(): OnboardingViewport? {
+            val host = overlayHost ?: return null
+            if (!host.isAttachedToWindow || !host.isLaidOut || host.width <= 0 || host.height <= 0 ||
+                !activity.hasWindowFocus() || X11Activity.getInstance() !== activity || !X11Activity.isConnected()
+            ) return null
+            val viewport = activity.lorieView ?: return null
+            if (!viewport.isAttachedToWindow || !viewport.isLaidOut || !viewport.isShown ||
+                !viewport.holder.surface.isValid || viewport.width <= 0 || viewport.height <= 0
+            ) return null
+            return OnboardingViewport(viewport.width, viewport.height)
+        }
+
+        private fun showOnboardingStatus(timedOut: Boolean) {
+            val host = overlayHost ?: return
+            hideOnboardingStatus()
+            val card = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(14), dp(8), dp(14), dp(8))
+                background = makeRounded("#F51a1b26", "#7aa2f7", 12, 1)
+                elevation = dp(12).toFloat()
+            }
+            card.addView(TextView(activity).apply {
+                text = if (timedOut) "桌面启动时间较长，请重新检测或暂时跳过引导。" else "正在等待桌面和顶部状态栏启动…"
+                setTextColor(Color.parseColor("#c0caf5"))
+                textSize = 13f
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            })
+            if (timedOut) {
+                val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER }
+                actions.addView(
+                    makeBarBtn("重试检测", true, ::waitForOnboardingDesktop),
+                    LinearLayout.LayoutParams(dp(84), dp(44)).apply { marginEnd = dp(8) }
+                )
+                actions.addView(
+                    makeBarBtn("暂时跳过", false, ::cancelOnboardingProbe),
+                    LinearLayout.LayoutParams(dp(84), dp(44))
+                )
+                card.addView(actions)
+            }
+            host.addView(card, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            ).apply { setMargins(dp(16), 0, dp(16), dp(18)) })
+            onboardingStatus = card
+        }
+
+        private fun hideOnboardingStatus() {
+            onboardingStatus?.let { overlayHost?.removeView(it) }
+            onboardingStatus = null
+        }
+
+        private fun cancelOnboardingProbe() {
+            onboardingProbeJob?.cancel()
+            onboardingProbeJob = null
+            onboardingReadiness?.cancel()
+            onboardingReadiness = null
+            hideOnboardingStatus()
+        }
+
         private fun hideOnboarding() {
             onboardingOverlay?.let { overlayHost?.removeView(it) }
             onboardingOverlay = null
         }
 
-        private fun finishOnboarding() {
-            prefs.edit().putBoolean("onboarding_v2_done", true).apply()
+        private fun onboardingProgress() = OnboardingProgress(
+            completed = prefs.getBoolean(ONBOARDING_COMPLETE, false),
+            optedOut = prefs.getBoolean(ONBOARDING_OPT_OUT, false)
+        )
+
+        private fun closeOnboarding(action: OnboardingExit) {
+            val readiness = onboardingReadiness ?: return
+            if (readiness.state != OnboardingReadiness.State.READY) return
+            if (action == OnboardingExit.COMPLETE) readiness.finish()
+            val before = onboardingProgress()
+            val after = before.after(action)
+            if (before != after) {
+                val editor = prefs.edit()
+                if (before.completed != after.completed) editor.putBoolean(ONBOARDING_COMPLETE, after.completed)
+                if (before.optedOut != after.optedOut) editor.putBoolean(ONBOARDING_OPT_OUT, after.optedOut)
+                editor.apply()
+            }
+            cancelOnboardingProbe()
             hideOnboarding()
         }
 
@@ -1028,7 +1153,7 @@ object OmarchyX11Overlay {
                 textSize = 12f
                 setTextColor(Color.parseColor("#9aa5ce"))
                 setPadding(dp(8), dp(4), dp(4), dp(4))
-                setOnClickListener { finishOnboarding() }
+                setOnClickListener { closeOnboarding(OnboardingExit.SKIP) }
             })
             card.addView(header)
 
@@ -1097,7 +1222,7 @@ object OmarchyX11Overlay {
                         background = makeRounded("#CC283457", "#7aa2f7", 8, 1)
                         setOnClickListener {
                             sendCmd("keybindings")
-                            finishOnboarding()
+                            closeOnboarding(OnboardingExit.PREVIEW)
                         }
                     }
                     card.addView(previewBtn, LinearLayout.LayoutParams(
@@ -1209,7 +1334,7 @@ object OmarchyX11Overlay {
                 setTextColor(Color.parseColor("#1a1b26"))
                 background = makeRounded("#7aa2f7", "#7aa2f7", 8, 1)
                 setOnClickListener {
-                    if (step < 3) showOnboardingStep(step + 1) else finishOnboarding()
+                    if (step < 3) showOnboardingStep(step + 1) else closeOnboarding(OnboardingExit.COMPLETE)
                 }
             }, LinearLayout.LayoutParams(0, dp(38), 1f))
             card.addView(navRow)

@@ -15,6 +15,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import zipfile
 
@@ -250,21 +251,121 @@ def verify_native_runtime(apk, repo, metadata):
     return dict(nativeRuntimeId=native["runtimeId"], nativeLibraryCount=3, nativeLibraries=native["files"])
 
 
+def checked_zip_members(archive):
+    members = archive.infolist()
+    names = [member.filename for member in members]
+    if len(names) != len(set(names)):
+        raise ValueError("APK has duplicate ZIP member names")
+    for member in members:
+        parts = member.filename.rstrip("/").split("/")
+        if any(part in {"", ".", ".."} for part in parts) or any(
+                ord(c) < 32 or ord(c) == 127 or c == "\\" for c in member.filename):
+            raise ValueError("APK has an ambiguous ZIP member path")
+        if not member.is_dir() and stat.S_IFMT(member.external_attr >> 16) not in {0, stat.S_IFREG}:
+            raise ValueError("APK has a non-regular ZIP member")
+    return members
+
+
+def check_guest_path(name):
+    parts = name.rstrip("/").split("/")
+    reserved = {"managed-core", "omarchy-node", "omarchy-chromium128", "rootfs.tar.zst"}
+    if reserved.intersection(parts) or "/usr/local/bin/" in "/" + "/".join(parts) + "/":
+        raise ValueError("Online installer contains a guest path: " + name)
+
+
+def check_installer_inputs(repo):
+    # Ignore rules affect Git only. Gradle merges these source directories even
+    # when an old AllInOne artifact there is untracked.
+    sources = repo / "apps/android/app/src"
+    for source in sources.glob("*/assets"):
+        for path in source.rglob("*"):
+            check_guest_path(path.relative_to(sources).as_posix())
+
+
+def check_tar_member(entry, asset):
+    path = "/" + entry.name.strip("/") + "/"
+    check_guest_path(entry.name)
+    if any(path.endswith(marker) for marker in ("/.tiny.yaml/", "/etc/os-release/", "/etc/passwd/",
+                                                "/usr/lib/os-release/", "/usr/bin/env/", "/bin/sh/")):
+        raise ValueError("Online installer contains a guest filesystem: " + asset + "/" + entry.name)
+
+
+def check_tar_contents(stream, asset):
+    try:
+        contents = tarfile.open(fileobj=stream, mode="r|*")
+    except tarfile.ReadError:
+        return  # Compressed application resources do not have to contain tar.
+    with contents:
+        for entry in contents:
+            check_tar_member(entry, asset)
+            if entry.isfile() and entry.size >= 4 and contents.extractfile(entry).read(4) == b"\x7fELF":
+                raise ValueError("Online installer tar contains an ELF executable: " + asset + "/" + entry.name)
+
+
+def check_guest_contents(archive, member):
+    if member.is_dir():
+        return
+    name = member.filename
+    with archive.open(member) as stream:
+        header = stream.read(512)
+        if header.startswith(b"\x7fELF"):
+            if not re.fullmatch(r"lib/arm64-v8a/lib[^/]+\.so", name):
+                raise ValueError("ELF executable outside the APK native library directory: " + name)
+            return
+        is_zstd = header.startswith(b"\x28\xb5\x2f\xfd")
+        if not is_zstd and not header.startswith((b"\x1f\x8b", b"BZh", b"\xfd7zXZ\x00")):
+            try:
+                tarfile.TarInfo.frombuf(header, "utf-8", "surrogateescape")
+            except tarfile.HeaderError:
+                return
+        stream.seek(0)
+        if not is_zstd:
+            check_tar_contents(stream, name)
+            return
+        # Python <3.14 tarfile supports gzip, bzip2 and xz natively. For a
+        # zstd member give the decoder a real input fd and inspect its stream.
+        with tempfile.TemporaryFile() as compressed:
+            shutil.copyfileobj(stream, compressed)
+            compressed.seek(0)
+            with subprocess.Popen(["zstd", "-qdc", "-M64MB"], stdin=compressed,
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+                try:
+                    check_tar_contents(process.stdout, name)
+                    # The decoder must also have succeeded for generic zstd resources.
+                    while process.stdout.read(1024 * 1024):
+                        pass
+                    if process.wait() != 0:
+                        raise ValueError("Cannot inspect zstd asset: " + name)
+                finally:
+                    process.stdout.close()
+
+
+def verify_online_installer(apk, repo):
+    catalog_name = "assets/initial-images.json"
+    catalog = checked_repo_file(repo, "apps/android/app/src/main/" + catalog_name)
+    with zipfile.ZipFile(apk) as archive:
+        members = checked_zip_members(archive)
+        for member in members:
+            check_guest_path(member.filename)
+            check_guest_contents(archive, member)
+        packaged = archive.getinfo(catalog_name)
+        if packaged.file_size != catalog.stat().st_size or packaged.file_size > 256 * 1024:
+            raise ValueError("APK bundled image catalog has an unexpected size")
+        data = archive.read(packaged)
+        if data != catalog.read_bytes():
+            raise ValueError("APK bundled image catalog differs from the checkout")
+        parsed = json.loads(data, object_pairs_hook=unique_json_object)
+        if (not isinstance(parsed, dict) or type(parsed.get("schemaVersion")) is not int
+                or parsed["schemaVersion"] != 1 or not isinstance(parsed.get("images"), list)):
+            raise ValueError("Invalid APK bundled image catalog")
+    return dict(catalogSha256=hashlib.sha256(data).hexdigest(), managedFileCount=0, managedPayloadBytes=0)
+
+
 def verify_managed_payload(apk, source_sha):
     prefix = "assets/managed-core/"
     payload_prefix = prefix + "files/"
     with zipfile.ZipFile(apk) as archive:
-        members = archive.infolist()
-        names = [member.filename for member in members]
-        if len(names) != len(set(names)):
-            raise ValueError("APK has duplicate ZIP member names")
-        for member in members:
-            parts = member.filename.rstrip("/").split("/")
-            if any(part in {"", ".", ".."} for part in parts) or any(
-                    ord(c) < 32 or ord(c) == 127 or c == "\\" for c in member.filename):
-                raise ValueError("APK has an ambiguous ZIP member path")
-            if not member.is_dir() and stat.S_IFMT(member.external_attr >> 16) not in {0, stat.S_IFREG}:
-                raise ValueError("APK has a non-regular ZIP member")
+        members = checked_zip_members(archive)
         manifest = json.loads(archive.read(prefix + "manifest.json"), object_pairs_hook=unique_json_object)
         if not isinstance(manifest, dict):
             raise ValueError("APK managed manifest must be an object")
@@ -319,11 +420,11 @@ def verify_managed_payload(apk, source_sha):
     return dict(managedSourceSha=source_sha, managedFileCount=len(expected), managedPayloadBytes=payload_bytes)
 
 
-def verify(apk, metadata_path, build_tools, repo):
+def verify(apk, metadata_path, build_tools, repo, delivery):
     metadata = json.loads(metadata_path.read_text())
     # Clear any old success receipt before a retry, including a failed retry.
     metadata["upgradeable"] = False
-    for key in ("certificateSha256", "managedSourceSha", "managedFileCount", "managedPayloadBytes",
+    for key in ("delivery", "catalogSha256", "certificateSha256", "managedSourceSha", "managedFileCount", "managedPayloadBytes",
                 "nativeRuntimeId", "nativeLibraryCount", "nativeLibraries"):
         metadata.pop(key, None)
     write_metadata(metadata_path, metadata)
@@ -340,9 +441,17 @@ def verify(apk, metadata_path, build_tools, repo):
     package = re.search(r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging, re.M)
     if not package or package.groups() != (metadata["packageName"], str(metadata["versionCode"]), metadata["versionName"]):
         raise ValueError("APK package/version does not match prepared source metadata")
-    metadata.update(verify_managed_payload(apk, metadata["sourceSha"]))
+    if delivery is None:
+        catalog = repo / "apps/android/app/src/main/assets/initial-images.json"
+        delivery = "online-installer" if catalog.exists() else "managed"
+    if delivery == "online-installer":
+        if not metadata.get("expectedNativeRuntime"):
+            raise ValueError("Online installer requires the native PRoot triplet")
+        metadata.update(verify_online_installer(apk, repo))
+    else:
+        metadata.update(verify_managed_payload(apk, metadata["sourceSha"]))
     metadata.update(verify_native_runtime(apk, repo, metadata))
-    metadata.update(certificateSha256=fingerprint, upgradeable=metadata["signingMode"] == "stable-test")
+    metadata.update(delivery=delivery, certificateSha256=fingerprint, upgradeable=metadata["signingMode"] == "stable-test")
     write_metadata(metadata_path, metadata)
     print(f"Verified APK {metadata['versionName']} ({metadata['signingMode']})")
 
@@ -352,12 +461,15 @@ def main():
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
     commands = parser.add_subparsers(dest="action", required=True)
     commands.add_parser("version")
+    commands.add_parser("check-installer-inputs")
     prep = commands.add_parser("prepare")
     prep.add_argument("--output-dir", type=Path, required=True)
     generate = commands.add_parser("generate-keystore")
     generate.add_argument("--output-dir", type=Path, required=True)
     generate.add_argument("--openssl", default="openssl")
     check = commands.add_parser("verify")
+    check.add_argument("--delivery", choices=("managed", "online-installer"),
+                       help="Defaults to online-installer in checkouts with an image catalog")
     check.add_argument("--apk", type=Path, required=True)
     check.add_argument("--metadata", type=Path, required=True)
     check.add_argument("--build-tools", type=Path, required=True)
@@ -365,13 +477,15 @@ def main():
     try:
         if args.action == "version":
             print(json.dumps(version(args.repo.resolve()), sort_keys=True))
+        elif args.action == "check-installer-inputs":
+            check_installer_inputs(args.repo.resolve())
         elif args.action == "prepare":
             prepare(args.repo.resolve(), args.output_dir.absolute())
         elif args.action == "generate-keystore":
             generate_keystore(args.output_dir.absolute(), args.openssl)
         else:
-            verify(args.apk, args.metadata, args.build_tools, args.repo.resolve())
-    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as error:
+            verify(args.apk, args.metadata, args.build_tools, args.repo.resolve(), args.delivery)
+    except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, tarfile.TarError) as error:
         # Do not print arbitrary tool output, key bytes, passwords or encoded secrets.
         print(f"Android build preparation failed: {error}", file=sys.stderr)
         return 1

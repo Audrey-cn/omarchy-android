@@ -1,31 +1,7 @@
-name: Build Omarchy Ubuntu 24.04 ARM64 Container (.tar.zst)
+name: Build Omarchy Initial Desktop Image
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    paths:
-      - 'core/**'
-      - 'scripts/stage-core.sh'
-      - 'scripts/android-build.py'
-      - 'scripts/prepare-android-managed.py'
-      - 'scripts/browser-bundle-sources.json'
-      - 'scripts/build-browser-bundle.py'
-      - 'runtime/proot-omarchy/**'
-      - 'apps/android/**'
-      - '.github/workflows/build-container.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'core/**'
-      - 'scripts/stage-core.sh'
-      - 'scripts/android-build.py'
-      - 'scripts/prepare-android-managed.py'
-      - 'scripts/browser-bundle-sources.json'
-      - 'scripts/build-browser-bundle.py'
-      - 'runtime/proot-omarchy/**'
-      - 'apps/android/**'
-      - '.github/workflows/build-container.yml'
 
 permissions:
   contents: read
@@ -35,27 +11,47 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install host build tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y debootstrap zstd curl tar
 
+      - name: Build pinned Chromium, Playwright and Node from verified public sources
+        run: |
+          python3 scripts/build-browser-bundle.py --sources scripts/browser-bundle-sources.json \
+            --cache-dir "$RUNNER_TEMP/browser-sources" --output-dir "$RUNNER_TEMP/browser-bundle"
+
       - name: Build clean Ubuntu 24.04 ARM64 Omarchy rootfs
         run: |
           ROOTFS=/tmp/omarchy-rootfs
-          sudo mkdir -p "$ROOTFS"
+          sudo mkdir "$ROOTFS"
           sudo debootstrap --arch=arm64 --variant=minbase noble "$ROOTFS" http://ports.ubuntu.com/ubuntu-ports
 
           sudo bash scripts/stage-core.sh "$ROOTFS"
+          sudo install -d "$ROOTFS/usr/share/doc/omarchy-image"
+          sudo install -m644 LICENSE LICENSES.md apps/android/COPYING "$ROOTFS/usr/share/doc/omarchy-image/"
+          test -d "$ROOTFS/opt" && test ! -L "$ROOTFS/opt"
+          for component in omarchy-node omarchy-chromium128; do
+            test ! -e "$ROOTFS/opt/$component"
+            sudo mv -T "$RUNNER_TEMP/browser-bundle/managed-core/files/opt/$component" "$ROOTFS/opt/$component"
+            sudo chown -R 0:0 "$ROOTFS/opt/$component"
+          done
 
-          sudo cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
+          sudo cp -L --remove-destination /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
           sudo mount --bind /dev "$ROOTFS/dev"
           sudo mount --bind /proc "$ROOTFS/proc"
           sudo mount --bind /sys "$ROOTFS/sys"
 
           sudo chroot "$ROOTFS" /bin/bash -e <<'CHROOT'
+          set -o pipefail
           export DEBIAN_FRONTEND=noninteractive
+          DOC=/usr/share/doc/omarchy-image
+          SOURCES="$DOC/upstream-components.tsv"
+          printf 'component\tversion\tupstream source\n' > "$SOURCES"
+          record_source() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$SOURCES"; }
           cat > /etc/apt/sources.list <<'SRC'
           deb http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
           deb http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
@@ -131,6 +127,16 @@ jobs:
           ninja -C build -j$(nproc)
           ninja -C build install
           cd /
+          for dir in /tmp/build-sway/*; do
+            component=${dir##*/}
+            install -d "$DOC/$component"
+            find "$dir" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'COPYING*' \) -exec cp -t "$DOC/$component" {} +
+          done
+          record_source wayland 1.23.1 https://gitlab.freedesktop.org/wayland/wayland/-/tags/1.23.1
+          record_source wayland-protocols 1.38 https://gitlab.freedesktop.org/wayland/wayland-protocols/-/tags/1.38
+          record_source libinput 1.26.2 https://gitlab.freedesktop.org/libinput/libinput/-/tags/1.26.2
+          record_source wlroots 0.18.2 https://gitlab.freedesktop.org/wlroots/wlroots/-/tags/0.18.2
+          record_source sway 1.10.1 https://github.com/swaywm/sway/tree/1.10.1
           rm -rf /tmp/build-sway
           /usr/local/bin/sway --version
 
@@ -142,17 +148,30 @@ jobs:
 
           # Install JetBrainsMono Nerd Font + Omarchy icon font (fixes Waybar & UI icons)
           mkdir -p /usr/share/fonts/truetype/omarchy /usr/share/fonts/truetype/jetbrains-mono-nerd
-          curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" | tar -xJ -C /usr/share/fonts/truetype/jetbrains-mono-nerd --wildcards '*NerdFont-Regular.ttf' '*NerdFont-Bold.ttf' '*NerdFontMono-Regular.ttf' '*NerdFontPropo-Regular.ttf' || \
-            curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" | tar -xJ -C /usr/share/fonts/truetype/jetbrains-mono-nerd
+          FONT_VER=$(curl -fsSL https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest | jq -er .tag_name)
+          FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/download/$FONT_VER/JetBrainsMono.tar.xz"
+          record_source JetBrainsMonoNerdFont "$FONT_VER" "$FONT_URL"
+          mkdir /tmp/nerd-font
+          curl -fsSL --retry 3 "$FONT_URL" | tar -xJ -C /tmp/nerd-font
+          find /tmp/nerd-font -type f \( -name '*NerdFont-Regular.ttf' -o -name '*NerdFont-Bold.ttf' -o -name '*NerdFontMono-Regular.ttf' -o -name '*NerdFontPropo-Regular.ttf' \) -exec cp -t /usr/share/fonts/truetype/jetbrains-mono-nerd {} +
+          test -n "$(ls -A /usr/share/fonts/truetype/jetbrains-mono-nerd)"
+          mkdir "$DOC/JetBrainsMonoNerdFont"
+          find /tmp/nerd-font -type f \( -iname '*license*' -o -iname 'OFL*' \) -exec cp -t "$DOC/JetBrainsMonoNerdFont" {} +
 
-          # Install lazygit ARM64
-          LG_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/jesseduffield/lazygit/releases/latest" | sed 's|.*/tag/v||')
-          curl -fsSL "https://github.com/jesseduffield/lazygit/releases/download/v${LG_VER}/lazygit_${LG_VER}_Linux_arm64.tar.gz" -o /tmp/lg.tar.gz
-          tar -xzf /tmp/lg.tar.gz -C /usr/local/bin lazygit && chmod 755 /usr/local/bin/lazygit && rm -f /tmp/lg.tar.gz
+          # Install lazygit and the license shipped with the upstream binary.
+          curl -fsSL --retry 3 https://api.github.com/repos/jesseduffield/lazygit/releases/latest -o /tmp/lazygit-release.json
+          LG_TAG=$(jq -er .tag_name /tmp/lazygit-release.json)
+          LG_URL=$(jq -er '[.assets[] | select(.name | ascii_downcase | endswith("_linux_arm64.tar.gz")) | .browser_download_url] | select(length == 1) | .[0]' /tmp/lazygit-release.json)
+          record_source lazygit "$LG_TAG" "$LG_URL"
+          mkdir /tmp/lazygit "$DOC/lazygit"
+          curl -fsSL --retry 3 "$LG_URL" | tar -xz -C /tmp/lazygit
+          install -m755 /tmp/lazygit/lazygit /usr/local/bin/lazygit
+          install -m644 /tmp/lazygit/LICENSE "$DOC/lazygit/"
 
           # Install official Omarchy assets; this checkout's core was staged before chroot
           mkdir -p /root/.local/share/applications /root/.local/share/icons/hicolor/256x256/apps /usr/share/pixmaps /root/.config/sway /root/.config/fcitx5 /root/.config/omarchy /root/.config/alacritty
           git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
+          record_source omarchy "$(git -C /root/.local/share/omarchy rev-parse HEAD)" https://github.com/basecamp/omarchy
           find /root/.local/share/omarchy -maxdepth 3 -name "*.ttf" -exec cp -f {} /usr/share/fonts/truetype/omarchy/ \;
           fc-cache -f
 
@@ -192,91 +211,58 @@ jobs:
           DESK
 
           /usr/local/bin/omarchy-fix-desktops || true
+          dpkg-query -W -f='${binary:Package}\t${Version}\n' > "$DOC/packages.tsv"
           apt-get clean
           rm -rf /var/lib/apt/lists/* /tmp/*
           CHROOT
 
-          sudo umount -lf "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
-          sudo bash -c "printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n' > '$ROOTFS/etc/resolv.conf'"
+          sudo chroot "$ROOTFS" /usr/local/bin/omarchy-playwright128 check
+          sudo chroot "$ROOTFS" /usr/bin/env HOME=/tmp /opt/omarchy-chromium128/browsers/chromium-1129/chrome-linux/chrome --version
+          sudo umount "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
+          # Chroot keeps absolute symlinks inside the guest during final cleanup.
+          sudo chroot "$ROOTFS" /bin/bash -e <<'CLEAN'
+          rm -f /etc/machine-id /var/lib/dbus/machine-id /var/lib/systemd/random-seed
+          touch /etc/machine-id
+          chmod 644 /etc/machine-id
+          ln -s /etc/machine-id /var/lib/dbus/machine-id
+          rm -f /etc/resolv.conf
+          printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf
+          CLEAN
           sudo cp apps/android/container/omarchy.tiny.yaml "$ROOTFS/.tiny.yaml"
 
-          echo "Packing rootfs.tar.zst with top-level .tiny.yaml FIRST (no ./ prefix)..."
-          sudo tar --numeric-owner -C "$ROOTFS" -cf - .tiny.yaml --exclude='./.tiny.yaml' --transform='s|^\./||' . | zstd -T0 -6 -o /tmp/rootfs.tar.zst
-          tar --zstd -tf /tmp/rootfs.tar.zst | sed -n '1,5p'
-          ls -lh /tmp/rootfs.tar.zst
+          sudo python3 scripts/prepare-initial-image.py --rootfs "$ROOTFS" --source-sha "$GITHUB_SHA" \
+            --output-dir "$RUNNER_TEMP/initial-image"
 
-      - name: Upload Container Artifact
+      - name: Upload verified initial installation media
         uses: actions/upload-artifact@v4
         with:
-          name: omarchy-ubuntu24-arm64-container
-          path: /tmp/rootfs.tar.zst
+          name: initial-desktop-image-${{ github.sha }}
+          path: ${{ runner.temp }}/initial-image/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
-  build-all-in-one-apk:
+  publish:
+    if: github.repository == 'Audrey-cn/omarchy-android' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     needs: build-rootfs
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/android
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          name: omarchy-ubuntu24-arm64-container
-          path: apps/android/app/src/main/assets
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-      - name: Prepare APK version and test signing
-        id: android-build
+          name: initial-desktop-image-${{ github.sha }}
+          path: image
+      - name: Publish versioned initial image
+        working-directory: image
         env:
-          OMARCHY_ANDROID_TEST_KEYSTORE_B64: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_B64 || '' }}
-          OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD || '' }}
-        run: python3 ../../scripts/android-build.py prepare --output-dir "$RUNNER_TEMP/omarchy-android-signing"
-      - name: Verify source archives and build pinned browser payload
+          GH_TOKEN: ${{ github.token }}
         run: |
-          BUNDLE_DIR="$RUNNER_TEMP/omarchy-browser-managed-payload"
-          python3 ../../scripts/build-browser-bundle.py \
-            --sources ../../scripts/browser-bundle-sources.json \
-            --cache-dir "$RUNNER_TEMP/omarchy-browser-source-cache" \
-            --output-dir "$BUNDLE_DIR"
-          python3 - "$BUNDLE_DIR/managed-core/manifest.json" "$OMARCHY_ANDROID_SOURCE_SHA" <<'PY'
-          import json, sys
-          with open(sys.argv[1]) as stream:
-              manifest = json.load(stream)
-          if manifest["sourceSha"] != sys.argv[2]:
-              raise SystemExit("Browser payload source SHA differs from prepared APK metadata")
-          print("Prepared pinned browser payload:", len(manifest["files"]), "files from", manifest["sourceSha"])
-          PY
-          printf 'OMARCHY_ANDROID_MANAGED_PAYLOAD_DIR=%s\n' "$BUNDLE_DIR" >> "$GITHUB_ENV"
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Install Android SDK 37 & NDK/CMake
-        run: |
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0" "cmake;3.22.1" "ndk;27.2.12479018" >/dev/null || true
-      - name: Assemble All-in-One OmarchyAndroid APK
-        env:
-          OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD || '' }}
-        run: |
-          chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug --no-daemon
-          mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
-          python3 -c 'import zipfile; z = zipfile.ZipFile("app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk"); assert z.getinfo("assets/rootfs.tar.zst").file_size > 0'
-          ls -lh app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
-      - name: Verify APK certificate and version
-        run: |
-          python3 ../../scripts/android-build.py verify --apk app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk --metadata "$OMARCHY_ANDROID_BUILD_METADATA" --build-tools "$ANDROID_SDK_ROOT/build-tools/36.0.0"
-          cp "$OMARCHY_ANDROID_BUILD_METADATA" app/build/outputs/apk/debug/build-metadata.json
-      - name: Upload All-in-One APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: OmarchyAndroid-AllInOne-apk${{ steps.android-build.outputs.artifact_suffix }}
-          path: |
-            apps/android/app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
-            apps/android/app/build/outputs/apk/debug/build-metadata.json
-          if-no-files-found: error
-      - name: Remove runner signing key
-        if: always()
-        run: rm -f "$RUNNER_TEMP/omarchy-android-signing/test-signing.p12"
+          sha256sum -c SHA256SUMS
+          tag="desktop-ubuntu24-${GITHUB_SHA:0:12}"
+          jq -e --arg sha "$GITHUB_SHA" --arg tag "$tag" '.sourceSha == $sha and .id == $tag' image.json
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title "Omarchy Ubuntu 24.04 · ${GITHUB_SHA:0:12}" \
+            --notes "Initial installation media for the ARM64 Android app (version code 64 or newer). Source commit: $GITHUB_SHA." \
+            rootfs.tar.zst image.json catalog.json SHA256SUMS source.json browser-sources.json \
+            packages.tsv upstream-components.tsv LICENSES.md

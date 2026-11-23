@@ -1,16 +1,15 @@
 # Omarchy Android
 
-在 Android 手机、折叠屏与平板上运行 Omarchy 风格的 Ubuntu ARM64 Wayland 桌面。桌面核心、Android 一体包和 Termux 部署方案在同一个仓库开发与维护。
+在 Android 手机、折叠屏与平板上运行 Omarchy 风格的 Ubuntu ARM64 Wayland 桌面。桌面核心、免 Root 一体 App 和 Root chroot 运行时在同一个仓库开发与维护。
 
 ## 选择使用方式
 
-| 方式 | 项目位置 | 适用场景 |
+| 正式路线 | 项目位置 | 使用方式与状态 |
 | --- | --- | --- |
-| 免 Root 一体包 | [`apps/android/`](apps/android/) | APK 内置 PRoot、Termux:X11 和 Ubuntu 桌面镜像，无需额外安装 Termux |
-| Termux 部署 | [`install.sh`](install.sh)、[`runtime/`](runtime/) | 使用外部 Termux + Termux:X11，选择 Root chroot 或免 Root proot-distro |
-| Omarchy Deck 辅助 APK | [`apps/deck/`](apps/deck/) | 为外部 Termux:X11 桌面提供悬浮球、悬浮键盘和输入桥接 |
+| 免 Root 一体 App | [`apps/android/`](apps/android/) | APK 集成 PRoot、X11 与桌面入口，无需额外安装 Termux；新流程在首次运行时选择、下载或离线导入桌面镜像 |
+| Root chroot | [`install.sh`](install.sh)、[`runtime/chroot/`](runtime/chroot/) | 为已有 Root 环境提供 chroot 运行时；完整冷安装与云端镜像、实机集成仍待完成 |
 
-一体包与 Deck 是不同应用：一体包包名为 `com.omarchy.android`，Deck 包名为 `com.omarchy.deck`。
+外部 Termux + Termux:X11 的免 Root PRoot 路线保留为开发、调试和迁移入口。可选的 [Omarchy Deck](apps/deck/) 为外部 X11 提供悬浮输入工具，不是第三条正式产品路线。一体 App 包名为 `com.omarchy.android`，Deck 包名为 `com.omarchy.deck`。
 
 ## 实机效果
 
@@ -25,7 +24,7 @@
 - Sway 平铺窗口管理、Waybar 顶栏、GtkLayerShell 状态弹窗与 6 列原生应用网格。
 - Omarchy 主题与壁纸，联动 Sway、Waybar、Wofi、App Grid 和 Alacritty 配色。
 - Fcitx5 中文拼音、Android 输入法穿透、悬浮键盘与横竖屏控制。
-- Alacritty、Thunar、Neovim、Lazygit、imv、Zathura、mpv；免 Root 一体包内置固定 Chromium 128，保留轻量 WebKitGTK 浏览器。
+- Alacritty、Thunar、Neovim、Lazygit、imv、Zathura、mpv；免 Root 初装镜像包含配套 Chromium 128，保留轻量 WebKitGTK 浏览器。
 - 按需安装 CC Switch、Codex / ChatGPT Desktop、Claude Desktop、Hermes Desktop 等 AI 工具。
 - Root 路线提供 `evdev` 外接键盘与触控板独占，支持 `Alt` / `Super` 桌面快捷键。
 
@@ -33,32 +32,32 @@
 
 ## 快速开始
 
-### 免 Root 一体包
+### 免 Root 一体 App
 
-当前 K20 Pro 验证版为 [v1.0.62-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.62-test)，下载附件 `OmarchyAndroid-1.0.62-test.apk`，仅支持 `arm64-v8a`。一体包首次打开会自动导入桌面镜像；本轮已验证持续签名升级、数据保留和真实 Hermes Agent，详见[实机记录](docs/reports/k20-round2-20261123.md)。
+下载以主仓库 [Releases](https://github.com/Audrey-cn/omarchy-android/releases) 的实际附件为准，仅支持 `arm64-v8a`。已记录的 K20 Pro 验证版 [v1.0.62-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.62-test) 是内置镜像的旧交付方式，其同签名升级、数据保留和真实 Hermes Agent 验证见[实机记录](docs/reports/k20-round2-20261123.md)。
 
-构建工作流生成的 `OmarchyAndroid-apk` 是普通容器壳包；没有嵌入 `rootfs.tar.zst` 时，需要另行导入容器。`OmarchyAndroid-AllInOne-apk` 才是一体包构建产物。详见[应用说明](apps/android/README.md)。
+新的精简 APK 提供首次安装页面：选择初始镜像 → 下载并安装，支持持久断点、暂停后继续和匹配镜像的离线导入。APK 保留 Android 界面、内嵌 X11 与 PRoot，桌面及浏览器内容随初装镜像分发。首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)和[镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，支持 App 版本代码 64 及以上，随包目录也已加入同一镜像。精简 APK 云端构建与布局校验已通过；新的同签名 App Release 和 K20 实机验收仍待完成。操作说明和发布边界见[首次安装与更新](docs/initial-install.md)。
 
-仓库迁移和本地构建不会自动创建 GitHub Release；发布后的安装包以 Releases 实际附件为准。
+后续 App、X11 和 PRoot 更新沿用同一持久签名密钥，通过 Android 覆盖安装保留现有桌面与个人数据；日常启动不再同步 guest 文件或重新导入镜像。Ubuntu 内的软件使用其 APT 软件源维护。镜像定期修正后供新安装选择，已有桌面无需跟随每次镜像重发。
 
-### Termux 部署
+### Root chroot
 
-先在 Android 上安装 Termux 和 Termux:X11，再在设备的 Termux 环境运行：
+Root 路线目前提供运行时和桌面部署脚本，依赖已有可用 Ubuntu 环境、Root 和外部 Termux/X11 配套；从零下载、导入系统的完整安装流程尚未交付。具备这些前提的开发环境可从 [`install.sh`](install.sh) 的 `--mode chroot` 入口继续集成，部署现状见[发行与 Root 记录](docs/discussions/2026-11-23-distribution-and-root.md)。
+
+### 开发与迁移：外部 Termux
+
+免 Root 分体部署可在已安装 Termux 和 Termux:X11 的设备上运行：
 
 ```bash
 git clone https://github.com/Audrey-cn/omarchy-android.git
 cd omarchy-android
-./install.sh
+./install.sh --mode proot
 
 # 安装时同时加入 AI 桌面工具
-./install.sh --with-ai
-
-# 手动选择运行时
-./install.sh --mode chroot
-./install.sh --mode proot
+./install.sh --mode proot --with-ai
 ```
 
-Root `chroot` 与免 Root `proot-distro` 共用桌面核心；Root 路线另有硬件键盘独占等扩展。Deck 可作为这条路线的辅助应用，不能代替 Termux 或 Termux:X11。
+这一路径用于开发、调试和迁移；Deck 可辅助输入，不能代替 Termux 或 Termux:X11。
 
 ### 常用快捷键
 
@@ -83,17 +82,17 @@ omarchy-android/
 ├── apps/
 │   ├── android/              # 免 Root 一体包：Gradle 工程、容器配置、原生库
 │   └── deck/                 # 外部 Termux:X11 使用的辅助 APK
-├── install.sh                # Termux 路线安装入口
+├── install.sh                # Root 集成与外部 Termux 开发部署入口
 ├── scripts/
 │   ├── stage-core.sh         # 将本次 checkout 的 core 安装到指定 rootfs
 │   └── backup-personal.sh    # 个人配置迁移脚本，生成的备份不入库
-├── .github/workflows/        # Android 壳包、rootfs + 一体包、Deck 构建
+├── .github/workflows/        # 精简 App、独立初装镜像与 Deck 构建
 └── docs/
     ├── ARCHITECTURE.md        # 两种运行栈与共享核心
     └── DEVELOPMENT.md         # 开发、构建与迁移说明
 ```
 
-Android 一体包镜像构建直接读取本仓库的 `core/`，与 App 使用同一次 checkout，无需维护第二个核心仓库副本。桌面和 Android 界面的修改可以放在同一个提交中。
+初装镜像从本仓库的 `core/` 构建，并记录来源提交、配套组件及校验信息。镜像构建与频繁的 App 构建独立；镜像 Release 不占用 App 的 latest 发布入口。桌面和 Android 界面的修改仍可放在同一个提交中。
 
 ## 开发与维护
 

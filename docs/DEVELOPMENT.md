@@ -2,7 +2,7 @@
 
 ## 单仓开发
 
-后续统一在 `Audrey-cn/omarchy-android` 开发。共享桌面改 `core/`；Termux 启动与硬件支持改 `runtime/`；Android 一体包界面和容器管理改 `apps/android/`；外部桌面的辅助悬浮应用改 `apps/deck/`。
+后续统一在 `Audrey-cn/omarchy-android` 开发。共享桌面改 `core/`；Root 与外部 Termux 启动适配改 `runtime/`；Android 一体 App 界面和首次安装改 `apps/android/`；外部桌面的辅助悬浮应用改 `apps/deck/`。
 
 Android 项目通过 Git subtree 导入，保留原仓提交历史；这不是需要另行初始化的 Git submodule。`git log --all` 可查看合并后的历史。
 
@@ -10,11 +10,13 @@ Android 项目通过 Git subtree 导入，保留原仓提交历史；这不是�
 
 ## 默认使用云端构建
 
-本项目已有的开发流程是提交到 GitHub，由 Actions 构建 rootfs 和 APK，再下载产物到 Android 设备验证。本地 JDK/Android SDK 并非采用该流程的前置条件；下文的 Gradle 命令适用于需要本地编译时。
+默认流程是提交到 GitHub，由 Actions 独立构建精简 APK 和干净初装镜像，再下载产物到 Android 设备验证。本地 JDK/Android SDK 并非采用该流程的前置条件；下文的 Gradle 命令适用于需要本地编译时。
 
-统一仓库已经推送并完成云端 rootfs 与一体 APK 构建。合并后的构建工作流支持 main 的 push、面向 main 的 PR 和手动 dispatch。feature 分支单独 push 不会触发 main 的 push 过滤，可用 PR 验证合并版；手动 dispatch 需要工作流先在默认分支注册，再选择目标分支。
+`build-android.yml` 支持匹配路径的 main push、面向 main 的 PR 和手动 dispatch。`build-container.yml` 仅手动触发，避免频繁 App 变更重建整个系统。feature 分支单独 push 不会触发 main 的 push 过滤；手动 dispatch 需要工作流先在默认分支注册，再选择目标分支。
 
-## 编译 Android 容器壳
+首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)与[固定镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，随包目录已纳入同一份真实元数据。约 33.7 MB 的精简 APK 云端构建及布局校验已通过；新的同签名 App Release 和 K20 实机验收仍待完成。当前状态和用户流程见[首次安装与更新](initial-install.md)。
+
+## 编译精简 Android App
 
 在仓库根目录运行：
 
@@ -25,24 +27,26 @@ cd apps/android
 
 Android Studio 应打开 `apps/android/`，而不是仓库根目录。当前 CI 使用 JDK 21、Android 37 平台、NDK 27.2.12479018 与 CMake 3.22.1；版本以工程配置及 `build-android.yml` 为准；本机 SDK 路径写到 `apps/android/local.properties`，不要提交。
 
-输出为 `apps/android/app/build/outputs/apk/debug/app-debug.apk`。工程随仓库保存所需原生库；没有 `assets/rootfs.tar.zst` 时，该产物是容器壳，需另行导入容器。
+输出为 `apps/android/app/build/outputs/apk/debug/app-debug.apk`。APK 包含 Android 界面、内嵌 X11、配套原生 PRoot 与 `initial-images.json`，不包含 rootfs 或受管 Linux 文件载荷。Gradle 在构建前拒绝旧构建遗留的这些资产；CI 以 `scripts/android-build.py verify --delivery online-installer` 检查实际 APK 布局、配套原生库、签名与版本。
 
-## 编译包含镜像的一体包
+可信 main 构建使用持续保存的同一测试签名密钥，PR 和其他非可信上下文不取得该密钥，artifact 带相应签名模式后缀。只有证书兼容且版本符合 Android 升级规则的新 APK 才能覆盖既有安装。不要将签名密钥或口令提交入库。
 
-使用根目录的 **Build Omarchy Ubuntu 24.04 ARM64 Container** 工作流（`.github/workflows/build-container.yml`）：
+App 普通启动不再调用旧的 guest 受管文件同步。已有桌面脚本、浏览器、用户修改与旧同步记录留在原处；App/X11/PRoot 更新不重导入或替换 rootfs。Ubuntu 软件包在现有 guest 内使用其 APT 源维护。
 
-1. ARM64 job 构建 Ubuntu rootfs，并通过 `scripts/stage-core.sh` 装入本次 checkout 的 `core/`。
-2. 容器配置来自 `apps/android/container/omarchy.tiny.yaml`。
-3. 后续 APK job 将 `rootfs.tar.zst` 下载到 `apps/android/app/src/main/assets/`，再编译 Android 工程。
-4. 下载 `OmarchyAndroid-AllInOne-apk` artifact，内含 `OmarchyAndroid-AllInOne.apk`。
+## 构建独立初装镜像
 
-本地已取得对应镜像时，也可将它放到以下位置后运行上述 Gradle 命令：
+手动运行 **Build Omarchy Initial Desktop Image**（`.github/workflows/build-container.yml`）：
 
-```text
-apps/android/app/src/main/assets/rootfs.tar.zst
-```
+1. ARM64 job 从干净 Ubuntu 24.04 基础构建 rootfs，通过 `scripts/stage-core.sh` 装入本次 checkout 的 `core/`，安装桌面依赖与配套浏览器。
+2. 容器配置来自 `apps/android/container/omarchy.tiny.yaml`。镜像记录源码提交、软件清单和许可，不使用手机系统或个人备份作构建输入。
+3. `scripts/prepare-initial-image.py` 生成 `rootfs.tar.zst`、`image.json`、`catalog.json`、`SHA256SUMS` 与来源/许可附件，artifact 为 `initial-desktop-image-<完整提交 SHA>`。
+4. 仅主仓可信 main 的手动构建执行发布：版本标签为 `desktop-ubuntu24-<sha12>`，设置 prerelease 和 `latest=false`，不抢占 App 更新入口。
 
-该镜像、APK、构建目录与本机签名密钥均不入库。只修改 `core/` 后重新编译 Android 壳，不会更新已有镜像；需要先重建 rootfs，再构建一体包。
+镜像与 APK 分开发行，不再生成 `OmarchyAndroid-AllInOne-apk`。修正 `core/` 或镜像组件后重建初装镜像；已有用户不会因安装新 APK 自动取得这些 guest 文件修正，也不会因镜像重发而重装系统。此轮不建设整套 rootfs 更新或迁移管理器。
+
+首次安装目录 schema 为 1，条目包含镜像 ID、ABI、最低 App 版本、精确字节数、解压大小、SHA256、源码 SHA 与固定 HTTPS 下载地址。首批镜像的 `minAppVersionCode` 设置为 64；随包 `apps/android/app/src/main/assets/initial-images.json` 只应纳入已发布且核对过的真实元数据。App 显式刷新读取主仓 `desktop-images` Release 的 `catalog.json`；该固定目录入口需单独维护，不能假定版本化镜像发布后它已自动更新。保留随包目录作为离线回退，允许目录提供一个或多个兼容初始版本。
+
+镜像、APK、构建目录与本机签名密钥均不入库。首次安装下载支持持久断点；离线导入仍需匹配所选目录条目的大小与校验值。验证时使用隔离测试目录，不清空已有个人桌面。
 
 若在 Linux 上自行准备 rootfs，可从仓库根目录将当前核心装入一个已存在的镜像目录：
 
@@ -68,8 +72,8 @@ Deck 用于外部 Termux:X11 桌面，包名与一体包不同。它不包含 ro
 
 | 工作流 | 内容 | 产物 |
 | --- | --- | --- |
-| `build-android.yml` | Android 工程编译 | `OmarchyAndroid-apk`（普通壳包） |
-| `build-container.yml` | 同仓 core + Ubuntu rootfs + Android 一体包 | 容器镜像及 `OmarchyAndroid-AllInOne-apk` |
+| `build-android.yml` | 精简 APK 编译、单测、布局/原生库/签名/版本校验 | `OmarchyAndroid-apk`，非可信签名模式有后缀 |
+| `build-container.yml` | 手动构建干净 rootfs、同仓 core 和浏览器；可信 main 发布非 latest 镜像 | `initial-desktop-image-<完整提交 SHA>` 与版本化镜像 Release |
 | `build-apk.yml` | Deck 编译 | `OmarchyDeck-apk` |
 | `checks.yml` | 脚本语法与核心部署测试 | 检查结果 |
 
@@ -80,11 +84,11 @@ git diff --check
 python3 -m unittest discover -s tests -v
 ```
 
-完整镜像打包使用云端 ARM64 Linux runner。最终产品提交 `e876b3b` 的 [45120464556](https://github.com/Audrey-cn/omarchy-android/actions/runs/45120464556) 已完成 rootfs 与一体包构建，四项工作流均成功；K20 Pro 清洁初始化、中文输入、横竖屏及键盘避让已通过。本地与云端均有 37 项测试通过；各可选工具的实际通过项与限制见[验证报告](reports/cloud-k20-validation-20261123.md)。
+完整镜像打包使用云端 ARM64 Linux runner。历史内置镜像交付的提交 `e876b3b` 和运行 [45120464556](https://github.com/Audrey-cn/omarchy-android/actions/runs/45120464556) 的构建、37 项测试及 K20 结果保留在[验证报告](reports/cloud-k20-validation-20261123.md)，不代表新在线安装流程已经验收。新的交付还需分别核对下载恢复、失败安装不覆盖、既有 guest 保留与实际桌面就绪引导。
 
-GitHub Actions artifacts 与 Releases 附件是两个发布入口。现有工作流上传 artifacts，不会自动创建 Release；对外发布时应确认上传的是包含镜像的一体包，并保留对应版本的源码与许可证声明。
+GitHub Actions artifacts 与 Releases 附件是不同入口。App 工作流上传 artifact，App Release 需单独发布已验证的同签名 APK；镜像工作流另有可信 main 发布步骤。对外发布保留对应源码与许可证，并确认目录指向的镜像附件真实可取、大小和校验值一致。
 
-App 更新检查读取主仓的 latest Release，版本标签使用 `vX.Y.Z`，并将对应的一体 APK 一起发布。Deck 单独测试产物放在 Actions artifacts，避免把仅含 Deck 的发布设为 App 的 latest Release。
+App 更新检查读取主仓的 latest Release，版本标签使用 `vX.Y.Z`，附件应为对应的精简 App。镜像与目录 Release 必须保持非 latest。Deck 单独测试产物放在 Actions artifacts，避免把仅含 Deck 的发布设为 App 的 latest Release。
 
 ## 许可证
 
