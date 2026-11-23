@@ -159,13 +159,17 @@ class ContainerManageFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.containers.collect { list ->
+                    val currentBinding = _binding ?: return@collect
+                    val currentAdapter = adapter
                     val isIdle = viewModel.pageState.value is ContainerManagePageState.Idle
-                    binding.emptyHint.visibility = if (list.isEmpty() && isIdle) View.VISIBLE else View.GONE
-                    adapter.submitList(list) {
-                        binding.indicator.setupWithViewPager(binding.viewpager)
+                    currentBinding.emptyHint.visibility = if (list.isEmpty() && isIdle) View.VISIBLE else View.GONE
+                    currentAdapter.submitList(list) {
+                        // AsyncListDiffer 的提交回调可能晚于视图销毁或重建。
+                        if (_binding !== currentBinding) return@submitList
+                        currentBinding.indicator.setupWithViewPager(currentBinding.viewpager)
                         val pos = viewModel.selectedPosition.value
-                        if (pos in 0 until adapter.itemCount) {
-                            binding.viewpager.setCurrentItem(pos, false)
+                        if (pos in 0 until currentAdapter.itemCount) {
+                            currentBinding.viewpager.setCurrentItem(pos, false)
                         }
                     }
                 }
