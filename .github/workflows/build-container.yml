@@ -180,6 +180,7 @@ jobs:
           CHROOT
 
           sudo umount -lf "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
+          sudo bash -c "printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n' > '$ROOTFS/etc/resolv.conf'"
           sudo cp container/omarchy.tiny.yaml "$ROOTFS/.tiny.yaml"
 
           echo "Packing rootfs.tar.zst with top-level .tiny.yaml FIRST (no ./ prefix)..."
