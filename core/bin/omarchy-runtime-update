@@ -1,0 +1,563 @@
+#!/usr/bin/env python3
+"""Check, install or recover an independently published Android guest runtime."""
+import argparse
+from datetime import datetime, timezone
+from email.parser import Parser
+import fcntl
+import hashlib
+import http.client
+import json
+import lzma
+import os
+from pathlib import Path
+import posixpath
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
+
+REPO = "Audrey-cn/omarchy-android"
+BASE = "https://github.com/" + REPO + "/releases/download/"
+API = "https://api.github.com/repos/" + REPO + "/releases"
+ROOT = Path("/")
+STATE = Path("/var/lib/omarchy-android/runtimes")
+
+
+def sha(path):
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def identity(path):
+    if path.is_symlink():
+        return "link:" + os.readlink(path)
+    if path.is_file():
+        return sha(path)
+    if path.exists():
+        raise ValueError("Unexpected directory or special file: " + str(path))
+    return None
+
+
+def write(path, data):
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(path)
+
+
+def open_source(url, binary=False):
+    request = Request(url, headers={"User-Agent": "Omarchy-Android-runtime",
+                      "Accept": "application/octet-stream" if binary else "application/json"})
+    stream = urlopen(request, timeout=45)
+    origin = urlsplit(stream.geturl())
+    if origin.scheme != "https" or origin.hostname not in ("api.github.com", "github.com",
+            "release-assets.githubusercontent.com", "objects.githubusercontent.com"):
+        stream.close()
+        raise ValueError("Unexpected GitHub release download origin")
+    return stream
+
+
+def query(url):
+    with open_source(url) as stream:
+        data = stream.read(8 * 1024 * 1024 + 1)
+    if len(data) > 8 * 1024 * 1024:
+        raise ValueError("Release metadata too large")
+    return json.loads(data)
+
+
+def asset_routes(assets, name, tag):
+    matches = [asset for asset in assets if asset["name"] == name]
+    if len(matches) != 1:
+        raise ValueError("Missing or ambiguous runtime attachment: " + name)
+    asset = matches[0]
+    asset_id = asset["id"]
+    api = f"{API}/assets/{asset_id}"
+    web = BASE + tag + "/" + name
+    if type(asset_id) != int or asset_id < 1 or asset["url"] != api or asset["browser_download_url"] != web:
+        raise ValueError("Unexpected attachment ownership: " + name)
+    return asset, (api, web)
+
+
+def download(routes, expected_size, expected_sha, dest=None):
+    if type(expected_size) != int or not 0 < expected_size <= (2 << 30 if dest else 8 << 20):
+        raise ValueError("Invalid Release attachment size")
+    for index, url in enumerate(routes):
+        try:
+            with open_source(url, binary=True) as stream:
+                if dest is None:
+                    contents = stream.read(expected_size + 1)
+                    size, digest = len(contents), hashlib.sha256(contents).hexdigest()
+                else:
+                    size, hasher = 0, hashlib.sha256()
+                    with dest.open("wb") as output:
+                        for block in iter(lambda: stream.read(1 << 20), b""):
+                            size += len(block)
+                            if size > expected_size:
+                                raise ValueError("Release attachment exceeds expected length")
+                            hasher.update(block)
+                            output.write(block)
+                    digest = hasher.hexdigest()
+            if size != expected_size or (expected_sha and digest != expected_sha):
+                raise ValueError("Release attachment size or checksum mismatch")
+            return contents if dest is None else None
+        except (OSError, http.client.HTTPException):
+            if index + 1 == len(routes):
+                raise
+            print("GitHub API transport failed; trying the repository release URL", file=sys.stderr)
+
+
+def candidate(pkg):
+    versions = []
+    for page in range(1, 101):
+        releases = query(f"{API}?per_page=50&page={page}")
+        for release in releases:
+            tag = release["tag_name"]
+            m = re.fullmatch(r"runtime-v([0-9]+\.[0-9]+\.[0-9]+)", tag)
+            if not m or release["draft"] or release["prerelease"]:
+                continue
+            version = m[1]
+            stem = f"{pkg}_{version}_arm64"
+            assets = release["assets"]
+            if any(a["name"] == stem + ".json" for a in assets):
+                versions.append((tuple(map(int, version.split("."))), tag, version, stem, assets))
+        if len(releases) < 50:
+            break
+    else:
+        raise ValueError("Runtime release list exceeded pagination limit")
+    if not versions:
+        raise ValueError("No published stable runtime candidate for " + pkg)
+    _, tag, ver, stem, assets = max(versions, key=lambda row: row[0])
+    descriptor, metadata_routes = asset_routes(assets, stem + ".json", tag)
+    deb, deb_routes = asset_routes(assets, stem + ".deb", tag)
+    expected = descriptor.get("digest")
+    if expected and not re.fullmatch("sha256:[a-f0-9]{64}", expected):
+        raise ValueError("Invalid attachment metadata digest")
+    meta = json.loads(download(metadata_routes, descriptor["size"], expected[7:] if expected else None))
+    if (meta["asset"], meta["package"], meta["version"], meta["architecture"], meta["bytes"]) != (
+            deb["name"], pkg, ver, "arm64", deb["size"]) or not re.fullmatch("[a-f0-9]{64}", meta["sha256"]):
+        raise ValueError("Release attachment and metadata disagree")
+    if deb.get("digest") and deb["digest"] != "sha256:" + meta["sha256"]:
+        raise ValueError("GitHub attachment digest mismatch")
+    return meta, deb_routes
+
+
+def local_candidate(directory, expected, pkg):
+    if not expected or not re.fullmatch("[0-9a-f]{64}", expected):
+        raise ValueError("Offline candidate requires --metadata-sha256")
+    matches = list(directory.glob(pkg + "_*_arm64.json"))
+    if len(matches) != 1 or sha(matches[0]) != expected:
+        raise ValueError("Offline candidate metadata checksum mismatch")
+    meta = json.loads(matches[0].read_text())
+    if (meta["package"] != pkg or meta["architecture"] != "arm64"
+            or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", meta["version"])
+            or meta["asset"] != f"{pkg}_{meta['version']}_arm64.deb"
+            or not re.fullmatch(r"[0-9a-f]{64}", meta["sha256"])):
+        raise ValueError("Offline candidate identity mismatch")
+    return meta, directory / meta["asset"]
+
+
+def check_compat(meta):
+    if (meta["os"], meta["osVersion"]) != ("ubuntu", "24.04"):
+        raise ValueError("Unexpected declared OS compatibility")
+    os_release = Path("/etc/os-release").read_text().splitlines()
+    arch = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
+    if arch != "arm64" or 'VERSION_ID="24.04"' not in os_release or "ID=ubuntu" not in os_release:
+        raise ValueError("Requires Ubuntu Noble arm64")
+    kind = os.environ.get("OMARCHY_RUNTIME_KIND")
+    if kind not in ("chroot", "proot-app", "proot") or int(os.environ.get("OMARCHY_RUNTIME_API", 0)) < meta["runtimeApi"]:
+        raise ValueError("Incompatible or unknown runtime API; restart with the updated Android launcher")
+    if kind != "chroot" and int(os.environ.get("OMARCHY_APK_VERSION_CODE", 0)) < meta["minAppVersionCode"]:
+        raise ValueError("Incompatible APK version")
+
+
+def installed(pkg):
+    p = subprocess.run(["dpkg-query", "-W", "-f=${Status} ${Version}", pkg], capture_output=True, text=True)
+    return p.stdout.split()[-1] if p.returncode == 0 and p.stdout.startswith("install ok installed ") else None
+
+
+def safe_path(name, pkg):
+    path = Path(name)
+    prefixes = (f"usr/share/doc/{pkg}/", "opt/omarchy-graphics/") if "graphics" in pkg else (
+        f"usr/share/doc/{pkg}/", "opt/omarchy-node/", "opt/omarchy-chromium128/")
+    if path.is_absolute() or ".." in path.parts or path.as_posix() != name or not name.startswith(prefixes):
+        raise ValueError("Out-of-scope package path: " + name)
+    target = ROOT / path
+    if any(parent.is_symlink() for parent in target.parents):
+        raise ValueError("Refusing symlink parent: " + str(target))
+    return target
+
+
+def verify_deb(deb, pkg, meta):
+    """Inspect both GNU tar streams before extraction or any dpkg operation."""
+    sources = ("opt/omarchy-graphics/",) if "graphics" in pkg else ("opt/omarchy-node/", "opt/omarchy-chromium128/")
+    prefixes = (*sources, f"usr/share/doc/{pkg}/")
+    parents = {str(parent) for prefix in prefixes for parent in Path(prefix).parents}
+    expected = None
+    records = {}
+    for option in ("--ctrl-tarfile", "--fsys-tarfile"):
+        control = option == "--ctrl-tarfile"
+        seen, links, ancestors = set(), set(), set()
+        size = 0
+        with subprocess.Popen(["dpkg-deb", option, deb], stdout=subprocess.PIPE) as proc:
+            try:
+                with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
+                    for member in archive:
+                        name = member.name.removeprefix("./")
+                        if name == "." and member.isdir():
+                            continue
+                        path = Path(name)
+                        if (not name or path.is_absolute() or ".." in path.parts or path.as_posix() != name
+                                or name in seen or member.mode & 0o6000 or len(seen) >= 100000):
+                            raise ValueError("Unsafe package member: " + name)
+                        seen.add(name)
+                        size += member.size
+                        if size > (8 << 20 if control else 4 << 30):
+                            raise ValueError("Package payload exceeds component limits")
+                        if control:
+                            if name not in ("control", "md5sums") or not member.isfile():
+                                raise ValueError("Unexpected Debian control member: " + name)
+                            if name == "control":
+                                fields = Parser().parsestr(archive.extractfile(member).read().decode("utf-8"))
+                                allowed = {"Package", "Version", "Architecture", "Maintainer", "Section", "Priority",
+                                           "Description", "Depends", "Installed-Size"}
+                                if not set(fields.keys()) <= allowed or len(fields.keys()) != len(set(fields.keys())):
+                                    raise ValueError("Unexpected Debian control field or package relationship")
+                                if [fields[key] for key in ("Package", "Version", "Architecture")] != [pkg, meta["version"], "arm64"]:
+                                    raise ValueError("Unexpected Debian package identity")
+                                deps = [item.strip() for item in fields.get("Depends", "").split(",") if item.strip()]
+                                if deps != meta.get("depends", []) or not all(re.fullmatch("[a-z0-9][a-z0-9+.\-]+", d) for d in deps):
+                                    raise ValueError("Unexpected dependencies")
+                            continue
+                        if member.isdir() and (name in parents or name + "/" in prefixes):
+                            continue
+                        safe_path(name, pkg)
+                        ancestors.update(str(parent) for parent in path.parents)
+                        if member.isdir():
+                            continue
+                        if member.issym():
+                            target = member.linkname
+                            scope = next(prefix for prefix in prefixes if name.startswith(prefix))
+                            if not target or target.startswith("/") or not posixpath.normpath(
+                                    posixpath.join(str(path.parent), target)).startswith(scope):
+                                raise ValueError("Unsafe component symlink: " + name)
+                            links.add(name)
+                            records[name] = "link:" + target
+                        elif member.isfile():
+                            stream = archive.extractfile(member)
+                            if name == f"usr/share/doc/{pkg}/manifest.json":
+                                if member.size > 8 << 20:
+                                    raise ValueError("Oversized runtime manifest")
+                                document = json.loads(stream.read())
+                                if document.get("package") != pkg:
+                                    raise ValueError("Manifest identity mismatch")
+                                expected = document["files"]
+                            else:
+                                h = hashlib.sha256()
+                                for block in iter(lambda: stream.read(1 << 20), b""):
+                                    h.update(block)
+                                records[name] = h.hexdigest()
+                        else:
+                            raise ValueError("Special package entry: " + name)
+                while proc.stdout.read(1 << 20):
+                    pass
+            finally:
+                proc.stdout.close()
+            if proc.wait() != 0 or links.intersection(ancestors) or (control and "control" not in seen):
+                raise ValueError("Malformed Debian component tar")
+    if records != expected:
+        raise ValueError("Component data do not match ownership manifest")
+
+
+def files(root, pkg):
+    manifest = f"usr/share/doc/{pkg}/manifest.json"
+    path = root / manifest
+    data = json.loads(path.read_text())
+    if data["package"] != pkg:
+        raise ValueError("Manifest identity mismatch")
+    return {**data["files"], manifest: sha(path)}
+
+
+def backup(state, pkg, extracted, work, current):
+    new = files(extracted, pkg)
+    doc = f"usr/share/doc/{pkg}"
+    old = files(ROOT, pkg) if current and (ROOT / doc / "manifest.json").exists() else {}
+    legacy = json.loads(lzma.decompress((extracted / doc / "legacy.json.xz").read_bytes()))
+    targets = {"/" + name for name in set(old) | set(new)}
+    for listing in (ROOT / "var/lib/dpkg/info").glob("*.list"):
+        if listing.stem.split(":")[0] == pkg:
+            continue
+        occupied = targets.intersection(listing.read_text(errors="surrogateescape").splitlines())
+        if occupied:
+            raise ValueError(f"File owned by {listing.stem}: {min(occupied)}")
+    snapshot = work / "previous"
+    snapshot.mkdir()
+    removed = {}
+    bindings = {}
+    # Only four established executable entry points are activated. The old
+    # system libraries stay available to existing Ubuntu and legacy clients.
+    if pkg == "omarchy-graphics-runtime":
+        for cmd in ("sway", "swaymsg", "swaybar", "swaynag"):
+            name = f"usr/local/bin/{cmd}"
+            src = ROOT / name
+            if any(parent.is_symlink() for parent in src.parents):
+                raise ValueError("Unsafe graphics launcher parent: " + str(src))
+            actual = identity(src)
+            link = f"/opt/omarchy-graphics/bin/{cmd}"
+            if actual not in (None, legacy.get(name), "link:" + link):
+                raise ValueError("Preserved conflicting graphics launcher: " + str(src))
+            bindings[cmd] = actual
+    for name in sorted(set(old) | set(new)):
+        src = safe_path(name, pkg)
+        actual = identity(src)
+        if actual is None:
+            if name in old:
+                raise ValueError("Missing managed file: " + str(src))
+            continue
+        if actual not in (old.get(name), legacy.get(name), new.get(name)):
+            raise ValueError("Preserved conflicting file: " + str(src))
+        target = snapshot / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_symlink():
+            target.symlink_to(os.readlink(src))
+        else:
+            try:
+                os.link(src, target)
+            except OSError:
+                shutil.copy2(src, target)
+        removed[name] = actual
+    control = snapshot / "DEBIAN"
+    control.mkdir()
+    details = f"Package: {pkg}\nVersion: {current or '0~initial'}\nArchitecture: arm64\nMaintainer: Omarchy Android maintainers\nDescription: Local recovery snapshot\n"
+    if current:
+        details = subprocess.check_output(["dpkg-query", "-W",
+            "-f=Package: ${Package}\nVersion: ${Version}\nArchitecture: ${Architecture}\nMaintainer: ${Maintainer}\nDepends: ${Depends}\nDescription: ${Description}\n",
+            pkg], text=True)
+    (control / "control").write_text(details)
+    deb = work / "previous.deb"
+    subprocess.run(["dpkg-deb", "--root-owner-group", "-Zzstd", "-z1", "--build", snapshot, deb], check=True)
+    transaction = Path(tempfile.mkdtemp(prefix="transaction-", dir=state))
+    for cmd, actual in bindings.items():
+        if actual and not actual.startswith("link:"):
+            shutil.copy2(ROOT / "usr/local/bin" / cmd, transaction / cmd)
+    deb.replace(transaction / deb.name)
+    write(transaction / "changes.json", {"before": removed, "after": new, "bindings": bindings, "previousVersion": current, "sha256": sha(transaction / deb.name)})
+    return transaction
+
+
+def launchers(transaction, restore):
+    data = json.loads((transaction / "changes.json").read_text())
+    for cmd, prior in data["bindings"].items():
+        target = ROOT / "usr/local/bin" / cmd
+        link = "/opt/omarchy-graphics/bin/" + cmd
+        actual = identity(target)
+        if actual not in (prior, "link:" + link):
+            raise ValueError("Preserved conflicting graphics launcher: " + str(target))
+        if restore and actual == prior:
+            continue
+        if restore and prior is None:
+            target.unlink(missing_ok=True)
+            continue
+        with tempfile.TemporaryDirectory(dir=target.parent) as tmp:
+            staged = Path(tmp) / cmd
+            if restore and not prior.startswith("link:"):
+                original = transaction / cmd
+                if identity(original) != prior:
+                    raise ValueError("Graphics launcher backup failed checksum")
+                shutil.copy2(original, staged)
+            else:
+                staged.symlink_to(link)
+            staged.replace(target)
+
+
+def smoke(kind):
+    if kind == "graphics":
+        commands = [["/usr/local/bin/sway", "--version"]]
+    else:
+        commands = [["/usr/local/bin/omarchy-playwright128", "check"]]
+        browser = subprocess.check_output(["/usr/local/bin/omarchy-playwright128", "browser-path", "chromium"], text=True).strip()
+        commands.append([browser, "--version"])
+    for command in commands:
+        subprocess.run(command, check=True)
+
+
+def recover(state, pkg, kind):
+    pointer = state / ("pending.json" if (state / "pending.json").exists() else "last.json")
+    if not pointer.exists():
+        raise ValueError("No saved runtime to recover")
+    transaction = state / json.loads(pointer.read_text())
+    data = json.loads((transaction / "changes.json").read_text())
+    deb = transaction / "previous.deb"
+    if sha(deb) != data["sha256"]:
+        raise ValueError("Recovery archive checksum mismatch")
+    for name in set(data["before"]) | set(data["after"]):
+        actual = identity(safe_path(name, pkg))
+        if actual not in (None, data["before"].get(name), data["after"].get(name)):
+            raise ValueError("Preserved file changed after installation: " + name)
+    write(state / "pending.json", transaction.name)
+    if data["previousVersion"]:
+        subprocess.run(["dpkg", "-i", deb], check=True)
+    else:
+        # A pre-channel guest had unowned files. Unregister the new unit and
+        # restore those exact original files without giving them a fake version.
+        with tempfile.TemporaryDirectory(dir=state) as tmp:
+            recovered = Path(tmp)
+            subprocess.run(["dpkg-deb", "-x", deb, recovered], check=True)
+            for name, expected in data["before"].items():
+                if identity(recovered / name) != expected:
+                    raise ValueError("Damaged legacy recovery payload: " + name)
+            subprocess.run(["dpkg", "--force-remove-reinstreq", "--remove", pkg], check=True)
+            for name in data["before"]:
+                dest = safe_path(name, pkg)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.TemporaryDirectory(dir=dest.parent) as directory:
+                    temp = Path(directory) / "restore"
+                    shutil.copy2(recovered / name, temp, follow_symlinks=False)
+                    temp.replace(dest)
+    launchers(transaction, restore=True)
+    for name in set(data["before"]) | set(data["after"]):
+        if identity(safe_path(name, pkg)) != data["before"].get(name):
+            raise ValueError("Previous runtime file was not restored: " + name)
+    if data["previousUsable"]:
+        smoke(kind)
+    (state / "last.json").unlink(missing_ok=True)
+    (state / "pending.json").unlink()
+    shutil.rmtree(transaction)
+
+
+def install(state, pkg, kind, meta, url):
+    if (state / "pending.json").exists():
+        raise ValueError("Interrupted update: run recover first")
+    previous = installed(pkg)
+    if previous and subprocess.run(["dpkg", "--compare-versions", previous, "gt", meta["version"]]).returncode == 0:
+        raise ValueError("Installed version is newer; use recover for rollback")
+    with tempfile.TemporaryDirectory(dir=state) as tmp:
+        work = Path(tmp)
+        deb = work / meta["asset"]
+        print("Downloading", deb.name, flush=True)
+        if isinstance(url, Path):
+            shutil.copyfile(url, deb)
+        else:
+            download(url, meta["bytes"], meta["sha256"], deb)
+        if deb.stat().st_size != meta["bytes"] or sha(deb) != meta["sha256"]:
+            raise ValueError("Downloaded bytes failed verification")
+        verify_deb(deb, pkg, meta)
+        subprocess.run(["dpkg", "--no-act", "-i", deb], check=True)
+        extracted = work / "payload"
+        subprocess.run(["dpkg-deb", "-x", deb, extracted], check=True)
+        if previous == meta["version"]:
+            expected = files(extracted, pkg)
+            if any(identity(safe_path(name, pkg)) != digest for name, digest in expected.items()):
+                raise ValueError("Installed files differ from candidate with the same version")
+            smoke(kind)
+            print("Installed runtime matches this candidate")
+            return
+        transaction = backup(state, pkg, extracted, work, previous)
+        # A partial pre-channel installation may already lack executables or
+        # dependencies. Recovery verifies those exact bytes either way.
+        try:
+            smoke(kind)
+            usable = True
+        except (OSError, ValueError, subprocess.SubprocessError):
+            usable = False
+        changes = json.loads((transaction / "changes.json").read_text())
+        changes.update(previousUsable=usable, newVersion=meta["version"], newAssetSha=meta["sha256"])
+        write(transaction / "changes.json", changes)
+        old_pointer = state / "last.json"
+        old = json.loads(old_pointer.read_text()) if old_pointer.exists() else None
+        write(state / "pending.json", transaction.name)
+        subprocess.run(["dpkg", "-i", deb], check=True)
+        launchers(transaction, restore=False)
+        smoke(kind)
+        (state / "pending.json").replace(old_pointer)
+        if old:
+            shutil.rmtree(state / old)
+        print("Installed and verified", pkg, meta["version"])
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("action", choices=("status", "check", "install", "recover"))
+    parser.add_argument("kind", choices=("graphics", "browser"))
+    parser.add_argument("--candidate-dir", type=Path)
+    parser.add_argument("--metadata-sha256")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    pkg = f"omarchy-{args.kind}-runtime"
+    state = STATE / args.kind
+    cache = state / "check.json"
+    now = datetime.now(timezone.utc).isoformat()
+    result = dict(source=pkg, state="unknown", installed_version=None, available_version=None,
+                  checked_at=None, error=None, sha256=None)
+    rc = 0
+    try:
+        current = installed(pkg)
+        if cache.exists():
+            result.update(json.loads(cache.read_text()))
+        result["installed_version"] = current
+        pending = (state / "pending.json").exists()
+        if args.action == "status":
+            if pending:
+                result["state"] = "interrupted"
+            elif not cache.exists():
+                result["state"] = "installed" if current else "legacy"
+        elif args.action in ("check", "install"):
+            result.update(checked_at=now, available_version=None, sha256=None, error=None, state="checking")
+            if bool(args.candidate_dir) != bool(args.metadata_sha256):
+                raise ValueError("Supply both --candidate-dir and --metadata-sha256")
+            if pending:
+                result["state"] = "interrupted"
+                raise ValueError("Interrupted runtime update: recover first")
+            if args.candidate_dir:
+                meta, url = local_candidate(args.candidate_dir, args.metadata_sha256, pkg)
+            else:
+                meta, url = candidate(pkg)
+            result.update(available_version=meta["version"], sha256=meta["sha256"], bytes=meta["bytes"])
+            result["state"] = "incompatible"
+            check_compat(meta)
+            result["state"] = "available"
+            if current == meta["version"]:
+                ptr = state / "last.json"
+                if ptr.exists():
+                    saved = json.loads((state / json.loads(ptr.read_text()) / "changes.json").read_text())
+                    if saved["newVersion"] == current and saved["newAssetSha"] != meta["sha256"]:
+                        raise ValueError("Published version reused with different bytes")
+                result["state"] = "current"
+            elif current and subprocess.run(["dpkg", "--compare-versions", current, "gt", meta["version"]]).returncode == 0:
+                result["state"] = "ahead"
+        if args.action in ("install", "recover"):
+            if os.geteuid() != 0:
+                raise ValueError("Run inside the guest as root")
+            state.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with (state / "lock").open("a") as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                if args.action == "recover":
+                    recover(state, pkg, args.kind)
+                    result.update(state="recovered", error=None)
+                else:
+                    install(state, pkg, args.kind, meta, url)
+                    result.update(state="current", error=None)
+                result["installed_version"] = installed(pkg)
+    except (OSError, ValueError, KeyError, TypeError, tarfile.TarError, subprocess.SubprocessError, http.client.HTTPException) as exc:
+        if (state / "pending.json").exists():
+            result["state"] = "interrupted"
+        elif result["state"] != "incompatible":
+            result["state"] = "failed"
+        result["error"] = str(exc)
+        rc = 1
+    if args.action != "status" and os.geteuid() == 0:
+        state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", dir=state, delete=False) as temp:
+            json.dump(result, temp)
+        Path(temp.name).replace(cache)
+    print(json.dumps(result, ensure_ascii=False, indent=None if args.json else 2))
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

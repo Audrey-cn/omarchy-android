@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""Stage the reviewed Hermes archive and both repairs before atomic activation."""
+
+import argparse
+import ctypes
+import fcntl
+import hashlib
+import json
+import os
+import runpy
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+OPT = Path("/opt")
+BIN = Path(__file__).resolve().parent
+REPAIR = runpy.run_path(str(BIN / "omarchy-repair-hermes-onboarding"))
+PROFILE = REPAIR["PROFILE"]
+
+
+def verify_archive(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as archive:
+        for block in iter(lambda: archive.read(1024 * 1024), b""):
+            digest.update(block)
+    if digest.hexdigest() != PROFILE["package_sha256"]:
+        raise ValueError("Hermes package SHA256 differs from reviewed profile")
+
+
+def exchange(candidate, live):
+    if live.is_symlink() or not live.is_dir():
+        raise ValueError(f"Unexpected Hermes location: {live}")
+    # When the guest filesystem lacks RENAME_EXCHANGE, preserve the running tree.
+    libc = ctypes.CDLL(None, use_errno=True)
+    if not hasattr(libc, "renameat2"):
+        raise OSError("Atomic directory exchange unavailable")
+    if libc.renameat2(-100, os.fsencode(candidate), -100, os.fsencode(live), 2):
+        raise OSError(ctypes.get_errno(), "Atomic Hermes directory exchange failed")
+
+
+def identity(directory):
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError(f"Unexpected Hermes directory: {directory}")
+    stat = directory.stat()
+    return [stat.st_dev, stat.st_ino]
+
+
+def activate(candidate, live):
+    if not os.path.lexists(live):
+        os.rename(candidate, live)
+        return
+    # Exchange against durable storage, so no interruption can leave the old
+    # tree (including user additions) inside TemporaryDirectory's cleanup path.
+    recovery = live.parent / ".omarchy-hermes-recovery"
+    plan = {"previous": identity(live), "candidate": identity(candidate)}
+    recovery.mkdir(mode=0o700)
+    receipt = recovery / "transaction.json"
+    tree = recovery / "tree"
+    try:
+        with receipt.open("x") as out:
+            json.dump(plan, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.rename(candidate, tree)
+        exchange(tree, live)
+    except OSError:
+        # An unsupported atomic swap leaves the old program live. Only unwind
+        # the known candidate, never an exchanged or independently edited tree.
+        if identity(live) == plan["previous"]:
+            if tree.is_dir() and identity(tree) == plan["candidate"]:
+                os.rename(tree, candidate)
+            if not os.path.lexists(tree):
+                receipt.unlink(missing_ok=True)
+                recovery.rmdir()
+        raise
+    print(
+        f"Previous Hermes directory retained at {tree}; restore with omarchy-install-hermes recover"
+    )
+
+
+def recover():
+    live = OPT / "hermes-desktop"
+    with (OPT / ".omarchy-hermes-install.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        recovery = OPT / ".omarchy-hermes-recovery"
+        identity(recovery)
+        tree = recovery / "tree"
+        receipt = recovery / "transaction.json"
+        if receipt.is_symlink() or not receipt.is_file():
+            raise ValueError(f"Missing Hermes recovery receipt: {receipt}")
+        plan = json.loads(receipt.read_text())
+        if identity(live) == plan["previous"]:
+            print(
+                f"The previous Hermes directory is already active. Preserved files: {recovery}"
+            )
+            return
+        if identity(live) != plan["candidate"] or identity(tree) != plan["previous"]:
+            raise ValueError(
+                f"Hermes recovery identities changed. Inspect preserved files at {recovery}"
+            )
+        exchange(tree, live)
+        print(
+            f"Restored the previous Hermes installation. Replaced directory retained at {tree}"
+        )
+
+
+def install():
+    package = PROFILE["package"]
+    with (OPT / ".omarchy-hermes-install.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        live = OPT / "hermes-desktop"
+        recovery = OPT / ".omarchy-hermes-recovery"
+        if os.path.lexists(recovery):
+            raise ValueError(
+                f"Existing recovery directory preserved: {recovery}. Run omarchy-install-hermes recover or archive this directory before reinstalling."
+            )
+        if os.path.lexists(live):
+            if live.is_symlink() or not live.is_dir():
+                raise ValueError(f"Unexpected Hermes location: {live}")
+            # Preserve an independently upgraded or edited vendor installation.
+            REPAIR["inspect"](live)
+        with tempfile.TemporaryDirectory(dir=OPT, prefix=".hermes-stage-") as stage:
+            root = Path(stage)
+            archive = root / package
+            subprocess.run(
+                [
+                    "curl",
+                    "-fSL",
+                    "--proto",
+                    "=https",
+                    "--proto-redir",
+                    "=https",
+                    "-o",
+                    archive,
+                    "https://pkgs.omarchy.org/stable/aarch64/" + package,
+                ],
+                check=True,
+            )
+            verify_archive(archive)
+            # Archive identity is pinned above. Only extract the reviewed application and installer.
+            subprocess.run(
+                [
+                    "tar",
+                    "--zstd",
+                    "-xf",
+                    archive,
+                    "-C",
+                    root,
+                    "opt/hermes-desktop",
+                    "usr/share/hermes-desktop/install.sh",
+                ],
+                check=True,
+            )
+            candidate = root / "opt/hermes-desktop"
+            bootstrap = root / "usr/share/hermes-desktop/install.sh"
+            if (
+                hashlib.sha256(bootstrap.read_bytes()).hexdigest()
+                != PROFILE["bootstrap_installer_sha256"]
+            ):
+                raise ValueError("Unexpected Hermes bootstrap identity")
+            subprocess.run(
+                [BIN / "omarchy-repair-hermes-onboarding", "--hermes-dir", candidate],
+                check=True,
+            )
+            subprocess.run(
+                [BIN / "omarchy-repair-hermes-pty", "--hermes-dir", candidate],
+                check=True,
+            )
+            # Keep the verified bootstrap with the application. Profile seeding belongs to first launch.
+            os.rename(bootstrap, candidate / ".omarchy-onboarding" / "install.sh")
+            activate(candidate, live)
+    result = subprocess.run([BIN / "omarchy-fix-desktops"], check=False)
+    if result.returncode:
+        print(
+            "Hermes installed. Launcher creation failed, retry omarchy-fix-desktops.",
+            file=sys.stderr,
+        )
+    print("Hermes Desktop installed from reviewed package:", package)
+
+
+if __name__ == "__main__":
+    try:
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument(
+            "action", nargs="?", default="install", choices=["install", "recover"]
+        )
+        if parser.parse_args().action == "recover":
+            recover()
+        else:
+            install()
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        RuntimeError,
+        subprocess.SubprocessError,
+    ) as error:
+        sys.exit(str(error))

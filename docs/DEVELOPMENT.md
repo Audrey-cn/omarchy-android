@@ -31,7 +31,7 @@ Android Studio 应打开 `apps/android/`，而不是仓库根目录。当前 CI 
 
 可信 main 构建使用持续保存的同一测试签名密钥，PR 和其他非可信上下文不取得该密钥，artifact 带相应签名模式后缀。只有证书兼容且版本符合 Android 升级规则的新 APK 才能覆盖既有安装。不要将签名密钥或口令提交入库。
 
-App 普通启动不再调用旧的 guest 受管文件同步。已有桌面脚本、浏览器、用户修改与旧同步记录留在原处；App/X11/PRoot 更新不重导入或替换 rootfs。Ubuntu 软件包在现有 guest 内使用其 APT 源维护。
+App 普通启动不再调用旧的 guest 受管文件同步。已有桌面脚本、浏览器、用户修改与旧同步记录留在原处；App/X11/PRoot 更新不重导入或替换 rootfs。Ubuntu 软件包在现有 guest 内使用其 APT 源维护。项目后续通过用户显式发起的系统内组件更新交付桌面修正；这项机制尚未实现，不得恢复为 APK 启动时隐式覆盖 guest。
 
 ## 构建独立初装镜像
 
@@ -42,7 +42,7 @@ App 普通启动不再调用旧的 guest 受管文件同步。已有桌面脚本
 3. `scripts/prepare-initial-image.py` 生成 `rootfs.tar.zst`、`image.json`、`catalog.json`、`SHA256SUMS` 与来源/许可附件，artifact 为 `initial-desktop-image-<完整提交 SHA>`。
 4. 仅主仓可信 main 的手动构建执行发布：版本标签为 `desktop-ubuntu24-<sha12>`，设置 prerelease 和 `latest=false`，不抢占 App 更新入口。
 
-镜像与 APK 分开发行，不再生成 `OmarchyAndroid-AllInOne-apk`。修正 `core/` 或镜像组件后重建初装镜像；已有用户不会因安装新 APK 自动取得这些 guest 文件修正，也不会因镜像重发而重装系统。此轮不建设整套 rootfs 更新或迁移管理器。
+镜像与 APK 分开发行，不再生成 `OmarchyAndroid-AllInOne-apk`。初装镜像低频汇总已验证的 `core/` 与组件修正；已有用户不会因安装新 APK 自动取得这些 guest 文件修正，也不会因镜像重发而重装系统。后续需通过独立组件包和显式更新入口交付已有环境的桌面修正，保留 Ubuntu 软件源与个人配置；当前的上游 Git + APT 菜单不能代表该机制已经具备。源码盘点、优先级和验收要求见[更新维护清单](discussions/2026-11-23-update-maintenance.md)。不建设整套 rootfs 更新或迁移管理器。
 
 首次安装目录 schema 为 1，条目包含镜像 ID、ABI、最低 App 版本、精确字节数、解压大小、SHA256、源码 SHA 与固定 HTTPS 下载地址。首批镜像的 `minAppVersionCode` 设置为 64；随包 `apps/android/app/src/main/assets/initial-images.json` 只应纳入已发布且核对过的真实元数据。App 刷新时通过 GitHub 官方 Release API 查找 `desktop-images` 的 `catalog.json` 附件，保留固定网页下载地址回退；镜像也优先使用官方 API 附件地址并保留网页回退。该目录需单独维护，不能假定版本化镜像发布后已自动更新。保留随包目录作为离线回退，允许目录提供一个或多个兼容初始版本。
 

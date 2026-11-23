@@ -7,4 +7,4 @@ if ! pgrep -x fcitx5 >/dev/null 2>&1; then
   sleep 0.5
 fi
 fcitx5-remote -t
-pkill -RTMIN+9 waybar 2>/dev/null || true
+/usr/local/bin/omarchy_session.py signal waybar 9 2>/dev/null || true

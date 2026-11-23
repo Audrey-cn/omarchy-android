@@ -3,18 +3,12 @@
 # Omarchy ARM64 Installer Engine (Ubuntu 24.04 + tools + WebKitGTK WebApps)
 # Handles ALL 74+ official `install.*` entries from basecamp/omarchy cleanly!
 # ============================================================================
-set -e
+set -eo pipefail
 
 export OMARCHY_PATH="/root/.local/share/omarchy"
 export PATH="/usr/local/bin:$OMARCHY_PATH/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
-
-# Use USB proxy if port 18888 is listening (auto-detect!)
-if bash -c "exec 3<>/dev/tcp/127.0.0.1/18888" 2>/dev/null; then
-    export http_proxy="http://127.0.0.1:18888"
-    export https_proxy="http://127.0.0.1:18888"
-fi
 
 KEY="$1"
 LABEL="${2:-$1}"
@@ -25,12 +19,32 @@ mkdir -p "$APP_DIR" "$ICON_DIR"
 ensure_apt_updated() {
     if [ -z "$(ls -A /var/lib/apt/lists 2>/dev/null | grep -v '^partial$\|^auxfiles$\|^lock$')" ]; then
         echo "正在更新 APT 软件源索引..."
-        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any update -qq
     fi
 }
 
+write_launcher() (
+    local target="$1" staged
+    staged=$(mktemp "$APP_DIR/.omarchy-desktop.XXXXXXXX")
+    trap 'rm -f "$staged"' EXIT
+    cat > "$staged"
+    chmod 755 "$staged"
+    if ! ln -T "$staged" "$target" 2>/dev/null; then
+        if [[ -e "$target" || -L "$target" ]]; then
+            echo "保留已有入口: $target" >&2
+        else
+            echo "创建桌面入口失败: $target" >&2
+            return 1
+        fi
+    fi
+)
+
 install_webapp_desktop() {
     local name="$1"
+    if [[ "$name" == */* || "$name" == *$'\n'* || -z "$name" ]]; then
+        echo "应用名称不能含路径或换行" >&2
+        return 1
+    fi
     local url="$2"
     local icon_name="$3"
     local icon_src="$OMARCHY_PATH/applications/icons/${icon_name}.png"
@@ -38,12 +52,12 @@ install_webapp_desktop() {
 
     echo "正在为 $name 创建独立桌面应用 (WebApp)..."
     if [[ -f "$icon_src" ]]; then
-        cp -f "$icon_src" "$icon_dest"
+        [[ -e "$icon_dest" || -L "$icon_dest" ]] || cp -n "$icon_src" "$icon_dest"
     else
         icon_dest="web-browser"
     fi
 
-    cat << EOF > "$APP_DIR/${name}.desktop"
+    write_launcher "$APP_DIR/${name}.desktop" << EOF
 [Desktop Entry]
 Version=1.0
 Name=$name
@@ -55,7 +69,6 @@ Type=Application
 Categories=Network;Utility;
 StartupNotify=true
 EOF
-    chmod +x "$APP_DIR/${name}.desktop"
     echo ""
     echo "✓ $name 已安装完成！"
     echo "  -> 已添加到应用网格 (Super + Space)，正在为你启动窗口..."
@@ -90,7 +103,7 @@ case "$KEY" in
     # --- 2. AI Desktop & CLI Tools ---
     install.ai.doubao-say)
         echo "正在安装 Doubao Say (豆包说 · Wayland / Omarchy 语音输入)..."
-        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-webkit-6.0 python3-cairo python3-gi-cairo libportaudio2 libasound2-plugins python3-venv python3-pip
         rm -rf /opt/doubao-say
         git clone --depth 1 https://github.com/quanru/doubao-say.git /opt/doubao-say
@@ -104,7 +117,7 @@ export PYTHONPATH="/opt/doubao-say/src${PYTHONPATH:+:$PYTHONPATH}" PYTHONDONTWRI
 exec /opt/doubao-say/.venv/bin/python -m doubao_input "$@"
 LAUNCH
         chmod 755 /usr/local/bin/doubao-say-launch
-        cat > "$APP_DIR/Doubao-Say.desktop" <<'DESKTOP'
+        write_launcher "$APP_DIR/Doubao-Say.desktop" <<'DESKTOP'
 [Desktop Entry]
 Name=Doubao Say (豆包说)
 Comment=豆包语音输入 (Wayland / Omarchy)
@@ -137,21 +150,13 @@ DESKTOP
         ensure_apt_updated
         DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cc-switch_arm64.deb
         rm -f /tmp/cc-switch_arm64.deb
-        for f in /usr/share/applications/*CC*Switch*.desktop /usr/share/applications/*cc-switch*.desktop; do
-            [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/cc-switch-launch|" "$f"
-        done
-        update-desktop-database /usr/share/applications "$APP_DIR" 2>/dev/null || true
         echo "✓ CC Switch v${CC_VER} (ARM64) 已安装完成！已添加到应用网格 (Super + Space)。"
         ;;
     install.ai.chatgpt)
         echo "正在安装 OpenAI 官方原生 ARM64 ChatGPT / Codex Desktop (.deb)..."
         curl -fSL -o /tmp/chatgpt_arm64.deb "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_arm64.deb"
         DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/chatgpt_arm64.deb
-        rm -f /tmp/chatgpt_arm64.deb "$APP_DIR/ChatGPT.desktop"
-        for f in /usr/share/applications/*chatgpt*.desktop /usr/share/applications/*codex*.desktop; do
-            [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/chatgpt-launch %u|" "$f"
-        done
-        update-desktop-database /usr/share/applications "$APP_DIR" 2>/dev/null || true
+        rm -f /tmp/chatgpt_arm64.deb
         echo "✓ 官方原生 ARM64 Codex / ChatGPT Desktop 已安装完成！"
         ;;
     install.ai.claude)
@@ -159,33 +164,12 @@ DESKTOP
         mkdir -p /usr/share/keyrings
         curl -fsSL https://downloads.claude.ai/claude-desktop/apt/stable/keyring.gpg -o /usr/share/keyrings/claude-desktop-archive-keyring.asc
         echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" > /etc/apt/sources.list.d/claude-desktop.list
-        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y claude-desktop
-        rm -f "$APP_DIR/Claude.desktop"
-        for f in /usr/share/applications/*claude*.desktop; do
-            if [ -f "$f" ]; then
-                sed -i "s|^Exec=.*|Exec=/usr/local/bin/claude-desktop-launch %u|" "$f"
-                cp -f "$f" "$APP_DIR/$(basename "$f")"
-            fi
-        done
-        update-desktop-database /usr/share/applications "$APP_DIR" 2>/dev/null || true
         echo "✓ 官方原生 ARM64 Claude Desktop 已安装完成！"
         ;;
     install.ai.hermes)
-        echo "正在从 Omarchy 官方 ARM64 仓库拉取正版 Hermes Desktop 预编译包..."
-        curl -fsSL "https://pkgs.omarchy.org/stable/aarch64/omarchy.db" -o /tmp/omarchy.db
-        HFILE=$(tar --zstd -xOf /tmp/omarchy.db "$(tar --zstd -tf /tmp/omarchy.db | grep -E '^hermes-desktop.*/desc$' | head -n 1)" | awk '/%FILENAME%/{getline; print; exit}')
-        curl -fSL -o "/tmp/$HFILE" "https://pkgs.omarchy.org/stable/aarch64/$HFILE"
-        tar --zstd -xf "/tmp/$HFILE" -C / --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.BUILDINFO' --exclude='.INSTALL'
-        rm -f "/tmp/$HFILE" /tmp/omarchy.db "$APP_DIR/Hermes.desktop"
-        /usr/local/bin/omarchy-repair-hermes-pty
-        /usr/local/bin/omarchy-repair-hermes-onboarding
-        /usr/local/bin/omarchy-repair-hermes-onboarding --seed-bootstrap-cache
-        for f in /usr/share/applications/*hermes*.desktop; do
-            [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/hermes-desktop-launch %u|" "$f"
-        done
-        update-desktop-database /usr/share/applications "$APP_DIR" 2>/dev/null || true
-        echo "✓ 正版 NousResearch Hermes Desktop (ARM64) 已安装完成！已添加到应用网格 (Super + Space)。"
+        /usr/local/bin/omarchy-install-hermes
         ;;
     install.ai.grok-bot)
         install_webapp_desktop "Grok" "https://grok.com" "X"
@@ -207,7 +191,7 @@ DESKTOP
     install.ai.openclaw)
         echo "正在安装 OpenClaw CLI..."
         command -v node >/dev/null || mise use --global node@latest
-        npm install -g openclaw || true
+        npm install -g openclaw
         ;;
     install.ai.lm-studio|install.ai.herdr|install.ai.t3-code)
         echo "ℹ️  $LABEL 目前官方仅提供 x86_64 桌面包，在 ARM64 手机上推荐使用 Ollama 本地模型或终端 AI CLI (Claude/Codex/OpenCode)。"
@@ -275,7 +259,7 @@ DESKTOP
     # --- 4. Browsers ---
     install.browser.omarchy)
         DEBIAN_FRONTEND=noninteractive apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
-        cat << 'EOF' > "$APP_DIR/omarchy-browser.desktop"
+        write_launcher "$APP_DIR/omarchy-browser.desktop" <<'EOF'
 [Desktop Entry]
 Name=Omarchy Browser
 Comment=WebKitGTK browser (not a Playwright automation engine)
@@ -292,7 +276,7 @@ EOF
         ;;
     install.browser.firefox)
         /usr/local/bin/omarchy-install-firefox
-        cat << 'EOF' > "$APP_DIR/Firefox.desktop"
+        write_launcher "$APP_DIR/Firefox.desktop" <<'EOF'
 [Desktop Entry]
 Name=Firefox (Mozilla)
 Comment=Mozilla Firefox DEB, separate from Playwright's patched Firefox
@@ -302,7 +286,6 @@ Terminal=false
 Type=Application
 Categories=Network;WebBrowser;
 EOF
-        chmod +x "$APP_DIR/Firefox.desktop"
         echo "✓ Mozilla Firefox DEB 已安装；这不是 Playwright 的 Firefox 引擎。首次启动仍需验证本机兼容性。"
         ;;
     install.browser.playwright)
@@ -323,10 +306,6 @@ EOF
         curl -fSL -o /tmp/vscode-arm64.deb "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-arm64"
         DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/vscode-arm64.deb
         rm -f /tmp/vscode-arm64.deb
-        for f in /usr/share/applications/code*.desktop; do
-            [ -f "$f" ] && sed -i 's|/usr/share/code/code|/usr/share/code/code --no-sandbox --disable-dev-shm-usage --in-process-gpu --disable-gpu-compositing --ozone-platform=wayland --enable-wayland-ime --password-store=basic|g' "$f"
-        done
-        update-desktop-database /usr/share/applications 2>/dev/null || true
         echo "✓ VSCode (ARM64) 安装完成！已添加到应用网格 (Super + Space)。"
         ;;
     install.editor.vim)
@@ -443,5 +422,11 @@ EOF
     *)
         echo "正在尝试查找并安装: $LABEL ($KEY)..."
         echo "提示: 可使用 安装 -> 软件包 (Package) 模糊搜索 Ubuntu ARM64 全量软件源。"
+        ;;
+esac
+
+case "$KEY" in
+    install.ai.cc-switch|install.ai.chatgpt|install.ai.claude|install.editor.vscode)
+        /usr/local/bin/omarchy-fix-desktops
         ;;
 esac

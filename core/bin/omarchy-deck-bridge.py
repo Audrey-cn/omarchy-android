@@ -20,8 +20,10 @@ QUEUE_DIR = "/tmp/omarchy-browser-queue"
 
 
 def get_swaysock():
-    socks = sorted(glob.glob("/tmp/sway-ipc.*.sock"), key=os.path.getmtime, reverse=True)
-    return socks[0] if socks else "/tmp/sway-ipc.sock"
+    import sys
+    sys.dont_write_bytecode = True
+    from omarchy_session import select_sway_socket
+    return select_sway_socket(os.environ)
 
 
 def wl_env():
@@ -158,6 +160,8 @@ def handle_cmd(msg):
         "terminal": "alacritty",
         "kill": "swaymsg kill",
         "fullscreen": "swaymsg fullscreen toggle",
+        "floating": "swaymsg floating toggle",
+        "updates": "/usr/local/bin/omarchy-menu-ui update",
         "ime": "/usr/local/bin/omarchy-toggle-ime",
     }
     if action in mapping:

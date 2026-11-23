@@ -153,6 +153,11 @@ class ContainerMainViewModel(
         Global.setupEnvironment()
         Global.sendCommand("rm ${getApplication<Application>().filesDir}/boot_${code}.sh")
         val merged = collectEnabledOptions()
+        val application = getApplication<Application>()
+        val packageInfo = application.packageManager.getPackageInfo(application.packageName, 0)
+        merged.env.removeAll { it.substringBefore('=') in setOf("OMARCHY_APK_VERSION_CODE", "OMARCHY_APK_VERSION_NAME", "OMARCHY_RUNTIME_API", "OMARCHY_RUNTIME_KIND") }
+        merged.env.addAll(com.fct.tc4.OmarchyRuntimeIdentity.environment(
+            code, packageInfo.versionCode, packageInfo.versionName ?: "unknown"))
         for (cmd in merged.postEndHostCommands) {
             Global.sendCommand(cmd)
         }

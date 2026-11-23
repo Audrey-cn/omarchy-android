@@ -17,16 +17,18 @@ STATE_DIR = "/root/.local/state/omarchy/current"
 THEME_DIR = f"{STATE_DIR}/theme"
 
 def get_swaysock():
-    socks = sorted(glob.glob("/tmp/sway-ipc.*.sock"), key=os.path.getmtime, reverse=True)
-    return socks[0] if socks else "/tmp/sway-ipc.sock"
+    import sys
+    sys.dont_write_bytecode = True
+    from omarchy_session import select_sway_socket
+    return select_sway_socket(os.environ)
 
 def wl_env():
     return {
         **os.environ,
         "XDG_RUNTIME_DIR": "/tmp",
-        "WAYLAND_DISPLAY": "wayland-1",
+        "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-1"),
         "SWAYSOCK": get_swaysock(),
-        "DISPLAY": ":0",
+        "DISPLAY": os.environ.get("DISPLAY", ":0"),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8"
     }
@@ -571,7 +573,9 @@ bindsym $mod+Shift+5 move container to workspace number 5
     subprocess.run(["swaymsg", f"client.unfocused {c[8]} {bg} {c[8]} {c[8]} {c[8]}"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Restart swaybg on Wayland
-    subprocess.run("for p in $(pidof swaybg 2>/dev/null); do kill -9 $p; done", shell=True)
+    sys.dont_write_bytecode = True
+    from omarchy_session import stop_session_processes
+    stop_session_processes({"swaybg"}, env)
     if os.path.exists(out_png):
         subprocess.Popen(["swaybg", "-i", out_png, "-m", "fill"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

@@ -1,0 +1,611 @@
+#!/usr/bin/env python3
+"""Independent guest update channels. Waybar reads the last explicit check."""
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timedelta, timezone
+from http.client import HTTPException
+from pathlib import Path
+from urllib.request import Request, urlopen
+
+BIN = Path(__file__).resolve().parent
+CACHE = Path("/var/cache/omarchy/update-sources.json")
+# id, source and update mechanism, installation probe. Path probes never launch user applications.
+THIRD_PARTY = {
+    "claude-desktop": (
+        "Claude signed APT (downloads.claude.ai)",
+        "deb",
+        "claude-desktop",
+    ),
+    "firefox": ("Mozilla signed APT (packages.mozilla.org)", "deb", "firefox"),
+    "cc-switch": (
+        "farion1231/cc-switch GitHub Release · standalone DEB",
+        "deb",
+        "cc-switch",
+    ),
+    "chatgpt": ("OpenAI Desktop · standalone DEB", "deb", "chatgpt"),
+    "hermes-desktop": (
+        "Omarchy archive · fingerprinted repair profile",
+        "path",
+        "/opt/hermes-desktop/Hermes",
+    ),
+    "hermes-cli": (
+        "Hermes Agent CLI · independent upstream installation",
+        "cmd",
+        "hermes",
+    ),
+    "doubao-say": ("quanru/doubao-say Git checkout", "path", "/opt/doubao-say"),
+    "ollama": ("Ollama upstream installer", "cmd", "ollama"),
+    "openclaw": ("npm · openclaw", "cmd", "openclaw"),
+    "claude-cli": ("Claude Code · installation method varies", "cmd", "claude"),
+    "codex-cli": ("Codex CLI · installation method varies", "cmd", "codex"),
+    "opencode": ("OpenCode CLI · installation method varies", "cmd", "opencode"),
+}
+for app, site in [
+    ("Grok", "grok.com"),
+    ("Perplexity", "perplexity.ai"),
+    ("Antigravity", "antigravity.google"),
+    ("Amp", "ampcode.com"),
+]:
+    THIRD_PARTY[app] = (
+        f"{site} · hosted web application",
+        "path",
+        str(Path.home() / f".local/share/applications/{app}.desktop"),
+    )
+APT_ORIGINS = {
+    "claude-desktop": "https://downloads.claude.ai/",
+    "firefox": "https://packages.mozilla.org/",
+}
+RUNTIME_SOURCES = {"browser": "项目 Chromium 浏览器配套", "graphics": "项目定制图形栈"}
+APT_REFRESH = ["apt-get", "-o", "APT::Update::Error-Mode=any", "update"]
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def command(args):
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, LC_ALL="C"),
+        timeout=300,
+        check=False,
+    )
+    if result.returncode:
+        reason = (result.stderr or result.stdout).strip().splitlines()
+        raise RuntimeError(
+            (reason[-1] if reason else f"exit {result.returncode}")[:500]
+        )
+    return result.stdout
+
+
+def record(source, state="unknown", installed=None, available=None, detail=""):
+    return {
+        "source": source,
+        "state": state,
+        "installed_version": installed,
+        "available_version": available,
+        "checked_at": now(),
+        "detail": detail,
+    }
+
+
+def apt():
+    command(APT_REFRESH)
+    targets = command(
+        ["apt-get", "indextargets", "--format", "$(FILENAME)", "Identifier: Packages"]
+    )
+    if not any(Path(line).is_file() for line in targets.splitlines()):
+        raise RuntimeError("APT has no configured binary package index on disk")
+    listing = command(["apt", "list", "--upgradable"])
+    packages = [line for line in listing.splitlines() if re.match(r"^[^ /]+/\S+", line)]
+    return record(
+        "APT · 当前配置的软件源",
+        "available" if packages else "current",
+        detail="\n".join(packages) if packages else "刷新成功，无可升级的软件包",
+    )
+
+
+def component_result(label, args):
+    result = subprocess.run(
+        args,
+        timeout=120,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if not result.stdout.strip() and result.returncode:
+        raise RuntimeError(result.stderr.strip() or f"exit {result.returncode}")
+    data = json.loads(result.stdout)
+    entry = record(
+        label,
+        data["state"],
+        data.get("installed_version"),
+        data.get("available_version"),
+        "\n".join(
+            str(data[key])
+            for key in ("changes", "compatibility", "sha256", "size", "error")
+            if data.get(key)
+        ),
+    )
+    if data.get("checked_at"):
+        instant = datetime.fromisoformat(data["checked_at"].replace("Z", "+00:00"))
+        if instant.tzinfo is None:
+            raise ValueError("Check returned a timestamp without a timezone")
+        entry["checked_at"] = instant.isoformat()
+    if result.returncode and entry["state"] not in (
+        "failed",
+        "incompatible",
+        "interrupted",
+    ):
+        entry.update(state="failed", detail=result.stderr.strip() or entry["detail"])
+    return entry
+
+
+def desktop():
+    return component_result(
+        "项目桌面组件 Release", [BIN / "omarchy-component-update", "check", "--json"]
+    )
+
+
+def runtime(kind):
+    return component_result(
+        RUNTIME_SOURCES[kind], [BIN / "omarchy-runtime-update", "check", kind, "--json"]
+    )
+
+
+def apk():
+    installed = os.getenv("OMARCHY_APK_VERSION_NAME")
+    with urlopen(
+        "https://api.github.com/repos/Audrey-cn/omarchy-android/releases/latest",
+        timeout=10,
+    ) as response:
+        latest = json.load(response)["tag_name"].removeprefix("v")
+    state = "unknown"
+    version_pattern = r"(\d+(?:\.\d+)*)(?:-[0-9A-Za-z.+-]+)?"
+    local_match = re.fullmatch(version_pattern, installed or "")
+    latest_match = re.fullmatch(version_pattern, latest)
+    if local_match and latest_match:
+        current = tuple(map(int, local_match[1].split(".")))
+        upstream = tuple(map(int, latest_match[1].split(".")))
+        length = max(len(current), len(upstream))
+        state = (
+            "available"
+            if upstream + (0,) * (length - len(upstream))
+            > current + (0,) * (length - len(current))
+            else "current"
+        )
+    return record("APK · Android 应用内升级", state, installed, latest)
+
+
+def deb_version(name):
+    result = subprocess.run(
+        ["dpkg-query", "-W", "-f=${db:Status-Status} ${Version}", name],
+        capture_output=True,
+        text=True,
+        env=dict(os.environ, LC_ALL="C"),
+        check=False,
+    )
+    if result.returncode == 1 and "no packages found" in result.stderr:
+        return None
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip())
+    status, _, version = result.stdout.partition(" ")
+    return version if status == "installed" else None
+
+
+def apt_candidate(name):
+    policy = command(["apt-cache", "policy", name])
+    match = re.search(r"^\s*Candidate: (\S+)", policy, re.MULTILINE)
+    if not match:
+        return None
+    candidate = match[1]
+    active = False
+    for line in policy.split("Version table:", 1)[-1].splitlines():
+        version = re.fullmatch(r"\s*(?:\*\*\* )?(\S+)\s+-?\d+\s*", line)
+        if version:
+            active = version[1] == candidate
+        elif active and APT_ORIGINS[name] in line.split(" ", 1)[-1]:
+            return candidate
+    return None
+
+
+def cc_release():
+    with urlopen(
+        "https://api.github.com/repos/farion1231/cc-switch/releases/latest", timeout=15
+    ) as response:
+        release = json.load(response)
+    tag = release["tag_name"]
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+        raise ValueError("Unreviewed CC Switch release tag")
+    name = f"CC-Switch-{tag}-Linux-arm64.deb"
+    asset = next((a for a in release["assets"] if a["name"] == name), None)
+    url = f"https://github.com/farion1231/cc-switch/releases/download/{tag}/{name}"
+    if not asset or asset.get("browser_download_url") != url:
+        raise ValueError("CC Switch ARM64 asset unavailable")
+    asset_id = asset.get("id")
+    if (
+        type(asset_id) is not int
+        or asset_id <= 0
+        or asset.get("url")
+        != f"https://api.github.com/repos/farion1231/cc-switch/releases/assets/{asset_id}"
+    ):
+        raise ValueError("CC Switch asset API identity mismatch")
+    if (
+        not re.fullmatch(r"sha256:[0-9a-f]{64}", asset.get("digest") or "")
+        or int(asset["size"]) <= 0
+    ):
+        raise ValueError("CC Switch ARM64 asset lacks verified size or digest")
+    return tag[1:], asset
+
+
+def download_cc_asset(asset, path):
+    api = Request(asset["url"], headers={"Accept": "application/octet-stream"})
+    for request in (api, asset["browser_download_url"]):
+        digest = hashlib.sha256()
+        try:
+            with urlopen(request, timeout=30) as src, path.open("wb") as dest:
+                if (
+                    "json" in getattr(src, "headers", {}).get("Content-Type", "")
+                    and request is api
+                ):
+                    raise OSError(
+                        "CC Switch API returned metadata instead of the asset"
+                    )
+                while chunk := src.read(1024 * 1024):
+                    if dest.tell() + len(chunk) > asset["size"]:
+                        raise ValueError("CC Switch download exceeds release size")
+                    dest.write(chunk)
+                    digest.update(chunk)
+        except (OSError, HTTPException) as error:
+            if request is not api:
+                raise
+            print(
+                f"CC Switch asset API unavailable ({error}); retrying release download.",
+                file=sys.stderr,
+            )
+            continue
+        if (
+            path.stat().st_size != asset["size"]
+            or "sha256:" + digest.hexdigest() != asset["digest"]
+        ):
+            raise ValueError("CC Switch asset integrity check failed")
+        return
+
+
+def install_cc():
+    installed = deb_version("cc-switch")
+    if not installed:
+        raise ValueError("请先通过应用安装菜单安装 CC Switch")
+    version, asset = cc_release()
+    if subprocess.run(
+        ["dpkg", "--compare-versions", version, "gt", installed], check=False
+    ).returncode:
+        raise ValueError("CC Switch 无更新版本")
+    with tempfile.TemporaryDirectory(prefix="omarchy-cc-switch-") as stage:
+        path = Path(stage) / "cc-switch.deb"
+        download_cc_asset(asset, path)
+        for key, expected in [
+            ("Package", "cc-switch"),
+            ("Architecture", "arm64"),
+            ("Version", version),
+        ]:
+            if command(["dpkg-deb", "-f", path, key]).strip() != expected:
+                raise ValueError(f"Unexpected CC Switch DEB {key}")
+        subprocess.run(["apt-get", "install", str(path)], check=True)
+        if deb_version("cc-switch") != version:
+            raise ValueError("CC Switch installed version mismatch")
+        subprocess.run([BIN / "omarchy-fix-desktops"], check=True)
+
+
+def third_party(name, apt_checked):
+    source, probe, target = THIRD_PARTY[name]
+    version = None
+    if probe == "deb":
+        version = deb_version(target)
+        present = bool(version)
+    elif probe == "cmd":
+        present = (
+            shutil.which(target) is not None
+            or (Path.home() / ".local/bin" / target).is_file()
+        )
+        if name == "hermes-cli" and not present:
+            home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+            present = (home / "hermes-agent/venv/bin/hermes").is_file()
+    else:
+        present = Path(target).exists()
+    if not present:
+        return record(source, "not-installed")
+    if name in APT_ORIGINS:
+        if not apt_checked:
+            return record(
+                source, "failed", version, detail="APT 索引刷新失败，候选版本未验证"
+            )
+        candidate = apt_candidate(name)
+        if candidate is None:
+            return record(
+                source, "unknown", version, detail="当前候选版本缺少已登记的上游 APT 源"
+            )
+        newer = subprocess.run(
+            ["dpkg", "--compare-versions", candidate, "gt", version], check=False
+        ).returncode
+        if newer not in (0, 1):
+            raise ValueError("APT version comparison failed")
+        return record(
+            source,
+            "available" if newer == 0 else "current",
+            version,
+            candidate,
+            "通过 APT 更新",
+        )
+    if name == "cc-switch":
+        candidate, asset = cc_release()
+        status = subprocess.run(
+            ["dpkg", "--compare-versions", candidate, "gt", version], check=False
+        ).returncode
+        if status not in (0, 1):
+            raise ValueError("Cannot compare installed CC Switch version")
+        return record(
+            source,
+            "available" if status == 0 else "current",
+            version,
+            candidate,
+            asset["digest"],
+        )
+    if name == "hermes-desktop":
+        import runpy
+
+        repair = runpy.run_path(str(BIN / "omarchy-repair-hermes-onboarding"))
+        repair["inspect"](Path(target).parent)
+        return record(
+            source,
+            "pinned",
+            repair["PROFILE"]["package"],
+            detail="仅可重装已验证的适配版本",
+        )
+    if name == "doubao-say":
+        version = command(["git", "-C", target, "rev-parse", "--short", "HEAD"]).strip()
+    return record(
+        source, "unsupported", version, detail="无已验证的自动更新方式，按上游说明维护"
+    )
+
+
+def checked(label, callback):
+    try:
+        return callback()
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        RuntimeError,
+        subprocess.SubprocessError,
+    ) as error:
+        return record(label, "failed", detail=str(error)[:500])
+
+
+def check():
+    rows = {
+        "apt": checked("APT · 当前配置的软件源", apt),
+        "desktop": checked("项目桌面组件 Release", desktop),
+        "apk": checked("Android APK", apk),
+    }
+    for kind, source in RUNTIME_SOURCES.items():
+        rows[kind] = checked(source, lambda kind=kind: runtime(kind))
+    for name, (source, _, _) in THIRD_PARTY.items():
+        rows[name] = checked(
+            source,
+            lambda name=name: third_party(name, rows["apt"]["state"] != "failed"),
+        )
+    if not rows["apk"]["installed_version"]:
+        rows["apk"]["installed_version"] = os.getenv("OMARCHY_APK_VERSION_NAME")
+    return rows
+
+
+def save(rows):
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=CACHE.parent, mode="w", delete=False) as out:
+        json.dump(rows, out, ensure_ascii=False)
+    os.replace(out.name, CACHE)
+
+
+def cached():
+    try:
+        rows = json.loads(CACHE.read_text())
+        for row in rows.values():
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(row["checked_at"])
+            if age >= timedelta(hours=24) or age < timedelta(0):
+                row["last_state"] = row["state"]
+                row["state"] = "stale"
+        return rows
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {}
+
+
+def display(rows):
+    for name, row in rows.items():
+        print(
+            f"{name} [{row['state']}] {row['source']} | {row['installed_version'] or '?'} → "
+            f"{row['available_version'] or '?'} | {row['checked_at']}"
+        )
+        if row["detail"]:
+            print(" ", row["detail"])
+
+
+def waybar(rows):
+    states = {row["state"] for row in rows.values()}
+    if {"apt", "apk", "desktop", *RUNTIME_SOURCES, *THIRD_PARTY} - rows.keys():
+        states.add("unknown")
+    available = [name for name, r in rows.items() if r["state"] == "available"]
+    klass = (
+        "has-updates"
+        if available
+        else "needs-check"
+        if not rows or states - {"current", "not-installed"}
+        else "up-to-date"
+    )
+    tooltip = (
+        "\n".join(
+            f"{name}: {r['state']} ({r['checked_at']})" for name, r in rows.items()
+        )
+        or "尚未检查，点击打开更新中心"
+    )
+    print(
+        json.dumps(
+            dict(
+                text={"has-updates": "", "needs-check": "?", "up-to-date": ""}[klass],
+                tooltip=tooltip,
+                **{"class": klass},
+            )
+        )
+    )
+
+
+def refresh():
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    with CACHE.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = check()
+        save(rows)
+    return rows
+
+
+def apt_upgrade():
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    with CACHE.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        rows = cached()
+        result = checked("APT · 当前配置的软件源", apt)
+        rows["apt"] = result
+        save(rows)
+        display({"apt": result})
+        if result["state"] == "failed":
+            raise RuntimeError(result["detail"])
+        if result["state"] == "current":
+            return
+        # Package operations also change installed versions of third-party APT packages.
+        for name in ("apt", *APT_ORIGINS):
+            if name in rows:
+                rows[name]["state"] = "unknown"
+                rows[name]["detail"] = "软件包操作已开始，需要重新检查"
+        save(rows)
+        try:
+            subprocess.run(["apt-get", "upgrade"], check=True)
+        except (OSError, subprocess.SubprocessError) as error:
+            rows["apt"] = record("APT · 当前配置的软件源", "failed", detail=str(error))
+            save(rows)
+            raise
+
+
+def menu():
+    rows = cached()
+    display(rows)
+    if not rows:
+        print("尚无检查记录")
+    print(
+        "1 检查各来源   2 升级 APT 软件包   3 安装项目桌面更新   4 恢复桌面组件\n"
+        "5 重装已验证 Hermes Desktop   6 APT 独立清理   7 图形栈   8 浏览器配套   9 更新 CC Switch   10 本机组件清单   11 恢复 Hermes Desktop   回车退出"
+    )
+    choice = input("选择 > ").strip()
+    if choice == "1":
+        rows = refresh()
+        display(rows)
+        return int(any(r["state"] == "failed" for r in rows.values()))
+    if choice == "2":
+        apt_upgrade()
+    elif choice == "3":
+        result = desktop()
+        display({"desktop": result})
+        if result["state"] != "available":
+            print("只有确认可用且兼容的组件可在此安装")
+            return int(result["state"] != "current")
+        if input("安装此版本？ [y/N] ").strip().lower() != "y":
+            return 0
+        subprocess.run(
+            [
+                BIN / "omarchy-component-update",
+                "install",
+                "desktop",
+                "--version",
+                result["available_version"],
+            ],
+            check=True,
+        )
+    elif choice == "4":
+        subprocess.run([BIN / "omarchy-component-update", "recover"], check=True)
+    elif choice == "5":
+        subprocess.run([BIN / "omarchy-install-hermes"], check=True)
+    elif choice == "6":
+        subprocess.run(["apt-get", "autoremove"], check=True)
+    elif choice == "11":
+        subprocess.run([BIN / "omarchy-install-hermes", "recover"], check=True)
+    elif choice == "10":
+        subprocess.run(
+            [BIN / "omarchy-component-update", "inventory", "--json"], check=True
+        )
+    elif choice == "9":
+        install_cc()
+    elif choice in ("7", "8"):
+        action = input("1 检查   2 安装   3 恢复 > ").strip()
+        if action in ("1", "2", "3"):
+            subprocess.run(
+                [
+                    BIN / "omarchy-runtime-update",
+                    {"1": "check", "2": "install", "3": "recover"}[action],
+                    "graphics" if choice == "7" else "browser",
+                ],
+                check=True,
+            )
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "action", choices=["status", "check", "waybar", "menu", "sources"]
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    if args.action == "sources":
+        print(
+            json.dumps(
+                {
+                    name: {"source": source, "probe": kind, "target": target}
+                    for name, (source, kind, target) in THIRD_PARTY.items()
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.action == "menu":
+        return menu()
+    rows = refresh() if args.action == "check" else cached()
+    if args.action == "waybar":
+        waybar(rows)
+    elif args.json:
+        print(json.dumps(rows, ensure_ascii=False))
+    elif rows:
+        display(rows)
+    else:
+        print("尚无检查记录")
+    return int(
+        args.action == "check" and any(r["state"] == "failed" for r in rows.values())
+    )
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        sys.exit(str(error))

@@ -124,7 +124,11 @@ class DesktopInstallService : Service() {
         if ("omarchy" in Global.installedContainers) throw IOException("An existing desktop cannot be replaced")
         val root = InitialDesktopState.directory(this)
         val downloads = File(root, "downloads")
-        val downloader = ResumableImageDownloader()
+        var downloadSource = ""
+        val downloader = ResumableImageDownloader(onSource = { index, total ->
+            downloadSource = "镜像来源 $index / $total"
+            publish(InitialDesktopState.state.value.copy(message = "$downloadSource · 正在连接…"))
+        })
         val imports = InitialImageImportCache(File(root, "imports"))
         val installer = InitialDesktopInstaller(this)
         val importUri = localUri ?: previous.importUri?.takeIf { previous.image == spec }?.let(Uri::parse)
@@ -153,7 +157,7 @@ class DesktopInstallService : Service() {
             val elapsed = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1)
             val speed = ((count - offset).coerceAtLeast(0) * 1000 / elapsed)
             val state = DesktopSetupState(if (offline) SetupPhase.IMPORTING else SetupPhase.DOWNLOADING,
-                spec, count, if (count == spec.bytes) "正在校验镜像完整性…" else "", speed, importUri?.toString())
+                spec, count, if (count == spec.bytes) "正在校验镜像完整性…" else if (offline) "正在读取本地镜像…" else downloadSource, speed, importUri?.toString())
             InitialDesktopState.update(this, state)
             val now = SystemClock.elapsedRealtime()
             if (now - lastNotice > 1000) { notify(state); lastNotice = now }
@@ -169,11 +173,12 @@ class DesktopInstallService : Service() {
                 try { result = downloader.download(spec, downloads, { pause.get() }, progress); break }
                 catch (e: IOException) {
                     val networkError = generateSequence<Throwable>(e) { it.cause }.any {
-                        it is java.net.SocketException || it is java.net.SocketTimeoutException || it is java.net.UnknownHostException
+                        it is java.net.SocketException || it is java.net.SocketTimeoutException || it is java.net.UnknownHostException || it is RetryableImageResponse
                     }
                     if (!networkError || attempts++ >= 2 || pause.get()) throw e
-                    publish(InitialDesktopState.state.value.copy(message = "连接中断，正在重试，已下载内容会保留。"))
-                    repeat(30) { if (!pause.get()) Thread.sleep(100) }
+                    publish(InitialDesktopState.state.value.copy(message = "网络或镜像服务暂时不可用，正在重试，已下载内容会保留。"))
+                    val retryDelay = (e as? RetryableImageResponse)?.retryAfterSeconds?.coerceIn(1, 5) ?: 3L
+                    repeat((retryDelay * 10).toInt()) { if (!pause.get()) Thread.sleep(100) }
                 }
             }
             result

@@ -42,6 +42,35 @@ class ResumableImageDownloaderTest {
     }
 
     @Test
+    fun temporaryFailureFallsBackAndReportsOnlySourceNumbers() = serve({
+        if (requestURI.path == "/busy") {
+            responseHeaders.set("Retry-After", "300")
+            sendResponseHeaders(503, -1)
+        } else sendImageOrRemainder(tag)
+    }) { spec, requests ->
+        val selected = mutableListOf<Pair<Int, Int>>()
+        val candidate = spec.copy(urls = listOf(spec.urls.single().replace("/image", "/busy"), spec.urls.single()))
+        val file = ResumableImageDownloader(allowHttpForTests = true,
+            onSource = { index, total -> selected += index to total })
+            .download(candidate, temporary.newFolder())!!
+        assertArrayEquals(image, file.readBytes())
+        assertEquals(listOf(1 to 2, 2 to 2), selected)
+        assertEquals(2, requests.size)
+    }
+
+    @Test
+    fun temporaryServerFailureIsDistinguishedFromCorruptDownload() = serve({
+        responseHeaders.set("Retry-After", "300")
+        sendResponseHeaders(429, -1)
+    }) { spec, _ ->
+        val failure = assertThrows(RetryableImageResponse::class.java) {
+            downloader().download(spec, temporary.newFolder())
+        }
+        assertEquals(429, failure.status)
+        assertEquals(5L, failure.retryAfterSeconds!!)
+    }
+
+    @Test
     fun publicAssetEndpointSelectsBinaryAcrossRedirectAndResume() = serve({
         when {
             requestHeaders.getFirst("Accept") != "application/octet-stream" -> {

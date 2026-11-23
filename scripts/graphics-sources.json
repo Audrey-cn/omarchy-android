@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "platform": "ubuntu-24.04-arm64",
+  "backend": "X11 SHM / Pixman",
+  "sources": [
+    {
+      "id": "wayland",
+      "version": "1.23.1",
+      "url": "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.23.1/downloads/wayland-1.23.1.tar.xz",
+      "archive": "wayland-1.23.1.tar.xz",
+      "sha256": "864fb2a8399e2d0ec39d56e9d9b753c093775beadc6022ce81f441929a81e5ed",
+      "bytes": 238212
+    },
+    {
+      "id": "wayland-protocols",
+      "version": "1.38",
+      "url": "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.38/downloads/wayland-protocols-1.38.tar.xz",
+      "archive": "wayland-protocols-1.38.tar.xz",
+      "sha256": "ff17292c05159d2b20ce6cacfe42d7e31a28198fa1429a769b03af7c38581dbe",
+      "bytes": 102648
+    },
+    {
+      "id": "libinput",
+      "version": "1.26.2",
+      "url": "https://gitlab.freedesktop.org/libinput/libinput/-/archive/1.26.2/libinput-1.26.2.tar.gz",
+      "archive": "libinput-1.26.2.tar.gz",
+      "sha256": "5c1c4150f217fea1db2d1fd88e2607b2f1928cfde65c34da65a9f24dcfd69464",
+      "bytes": 1032914
+    },
+    {
+      "id": "wlroots",
+      "version": "0.18.2",
+      "url": "https://gitlab.freedesktop.org/wlroots/wlroots/-/releases/0.18.2/downloads/wlroots-0.18.2.tar.gz",
+      "archive": "wlroots-0.18.2.tar.gz",
+      "sha256": "cf776c169169f279808d9eabc6583f484338dcd454c966a285ff178c88c105d4",
+      "bytes": 629379
+    },
+    {
+      "id": "sway",
+      "version": "1.10.1",
+      "url": "https://github.com/swaywm/sway/releases/download/1.10.1/sway-1.10.1.tar.gz",
+      "archive": "sway-1.10.1.tar.gz",
+      "sha256": "b2fbf3a2f94c8926efa18d6af59bb9f5f1eafa6d46491284b1610c57bef2d105",
+      "bytes": 5588240
+    }
+  ]
+}
