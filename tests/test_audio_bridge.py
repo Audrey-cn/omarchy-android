@@ -248,7 +248,11 @@ class PulseSetup(unittest.TestCase):
         self.assertEqual(self.modules, first_modules)
         self.assertEqual(len(self.modules), 2)
         commands = [argv for argv, _ in self.calls]
-        self.assertIn(["pulseaudio", "--daemonize=yes", "--exit-idle-time=-1", "--disallow-exit", "--disable-shm=yes", "--fail=no"], commands)
+        self.assertIn([
+            "pulseaudio", "--daemonize=yes", "--exit-idle-time=-1", "--disallow-exit",
+            "--disable-shm=yes", "--fail=no", "-n",
+            "-L", "module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse/native",
+        ], commands)
         self.assertEqual(sum(argv[0] == "pulseaudio" for argv in commands), 1)
         self.assertIn(["pactl", "load-module", "module-null-sink", "sink_name=omarchy_out", "rate=48000", "channels=2", "format=float32le", "sink_properties=device.description=Omarchy_Audio"], commands)
         self.assertIn(["pactl", "load-module", "module-pipe-source", "source_name=omarchy_mic", "file=" + str(self.fifo), "rate=48000", "channels=1", "format=float32le", "source_properties=device.description=Omarchy_Mic"], commands)

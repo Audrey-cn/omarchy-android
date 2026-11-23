@@ -35,12 +35,21 @@ LOG = logging.getLogger("omarchy-audio")
 
 
 def pulse_environment():
-    return {**os.environ, "XDG_RUNTIME_DIR": "/tmp",
-            "PULSE_RUNTIME_PATH": "/tmp/pulse", "PULSE_SERVER": "unix:/tmp/pulse/native"}
+    return {
+        **os.environ,
+        "HOME": "/tmp/pulse-home",
+        "XDG_RUNTIME_DIR": "/tmp",
+        "PULSE_RUNTIME_PATH": "/tmp/pulse",
+        "PULSE_STATE_PATH": "/tmp/pulse",
+        "PULSE_CONFIG_PATH": "/tmp/pulse",
+        "PULSE_SERVER": "unix:/tmp/pulse/native",
+    }
 
 
 def configure_pulse(fifo_path=MIC_FIFO):
     """Reuse matching modules; replace only this bridge's stale configuration."""
+    Path("/tmp/pulse").mkdir(parents=True, exist_ok=True)
+    Path("/tmp/pulse-home").mkdir(parents=True, exist_ok=True)
     env = pulse_environment()
 
     def run(*args, check=True):
@@ -49,7 +58,8 @@ def configure_pulse(fifo_path=MIC_FIFO):
 
     if run("pactl", "info", check=False).returncode:
         run("pulseaudio", "--daemonize=yes", "--exit-idle-time=-1", "--disallow-exit",
-            "--disable-shm=yes", "--fail=no")
+            "--disable-shm=yes", "--fail=no", "-n",
+            "-L", "module-native-protocol-unix auth-anonymous=1 socket=/tmp/pulse/native")
         run("pactl", "info")
 
     modules = []
