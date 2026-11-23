@@ -49,6 +49,19 @@ def temporary_umask(mask):
 
 
 class RuntimeContracts(unittest.TestCase):
+    def test_root_display_selection_rejects_nonlocal_or_malformed_names(self):
+        argv = ["sh", REPO / "runtime/chroot/ubuntu-chroot.sh", "--print-x11-display"]
+        env = dict(os.environ)
+        env.pop("OMARCHY_X11_DISPLAY", None)
+        self.assertEqual(subprocess.check_output(argv, env=env, text=True).strip(), ":0")
+        for display in (":1", ":2", ":12"):
+            result = subprocess.check_output(argv, env=dict(env, OMARCHY_X11_DISPLAY=display), text=True)
+            self.assertEqual(result.strip(), display)
+        for display in ("", ":", "2", ":2.0", "host:2", ":2/../X1", ":2 extra", "::2", ":-2"):
+            result = subprocess.run(argv, env=dict(env, OMARCHY_X11_DISPLAY=display), capture_output=True)
+            self.assertEqual(result.returncode, 2, display)
+            self.assertFalse(result.stdout)
+
     def test_root_inspection_matches_published_catalog(self):
         catalog = json.loads((REPO / "apps/android/app/src/main/assets/initial-images.json").read_text())
         receipt = dict(line.split("=", 1) for line in subprocess.check_output(

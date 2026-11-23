@@ -105,4 +105,4 @@ done
 printf '%s\n' "$bb" > "$base/busybox.path"
 printf '%s %s\n' "$tag" "$sha" > "$base/image.receipt"
 "$base/ubuntu-chroot.sh" /bin/bash -ec '/usr/local/bin/sway --version; /usr/local/bin/omarchy-playwright128 check'
-echo "Installed $base/rootfs. Start termux-x11 :1 in Termux, then run su -c $base/start-omarchy.sh."
+echo "Installed $base/rootfs. Start termux-x11 :0 in Termux, then run su -c $base/start-omarchy.sh. For another display pass OMARCHY_X11_DISPLAY=:N inside su -c."

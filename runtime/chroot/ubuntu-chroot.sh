@@ -1,6 +1,16 @@
 #!/system/bin/sh
 # A private mount namespace and subreaper confine each foreground session.
 set -eu
+display=${OMARCHY_X11_DISPLAY-:0}
+number=${display#:}
+case "$number" in
+    ""|*[!0-9]*) echo "OMARCHY_X11_DISPLAY must be : followed by digits" >&2; exit 2;;
+esac
+[ "$display" = ":$number" ] || { echo "OMARCHY_X11_DISPLAY must be : followed by digits" >&2; exit 2; }
+if [ "${1:-}" = --print-x11-display ]; then
+    printf '%s\n' "$display"
+    exit 0
+fi
 base=/data/omarchy-chroot
 root=$base/rootfs
 bb=$(cat "$base/busybox.path")
@@ -33,4 +43,4 @@ if [ -d /data/data/com.termux/files/usr/tmp/.X11-unix ]; then
     mkdir "$root/tmp/.X11-unix"
     "$bb" mount --bind /data/data/com.termux/files/usr/tmp/.X11-unix "$root/tmp/.X11-unix"
 fi
-exec "$bb" chroot "$root" /usr/bin/env -i HOME=/root USER=root SHELL=/bin/bash TERM=xterm-256color OMARCHY_RUNTIME_KIND=chroot OMARCHY_RUNTIME_API=1 LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DISPLAY=:1 XDG_RUNTIME_DIR=/tmp WLR_BACKENDS=x11 WLR_RENDERER=pixman WLR_NO_HARDWARE_CURSORS=1 /usr/bin/python3 /run/omarchy-supervise.py "$@"
+exec "$bb" chroot "$root" /usr/bin/env -i HOME=/root USER=root SHELL=/bin/bash TERM=xterm-256color OMARCHY_RUNTIME_KIND=chroot OMARCHY_RUNTIME_API=1 LANG=C.UTF-8 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin DISPLAY="$display" OMARCHY_X11_DISPLAY="$display" XDG_RUNTIME_DIR=/tmp WLR_BACKENDS=x11 WLR_RENDERER=pixman WLR_NO_HARDWARE_CURSORS=1 /usr/bin/python3 /run/omarchy-supervise.py "$@"

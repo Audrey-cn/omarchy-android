@@ -51,12 +51,12 @@ case "$ACTION" in
     case "$ITEM" in
       dnd)
         if [[ -f "$STATE_DIR/dnd" ]]; then
+          /usr/local/bin/omarchy_session.py mako dnd-off || exit 1
           rm -f "$STATE_DIR/dnd"
-          makoctl mode -r do-not-disturb 2>/dev/null || true
           notify-send -t 2000 "勿扰模式" "已关闭，恢复弹窗通知" 2>/dev/null || true
         else
+          /usr/local/bin/omarchy_session.py mako dnd-on || exit 1
           touch "$STATE_DIR/dnd"
-          makoctl mode -a do-not-disturb 2>/dev/null || true
         fi
         ;;
       night)

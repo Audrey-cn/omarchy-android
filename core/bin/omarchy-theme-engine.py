@@ -580,7 +580,7 @@ bindsym $mod+Shift+5 move container to workspace number 5
         subprocess.Popen(["swaybg", "-i", out_png, "-m", "fill"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Restart Official Waybar & reload Mako on Wayland
-    subprocess.run(["makoctl", "reload"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["/usr/local/bin/omarchy_session.py", "mako", "reload"], env=env)
     subprocess.Popen(["/usr/local/bin/launch-waybar"], env=env)
     return True
 

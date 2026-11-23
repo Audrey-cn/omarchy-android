@@ -39,3 +39,37 @@ class SessionScope(unittest.TestCase):
                 os.symlink("mnt:[" + namespace + "]", path / "ns/mnt")
             self.assertEqual(module.matching_processes({"waybar"}, {"SWAYSOCK": "a"}, proc, 100), [101])
             self.assertEqual(module.matching_processes({"waybar"}, {}, proc, 100), [])
+
+    def test_mako_fallback_preserves_other_modes_and_reloads_without_busctl(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        bus = Mock()
+        modes = ["default", "presentation"]
+        methods = []
+
+        def call(dest, obj, interface, method, arguments, reply, flags, timeout, cancel):
+            self.assertEqual((dest, obj, interface),
+                             ("org.freedesktop.Notifications", "/fr/emersion/Mako", "fr.emersion.Mako"))
+            methods.append(method)
+            if method == "ListModes":
+                return SimpleNamespace(unpack=lambda: (modes.copy(),))
+            if method == "SetModes":
+                signature, values = arguments
+                self.assertEqual(signature, "(as)")
+                modes[:] = values[0]
+
+        bus.call_sync.side_effect = call
+        gio = SimpleNamespace(BusType=SimpleNamespace(SESSION=1), DBusCallFlags=SimpleNamespace(NO_AUTO_START=2),
+                              bus_get_sync=lambda *_: bus)
+        gi_repository = SimpleNamespace(Gio=gio, GLib=SimpleNamespace(Variant=lambda t, v: (t, v)))
+        with patch.dict("sys.modules", {"gi.repository": gi_repository}), patch.object(module.shutil, "which", return_value=None):
+            module.mako_action("dnd-on")
+            self.assertEqual(modes, ["default", "presentation", "do-not-disturb"])
+            module.mako_action("dnd-on")
+            module.mako_action("dnd-off")
+            module.mako_action("reload")
+            self.assertEqual(modes, ["default", "presentation"])
+            self.assertEqual(methods, ["ListModes", "SetModes", "ListModes", "ListModes", "SetModes", "Reload"])
+        with patch.object(module.shutil, "which", return_value="/bin/tool"), patch.object(module.subprocess, "run") as run:
+            module.mako_action("dnd-on")
+            self.assertEqual(run.call_args.args[0], ["makoctl", "mode", "-a", "do-not-disturb"])

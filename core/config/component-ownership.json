@@ -45,7 +45,8 @@
       "d031aa4c5d78193e350e470b805e4e56c68e62f6e4e55a6aba3ed5863e21a18e"
     ],
     "omarchy-indicator": [
-      "87da6896d774e936a4b240042380844ea305f951d512438712c31bf6e113ae21"
+      "87da6896d774e936a4b240042380844ea305f951d512438712c31bf6e113ae21",
+      "b98e26f7b35fa5ff7b8a707b5dc535e79b2ed9ba77eb94d85b5302ce0fb434ee"
     ],
     "omarchy-install-firefox": [
       "f73b07c5b980133da6c4c70d69f029226b5ad02c72a33d7910001a64da36a10f"
@@ -100,13 +101,17 @@
       "73bc54557e5e74ebb6d5f7a098f636a1642e215b4fafe6d52b39f3921313d777"
     ],
     "omarchy-theme-engine.py": [
-      "0e9149dbb00bd8b3b08bcf27024131d0bfa931ebd6ae8644713667698708cdee"
+      "0e9149dbb00bd8b3b08bcf27024131d0bfa931ebd6ae8644713667698708cdee",
+      "cbca4bba16610fc091aea476ca0403c876c4eab3217b4893d7eae533f4c7b3b6"
     ],
     "omarchy-toggle-ime": [
       "b65230f5bff79e5706966c29cceffea2e2856f64555e1a41046f381ddf695d9b"
     ],
     "omarchy-update-check": [
       "844fa644a7969b2b8cbdef4559c2f8f4be122e1f58e6a580fd9c42dda973a6b2"
+    ],
+    "omarchy_session.py": [
+      "bc5c9646d43c4196d3792f8da5d02402e81912b7e221ca350fe04e67179b35be"
     ],
     "wtype": [
       "8522f4c498d387d96c2a86e5114c049257fcb2cb6ea415c05371f81ed3420899"

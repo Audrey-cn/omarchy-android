@@ -1,11 +1,14 @@
 #!/system/bin/sh
 set -eu
-[ -S /data/data/com.termux/files/usr/tmp/.X11-unix/X1 ] || {
-    echo 'Start termux-x11 :1 inside Termux before launching the desktop.' >&2
+wrapper=/data/omarchy-chroot/ubuntu-chroot.sh
+display=$("$wrapper" --print-x11-display)
+export OMARCHY_X11_DISPLAY="$display"
+[ -S "/data/data/com.termux/files/usr/tmp/.X11-unix/X${display#:}" ] || {
+    echo "Start termux-x11 $display inside Termux before launching the desktop." >&2
     exit 1
 }
 am start -n com.termux.x11/.MainActivity >/dev/null
-exec /data/omarchy-chroot/ubuntu-chroot.sh /bin/bash -es <<'SESSION'
+exec "$wrapper" /bin/bash -es <<'SESSION'
 # The public e550 image predates per-session signaling. Require the scoped
 # command and library from the same trusted checkout before starting any UI.
 python3 - <<'CAPABILITY'
@@ -59,7 +62,10 @@ if [[ ! -s "$config/waybar/config.jsonc" || ! -s "$config/waybar/style.css" ||
     mkdir "$render/config" "$render/state"
     # Render the public image's original theme engine without touching live
     # configurations or invoking its old process-wide restart commands.
-    unshare --mount --propagation private /bin/bash -es -- "$render" "$theme" "$background" <<'RENDER'
+    # ubuntu-chroot.sh already made the outer namespace recursively private.
+    # Preserve that property when cloning it: the chroot's / is a directory
+    # within /data, so a second propagation change on / would return EINVAL.
+    unshare --mount --propagation unchanged /bin/bash -es -- "$render" "$theme" "$background" <<'RENDER'
 mount --bind "$1/config" /root/.config
 mount --bind "$1/state" /root/.local/state/omarchy/current
 for command in pidof swaybg swaymsg makoctl launch-waybar; do
@@ -102,7 +108,7 @@ panel=$!
 browser=$!
 for ((i=0;i<225;i++)); do
     for pid in "$compositor" "$notifications" "$wallpaper" "$panel" "$browser"; do kill -0 "$pid"; done
-    if grep -q "Bar configured .* for output:" /tmp/waybar.log && makoctl mode >/dev/null 2>&1 && swaymsg -t get_tree |
+    if grep -q "Bar configured .* for output:" /tmp/waybar.log && gdbus call --session --timeout 2 --dest org.freedesktop.Notifications --object-path /fr/emersion/Mako --method fr.emersion.Mako.ListModes >/dev/null 2>&1 && swaymsg -t get_tree |
         jq -e '.. | objects | select((.app_id // "") | test("chrom";"i"))' >/dev/null; then
         echo "Root desktop ready: Sway, Waybar, wallpaper, Mako and Chromium"
         wait "$compositor"
