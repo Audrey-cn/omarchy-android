@@ -35,6 +35,8 @@ class DesktopInstallService : Service() {
     private val worker = Executors.newSingleThreadExecutor()
     private val pause = AtomicBoolean(false)
     private val cancel = AtomicBoolean(false)
+    private val controlLock = Any()
+    private var installing = false
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate()
@@ -44,9 +46,11 @@ class DesktopInstallService : Service() {
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action in listOf(PAUSE, CANCEL)) {
-            if (InitialDesktopState.state.value.phase == SetupPhase.INSTALLING) return START_NOT_STICKY
-            pause.set(true)
-            if (intent?.action == CANCEL) cancel.set(true)
+            synchronized(controlLock) {
+                if (installing) return START_NOT_STICKY
+                pause.set(true)
+                if (intent?.action == CANCEL) cancel.set(true)
+            }
             if (!InitialDesktopState.running.get()) {
                 if (cancel.get()) cancelCache()
                 stopSelf(startId)
@@ -55,7 +59,7 @@ class DesktopInstallService : Service() {
         }
         if (intent?.action != START) { stopSelf(startId); return START_NOT_STICKY }
         if (!InitialDesktopState.running.compareAndSet(false, true)) return START_NOT_STICKY
-        pause.set(false); cancel.set(false)
+        synchronized(controlLock) { pause.set(false); cancel.set(false); installing = false }
         val notice = notification(InitialDesktopState.state.value)
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTICE, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else startForeground(NOTICE, notice)
@@ -72,7 +76,8 @@ class DesktopInstallService : Service() {
                 }
                 publish(InitialDesktopState.state.value.copy(phase = SetupPhase.FAILED, message = message, bytesPerSecond = 0))
             } finally {
-                if (cancel.get()) cancelCache()
+                if (cancel.get() && !installing) cancelCache()
+                synchronized(controlLock) { installing = false }
                 InitialDesktopState.running.set(false)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -126,7 +131,10 @@ class DesktopInstallService : Service() {
             return
         }
         publish(DesktopSetupState(SetupPhase.VERIFYING, spec, spec.bytes, "正在校验并准备安装…"))
-        if (pause.get()) { publish(DesktopSetupState(SetupPhase.PAUSED, spec, spec.bytes)); return }
+        val begin = synchronized(controlLock) {
+            if (pause.get()) false else { installing = true; true }
+        }
+        if (!begin) { publish(DesktopSetupState(SetupPhase.PAUSED, spec, spec.bytes)); return }
         publish(DesktopSetupState(SetupPhase.INSTALLING, spec, spec.bytes, "正在解压和配置桌面，请稍候…"))
         InitialDesktopInstaller(this).install(spec, archive)
         publish(DesktopSetupState(SetupPhase.COMPLETE, spec, spec.bytes, "桌面安装完成，可以启动。"))

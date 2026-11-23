@@ -51,7 +51,7 @@ jobs:
           OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD: ${{ github.repository == 'Audrey-cn/omarchy-android' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD || '' }}
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug --no-daemon
+          ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest --no-daemon
       - name: Verify online installer layout, native libraries, certificate and version
         run: |
           python3 ../../scripts/android-build.py verify --delivery online-installer --apk app/build/outputs/apk/debug/app-debug.apk --metadata "$OMARCHY_ANDROID_BUILD_METADATA" --build-tools "$ANDROID_SDK_ROOT/build-tools/36.0.0"
@@ -63,6 +63,12 @@ jobs:
           path: |
             apps/android/app/build/outputs/apk/debug/app-debug.apk
             apps/android/app/build/outputs/apk/debug/build-metadata.json
+          if-no-files-found: error
+      - name: Upload opt-in device acceptance tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmarchyAndroid-device-tests${{ steps.android-build.outputs.artifact_suffix }}
+          path: apps/android/app/build/outputs/apk/androidTest/debug/*.apk
           if-no-files-found: error
       - name: Remove runner signing key
         if: always()

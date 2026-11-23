@@ -90,7 +90,12 @@ class InitialDesktopInstaller(
             Os.chmod(file.absolutePath, mode)
         }
         val machineId = inside(stage, "etc/machine-id")
-        if (machineId.readText().isBlank()) machineId.writeText(UUID.randomUUID().toString().replace("-", "") + "\n")
+        if (machineId.readText().isBlank()) {
+            val mode = Os.stat(machineId.absolutePath).st_mode and 511
+            Os.chmod(machineId.absolutePath, mode or 128)
+            machineId.writeText(UUID.randomUUID().toString().replace("-", "") + "\n")
+            Os.chmod(machineId.absolutePath, mode)
+        }
     }
     private fun inside(stage: File, path: String): File {
         val file = File(stage, path)
