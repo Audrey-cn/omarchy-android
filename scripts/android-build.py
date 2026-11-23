@@ -22,6 +22,7 @@ import zipfile
 ALIAS = "omarchy-android-test"
 PASSWORD_ENV = "OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD"
 CANONICAL_REPO = "Audrey-cn/omarchy-android"
+NATIVE_NAMES = {"libproot-omarchy-readonly.so", "libproot-omarchy-loader-aarch64.so", "libproot-omarchy-loader-arm.so"}
 
 
 def command(args, *, cwd=None, safe_error=None):
@@ -74,6 +75,9 @@ def github_lines(variable, values):
 
 def prepare(repo, output):
     metadata = version(repo)
+    native = native_runtime(repo)
+    if native is not None:
+        metadata["expectedNativeRuntime"] = native
     trusted = (os.environ.get("GITHUB_ACTIONS") == "true"
                and os.environ.get("GITHUB_REPOSITORY") == CANONICAL_REPO
                and os.environ.get("GITHUB_REF") == "refs/heads/main"
@@ -163,6 +167,89 @@ def unique_json_object(pairs):
     return result
 
 
+def checked_repo_file(repo, relative):
+    path = repo
+    for part in relative.split("/"):
+        path = path / part
+        if path.is_symlink():
+            raise ValueError("Native runtime source must not contain symlinks")
+    if not path.is_file():
+        raise ValueError("Missing native runtime source file: " + relative)
+    return path
+
+
+def sha256_stream(stream):
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def native_runtime(repo):
+    relative = "runtime/proot-omarchy/manifest.json"
+    manifest_path = repo / relative
+    source_prefix = "apps/android/app/src/main/jniLibs/arm64-v8a/"
+    if not manifest_path.exists() and not manifest_path.is_symlink():
+        if any((repo / source_prefix / name).exists() or (repo / source_prefix / name).is_symlink() for name in NATIVE_NAMES):
+            raise ValueError("Native runtime binaries require their source manifest")
+        return None  # Older/source-only fixtures without the independent runtime.
+    path = checked_repo_file(repo, relative)
+    manifest = json.loads(path.read_text(), object_pairs_hook=unique_json_object)
+    if not isinstance(manifest, dict) or type(manifest.get("schemaVersion")) is not int or manifest["schemaVersion"] != 1:
+        raise ValueError("Unsupported native runtime source manifest")
+    runtime_id = manifest.get("runtimeId")
+    if not isinstance(runtime_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", runtime_id):
+        raise ValueError("Invalid native runtime identity")
+    files = manifest.get("files")
+    if not isinstance(files, list) or len(files) != 3:
+        raise ValueError("Native runtime manifest must contain all three files")
+    expected_paths = {"lib/arm64-v8a/" + name for name in NATIVE_NAMES}
+    normalized = []
+    roles, paths = set(), set()
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise ValueError("Invalid native runtime manifest entry")
+        role, apk_path = entry["role"], entry["apkPath"]
+        checksum, size = entry["sha256"], entry["size"]
+        if not isinstance(role, str) or not role or role in roles or apk_path not in expected_paths or apk_path in paths:
+            raise ValueError("Duplicate or unapproved native runtime member")
+        if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum) or type(size) is not int or size <= 0:
+            raise ValueError("Invalid native runtime SHA-256/size")
+        source_path = source_prefix + apk_path.rsplit("/", 1)[1]
+        if entry["sourcePath"] != source_path:
+            raise ValueError("Unapproved native runtime source path")
+        source = checked_repo_file(repo, source_path)
+        with source.open("rb") as stream:
+            checksum_actual = sha256_stream(stream)
+        if source.stat().st_size != size or checksum_actual != checksum:
+            raise ValueError("Native runtime source SHA-256/size mismatch: " + source_path)
+        roles.add(role)
+        paths.add(apk_path)
+        normalized.append(dict(role=role, apkPath=apk_path, sha256=checksum, size=size))
+    return dict(runtimeId=runtime_id, files=sorted(normalized, key=lambda file: file["apkPath"]))
+
+
+def verify_native_runtime(apk, repo, metadata):
+    native = native_runtime(repo)
+    if native != metadata.get("expectedNativeRuntime"):
+        raise ValueError("Native runtime source manifest changed after build preparation")
+    if native is None:
+        return {}
+    with zipfile.ZipFile(apk) as archive:
+        for entry in native["files"]:
+            try:
+                member = archive.getinfo(entry["apkPath"])
+            except KeyError:
+                raise ValueError("APK is missing native runtime member: " + entry["apkPath"]) from None
+            if member.file_size != entry["size"]:
+                raise ValueError("APK native runtime size differs from source: " + entry["apkPath"])
+            with archive.open(member) as stream:
+                checksum = sha256_stream(stream)
+            if checksum != entry["sha256"]:
+                raise ValueError("APK native runtime SHA-256 differs from source: " + entry["apkPath"])
+    return dict(nativeRuntimeId=native["runtimeId"], nativeLibraryCount=3, nativeLibraries=native["files"])
+
+
 def verify_managed_payload(apk, source_sha):
     prefix = "assets/managed-core/"
     payload_prefix = prefix + "files/"
@@ -232,11 +319,12 @@ def verify_managed_payload(apk, source_sha):
     return dict(managedSourceSha=source_sha, managedFileCount=len(expected), managedPayloadBytes=payload_bytes)
 
 
-def verify(apk, metadata_path, build_tools):
+def verify(apk, metadata_path, build_tools, repo):
     metadata = json.loads(metadata_path.read_text())
     # Clear any old success receipt before a retry, including a failed retry.
     metadata["upgradeable"] = False
-    for key in ("certificateSha256", "managedSourceSha", "managedFileCount", "managedPayloadBytes"):
+    for key in ("certificateSha256", "managedSourceSha", "managedFileCount", "managedPayloadBytes",
+                "nativeRuntimeId", "nativeLibraryCount", "nativeLibraries"):
         metadata.pop(key, None)
     write_metadata(metadata_path, metadata)
     signer = command([str(build_tools / "apksigner"), "verify", "--print-certs", str(apk)],
@@ -253,6 +341,7 @@ def verify(apk, metadata_path, build_tools):
     if not package or package.groups() != (metadata["packageName"], str(metadata["versionCode"]), metadata["versionName"]):
         raise ValueError("APK package/version does not match prepared source metadata")
     metadata.update(verify_managed_payload(apk, metadata["sourceSha"]))
+    metadata.update(verify_native_runtime(apk, repo, metadata))
     metadata.update(certificateSha256=fingerprint, upgradeable=metadata["signingMode"] == "stable-test")
     write_metadata(metadata_path, metadata)
     print(f"Verified APK {metadata['versionName']} ({metadata['signingMode']})")
@@ -281,7 +370,7 @@ def main():
         elif args.action == "generate-keystore":
             generate_keystore(args.output_dir.absolute(), args.openssl)
         else:
-            verify(args.apk, args.metadata, args.build_tools)
+            verify(args.apk, args.metadata, args.build_tools, args.repo.resolve())
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as error:
         # Do not print arbitrary tool output, key bytes, passwords or encoded secrets.
         print(f"Android build preparation failed: {error}", file=sys.stderr)

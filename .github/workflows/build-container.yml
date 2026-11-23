@@ -9,6 +9,9 @@ on:
       - 'scripts/stage-core.sh'
       - 'scripts/android-build.py'
       - 'scripts/prepare-android-managed.py'
+      - 'scripts/browser-bundle-sources.json'
+      - 'scripts/build-browser-bundle.py'
+      - 'runtime/proot-omarchy/**'
       - 'apps/android/**'
       - '.github/workflows/build-container.yml'
   pull_request:
@@ -18,6 +21,9 @@ on:
       - 'scripts/stage-core.sh'
       - 'scripts/android-build.py'
       - 'scripts/prepare-android-managed.py'
+      - 'scripts/browser-bundle-sources.json'
+      - 'scripts/build-browser-bundle.py'
+      - 'runtime/proot-omarchy/**'
       - 'apps/android/**'
       - '.github/workflows/build-container.yml'
 

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tc4_bundled_runtime_incomplete">内置桌面运行组件不完整，请重新安装应用。</string>
+</resources>

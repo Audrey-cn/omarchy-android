@@ -128,6 +128,12 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            // Preserve the exact native triplet validated against its source receipt.
+            keepDebugSymbols += setOf(
+                "**/libproot-omarchy-readonly.so",
+                "**/libproot-omarchy-loader-aarch64.so",
+                "**/libproot-omarchy-loader-arm.so"
+            )
         }
     }
 }

@@ -1,0 +1,11 @@
+{
+  "TINY_SHA": "2919ebdcb865b192490f8c4ca1957a621f13d95b",
+  "UPSTREAM_SHA": "a179d3e8a4e045aaa1fb8cc3284f23509d96d353",
+  "TALLOC_VERSION": "2.5.0",
+  "NDK_VERSION": "27.3.13750724",
+  "ANDROID_API": "28",
+  "repository_commit": "8ad287d91820383aa3c851b258f8bffa23b34a44",
+  "github_run_id": "45130596518",
+  "status": "cross_compiled_not_device_validated",
+  "build_compatibility_patch_sha256": "a56bb2000d60fdbd4fe234832b24b0fd76537fbe4a7ec99379b63e5a36af3234"
+}

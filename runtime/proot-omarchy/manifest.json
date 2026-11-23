@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "runtimeId": "omarchy-proot-readonly-v1",
+  "files": [
+    {
+      "role": "proot",
+      "sourcePath": "apps/android/app/src/main/jniLibs/arm64-v8a/libproot-omarchy-readonly.so",
+      "apkPath": "lib/arm64-v8a/libproot-omarchy-readonly.so",
+      "sha256": "4dbc0c56480812f3ed0e9a8c39e85f759e8b4eba1b57a5d2a1d0e0d584a62eda",
+      "size": 339544
+    },
+    {
+      "role": "loader-aarch64",
+      "sourcePath": "apps/android/app/src/main/jniLibs/arm64-v8a/libproot-omarchy-loader-aarch64.so",
+      "apkPath": "lib/arm64-v8a/libproot-omarchy-loader-aarch64.so",
+      "sha256": "43161d1633dd9e174e362ddb335503a7456e2e76bbed96e3095964d9fcb7b880",
+      "size": 6008
+    },
+    {
+      "role": "loader-arm",
+      "sourcePath": "apps/android/app/src/main/jniLibs/arm64-v8a/libproot-omarchy-loader-arm.so",
+      "apkPath": "lib/arm64-v8a/libproot-omarchy-loader-arm.so",
+      "sha256": "b55fe7372eb290c53c4bbf3a9135da820023ba826e28b6c49737a1c14f9b824c",
+      "size": 5952
+    }
+  ],
+  "build": {
+    "repository": "https://github.com/Audrey-cn/omarchy-android",
+    "runId": 45130596518,
+    "artifactId": 14797951135,
+    "artifactName": "experimental-proot-readonly-arm64-8ad287d91820383aa3c851b258f8bffa23b34a44",
+    "artifactZipSha256": "b961879e2a588b54a3ed38926a39b1e369212189b6f80c205e6584bec549701a",
+    "headSha": "39d6c6864593ed7cc49d96bffce37020cb23d736",
+    "checkoutSha": "8ad287d91820383aa3c851b258f8bffa23b34a44",
+    "recipePath": "experiments/proot-readonly/build-android.sh",
+    "receiptPath": "runtime/proot-omarchy/build-receipt.json"
+  },
+  "sources": {
+    "tiny": {
+      "repository": "https://github.com/tiny-computer/proot-termux",
+      "revision": "2919ebdcb865b192490f8c4ca1957a621f13d95b",
+      "archiveUrl": "https://codeload.github.com/tiny-computer/proot-termux/tar.gz/2919ebdcb865b192490f8c4ca1957a621f13d95b",
+      "archiveSha256": "ab60bf1853416d3461a6d03952b427f91fbd981771788ec6edcac82ce2bcb89e"
+    },
+    "upstreamPatch": {
+      "revision": "a179d3e8a4e045aaa1fb8cc3284f23509d96d353",
+      "path": "experiments/proot-readonly/a179d3e8.patch",
+      "sha256": "9343f40304c5aedbe5bab1c1bfd18e9e6eeba3edb173586e07389f4cdb66b4b1"
+    },
+    "buildCompatibilityPatch": {
+      "path": "experiments/proot-readonly/build-compat.patch",
+      "sha256": "a56bb2000d60fdbd4fe234832b24b0fd76537fbe4a7ec99379b63e5a36af3234"
+    },
+    "talloc": {
+      "version": "2.5.0",
+      "archiveUrl": "https://www.samba.org/ftp/talloc/talloc-2.5.0.tar.gz",
+      "archiveSha256": "912afa237510ae542a7733998eb18a12bcda35ab6729c8e2ddb43e8d0ebab007",
+      "linkage": "static including target libreplace objects"
+    },
+    "androidNdk": {
+      "version": "27.3.13750724",
+      "api": 28,
+      "archiveUrl": "https://dl.google.com/android/repository/android-ndk-r27d-linux.zip",
+      "archiveSha1": "22105e410cf29afcf163760cc95522b9fb981121"
+    }
+  }
+}

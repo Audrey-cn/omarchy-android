@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tc4_bundled_runtime_incomplete">The bundled desktop runtime is incomplete. Please reinstall the app.</string>
+</resources>

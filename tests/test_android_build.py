@@ -155,7 +155,27 @@ class AndroidBuildTests(unittest.TestCase):
         again = self.run_script("generate-keystore", "--output-dir", str(output))
         self.assertNotEqual(again.returncode, 0)
 
-    def apk_fixture(self):
+    def native_fixture(self):
+        names = ["libproot-omarchy-readonly.so", "libproot-omarchy-loader-aarch64.so", "libproot-omarchy-loader-arm.so"]
+        manifest = dict(schemaVersion=1, runtimeId="omarchy-proot-readonly-v1", files=[])
+        for role, name in zip(["proot", "loader64", "loader32"], names):
+            data = ("native fixture " + name).encode()
+            source = "apps/android/app/src/main/jniLibs/arm64-v8a/" + name
+            target = self.repo / source
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            manifest["files"].append(dict(role=role, sourcePath=source, apkPath="lib/arm64-v8a/" + name,
+                                          size=len(data), sha256=hashlib.sha256(data).hexdigest()))
+        path = self.repo / "runtime/proot-omarchy/manifest.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(manifest))
+        self.git("add", ".")
+        self.git("commit", "-qm", "native runtime")
+        return manifest
+
+    def apk_fixture(self, native=False):
+        if native:
+            self.native_fixture()
         env = self.trusted_env()
         env.update(GITHUB_EVENT_NAME="pull_request", GITHUB_REF="refs/pull/7/merge")
         output = self.root / "signing"
@@ -178,7 +198,7 @@ class AndroidBuildTests(unittest.TestCase):
         args = ("verify", "--apk", str(apk), "--metadata", str(metadata_path), "--build-tools", str(tools))
         return apk, metadata_path, args
 
-    def write_apk(self, apk, manifest=None, payloads=None):
+    def write_apk(self, apk, manifest=None, payloads=None, native_payloads=None):
         payloads = payloads if payloads is not None else [("usr/local/bin/omarchy-one", b"#!/bin/sh\n"),
                                                        ("opt/omarchy-node/node/__generated__/.npmrc", b"node hidden config\n")]
         if manifest is None:
@@ -188,6 +208,13 @@ class AndroidBuildTests(unittest.TestCase):
             archive.writestr("assets/managed-core/manifest.json", json.dumps(manifest) if isinstance(manifest, dict) else manifest)
             for path, data in payloads:
                 archive.writestr("assets/managed-core/files/" + path, data)
+            if native_payloads is None:
+                native_manifest = self.repo / "runtime/proot-omarchy/manifest.json"
+                native_payloads = [] if not native_manifest.exists() else [
+                    (entry["apkPath"], (self.repo / entry["sourcePath"]).read_bytes())
+                    for entry in json.loads(native_manifest.read_text())["files"]]
+            for path, data in native_payloads:
+                archive.writestr(path, data)
 
     def test_apk_certificate_and_versions_must_match_prepared_metadata(self):
         apk, metadata_path, args = self.apk_fixture()
@@ -254,6 +281,57 @@ class AndroidBuildTests(unittest.TestCase):
         result = self.run_script(*args)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("duplicate", result.stderr.lower())
+
+    def test_native_runtime_sources_are_checked_before_signing_preparation(self):
+        manifest = self.native_fixture()
+        source = self.repo / manifest["files"][0]["sourcePath"]
+        source.write_bytes(b"tampered native source")
+        result = self.run_script("prepare", "--output-dir", str(self.root / "signing"), env=self.trusted_env())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("native", result.stderr.lower())
+        self.assertFalse((self.root / "signing/test-signing.p12").exists())
+
+    def test_apk_requires_all_three_exact_native_runtime_binaries(self):
+        apk, metadata_path, args = self.apk_fixture(native=True)
+        valid = self.run_script(*args)
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        receipt = json.loads(metadata_path.read_text())
+        self.assertEqual(receipt["nativeRuntimeId"], "omarchy-proot-readonly-v1")
+        self.assertEqual(receipt["nativeLibraryCount"], 3)
+        manifest = json.loads((self.repo / "runtime/proot-omarchy/manifest.json").read_text())
+        payloads = [(entry["apkPath"], (self.repo / entry["sourcePath"]).read_bytes()) for entry in manifest["files"]]
+        variants = [payloads[:2], [(payloads[0][0], b"stripped"), *payloads[1:]],
+                    [(payloads[0][0], b"x" * len(payloads[0][1])), *payloads[1:]]]
+        for payload in variants:
+            with self.subTest(paths=[name for name, _ in payload]):
+                self.write_apk(apk, native_payloads=payload)
+                result = self.run_script(*args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("native", result.stderr.lower())
+                failed = json.loads(metadata_path.read_text())
+                self.assertFalse(failed["upgradeable"])
+                self.assertNotIn("nativeLibraryCount", failed)
+
+    def test_native_source_symlink_and_duplicate_manifest_members_are_rejected(self):
+        manifest = self.native_fixture()
+        source = self.repo / manifest["files"][0]["sourcePath"]
+        data = source.read_bytes()
+        outside = self.root / "native-outside"
+        outside.write_bytes(data)
+        source.unlink()
+        source.symlink_to(outside)
+        env = self.trusted_env()
+        env.update(GITHUB_EVENT_NAME="pull_request", GITHUB_REF="refs/pull/7/merge")
+        result = self.run_script("prepare", "--output-dir", str(self.root / "signing"), env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("symlink", result.stderr.lower())
+        source.unlink()
+        source.write_bytes(data)
+        manifest["files"][2] = manifest["files"][0]
+        (self.repo / "runtime/proot-omarchy/manifest.json").write_text(json.dumps(manifest))
+        duplicate = self.run_script("prepare", "--output-dir", str(self.root / "signing"), env=env)
+        self.assertNotEqual(duplicate.returncode, 0)
+        self.assertIn("native", duplicate.stderr.lower())
 
 
 if __name__ == "__main__":
