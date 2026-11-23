@@ -22,7 +22,7 @@ import com.fct.tc4.ui.misc.Global
 import com.fct.tc4.ui.misc.OmarchyX11Overlay
 import com.google.android.material.color.DynamicColors
 
-class Tc4Application : Application() {
+open class Tc4Application : Application() {
     override fun onCreate() {
         super.onCreate()
         DynamicColors.applyToActivitiesIfAvailable(this)
