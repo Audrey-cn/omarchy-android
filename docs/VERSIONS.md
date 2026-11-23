@@ -66,12 +66,19 @@ gh secret set OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD \
 
 APK 更新不会把新 rootfs 解压到已有 guest；启动前通过独立 managed assets 更新核心命令，保留容器和个人数据。Gradle 的 `prepareManagedCoreAssets` 任务每次从当前 checkout 生成资产，壳包与一体包都包含同一套核心命令。只对容器代号 `omarchy` 生效，其他导入的 Linux 容器不受影响。
 
-- 默认清单只有 `core/bin` 和 `core/ai-suite/*launch` 中的脚本，安装为 `usr/local/bin/<文件名>`。不复制 Sway/fcitx 配置，也不管理 `/root/.hermes`、浏览器 profile 或应用私有配置。
+- 核心清单包含 `core/bin` 和 `core/ai-suite/*launch` 中的脚本，安装为 `usr/local/bin/<文件名>`。当前 main 的两种 APK 构建另通过匹配的 bundle builder 内置固定 Chromium 128、Playwright 1.46.1 与 Node 24.15.0；stable61 的完整 5,114 文件清单及首次同步已经验证。不复制 Sway/fcitx 配置，也不管理 `/root/.hermes`、浏览器 profile 或应用私有配置。
 - `managed-core/manifest.json` 包含 `schemaVersion: 1`、40 位 `sourceSha`，以及 `files` 数组；每项为 `path`（相对 guest 根目录）、`sha256`（64 位小写十六进制）与 `mode`（420/0644 或 493/0755）。每份 regular file 放在 `managed-core/files/<path>`。生成器和运行时都拒绝路径穿越、符号链接、重复条目、坏哈希和清单外路径。
-- 预留的管理范围为 `usr/local/bin/<文件名>`、`opt/omarchy-chromium128/**`、`opt/omarchy-node/**`。额外 payload 必须显式设置 `OMARCHY_ANDROID_MANAGED_PAYLOAD_DIR`，提供同 schema、同源码 SHA 的完整资产树，生成器验证每份文件后才合并。当前默认不内置浏览器候选。
+- 管理范围为 `usr/local/bin/<文件名>`、`opt/omarchy-chromium128/**`、`opt/omarchy-node/**`。APK 构建通过 `OMARCHY_ANDROID_MANAGED_PAYLOAD_DIR` 接入固定浏览器/Node 资产树；它必须与核心清单使用同 schema、同源码 SHA，生成器逐份校验后才合并。开发时不传该目录仍可生成仅含核心脚本的资产，不能把这种本地构建当作完整内置运行时交付。
 - 首次升级旧容器时，内容不同的既有 managed 文件会先精确备份到应用私有 `files/managed-core/omarchy/legacy-backup/<原路径>`；随后只更新已知旧哈希或不存在的目标。之后检测到用户改过的内容，或新管理路径已有其他文件，会保留文件、显示冲突并停止启动，避免悄悄覆盖。
-- 先在私有临时目录验证所有待更新 payload，再逐文件原子替换；清单退役文件只在哈希仍匹配时删除。最后才原子保存 `files/managed-core/omarchy/manifest.tsv` 回执。中断后可识别已发布的新哈希并重试，不重新导入 rootfs。每次启动核对 managed 文件内容；大型可选 payload 的首次同步时间和磁盘暂存空间仍需设备实测。
+- 先在私有临时目录验证所有待更新 payload，再逐文件原子替换；清单退役文件只在哈希仍匹配时删除。最后才原子保存 `files/managed-core/omarchy/manifest.tsv` 回执。中断后可识别已发布的新哈希并重试，不重新导入 rootfs。每次启动核对 managed 文件内容；固定浏览器/Node 的 stable61 fresh 首次完整同步已在 K20 成功，旧 guest 恢复和后续更新仍需单独验证。
 
 原数据归档已完整校验；历史备份本身不等于跨版本恢复验收。切换持续签名后的恢复，以及连续两版覆盖安装保留数据的设备结果，以验证记录为准。
 
-当前已验证产品代码为 `e876b3b`，集成到 `main`；后续文档提交不改变该 APK 的产品代码。云端和 K20 证据见[设备验证记录](reports/cloud-k20-validation-20261123.md)。
+当前已完成 fresh 安装验证的持续签名一体包为 **stable61**，产品源码为 `main` 的 `27f1ae4`：
+
+| 身份 | SHA-256 |
+| --- | --- |
+| 持续签名证书 | `bcb2f64501107f9425a0efe9193f3703acddb6e34daa54196978de7720c86c17` |
+| APK | `4bd577df7e5f28f6b67fc497046bfbae90b6a24597b63fa82e4aec04928d14ea` |
+
+K20 已正常卸载旧临时签名包后安装该包，空数据自动导入 rootfs、5,114 受管文件首次同步，以及内置 Chromium/Node 检查和完整 headless/键盘场景 Wayland 探针通过。旧 guest 恢复、数据保留和下一版同证书覆盖升级仍在验证，不能将 fresh 成功写成迁移完成。最新证据见[第二轮记录](reports/k20-round2-20261123.md)；`e876b3b` 等先前环境的历史边界保留在[首轮记录](reports/cloud-k20-validation-20261123.md)。
