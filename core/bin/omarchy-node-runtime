@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Print only the managed Linux ARM64 Node executable to stdout.
+set -euo pipefail
+
+VERSION=24.15.0
+PACKAGE="node-v${VERSION}-linux-arm64"
+ARCHIVE="${PACKAGE}.tar.xz"
+RUNTIME_ROOT="${OMARCHY_NODE_HOME:-/opt/omarchy-node}"
+
+fail() { echo "omarchy-node-runtime: $*" >&2; exit 1; }
+[[ $# -eq 0 ]] || fail "This helper takes no arguments."
+[[ "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]] || fail "Requires Linux aarch64 (Ubuntu ARM64 inside the container)."
+getconf GNU_LIBC_VERSION >/dev/null 2>&1 || fail "Requires a glibc Linux userland, not Android's native Bionic userland."
+[[ "$RUNTIME_ROOT" == /* ]] || fail "OMARCHY_NODE_HOME must be an absolute directory."
+mkdir -p "$RUNTIME_ROOT"
+RUNTIME_ROOT="$(cd "$RUNTIME_ROOT" && pwd -P)"
+NODE_BIN="$RUNTIME_ROOT/$PACKAGE/bin/node"
+
+if [[ -x "$NODE_BIN" ]] && [[ "$("$NODE_BIN" --version)" == "v$VERSION" ]]; then
+  printf '%s\n' "$NODE_BIN"
+  exit 0
+fi
+for tool in curl tar xz sha256sum flock; do
+  command -v "$tool" >/dev/null || fail "Missing $tool (install curl xz-utils coreutils util-linux)."
+done
+
+# Hermes and browser installation can share this runtime concurrently.
+exec 9>"$RUNTIME_ROOT/.install.lock"
+flock -x 9
+if [[ -x "$NODE_BIN" ]] && [[ "$("$NODE_BIN" --version)" == "v$VERSION" ]]; then
+  printf '%s\n' "$NODE_BIN"
+  exit 0
+fi
+[[ ! -e "$RUNTIME_ROOT/$PACKAGE" ]] || fail "Existing runtime is invalid: $RUNTIME_ROOT/$PACKAGE; inspect it before retrying."
+
+TMP_DIR="$(mktemp -d "$RUNTIME_ROOT/.download.XXXXXX")"
+trap 'rm -rf "$TMP_DIR"' EXIT
+echo "Downloading official Node v$VERSION for Linux ARM64..." >&2
+BASE_URL="https://nodejs.org/dist/v$VERSION"
+curl --fail --location --silent --show-error --retry 2 "$BASE_URL/SHASUMS256.txt" -o "$TMP_DIR/SHASUMS256.txt"
+curl --fail --location --silent --show-error --retry 2 "$BASE_URL/$ARCHIVE" -o "$TMP_DIR/$ARCHIVE"
+CHECKSUM="$(awk -v file="$ARCHIVE" '$2 == file { print $1 }' "$TMP_DIR/SHASUMS256.txt")"
+[[ "$CHECKSUM" =~ ^[0-9a-f]{64}$ ]] || fail "Official checksum manifest has no unique SHA-256 for $ARCHIVE."
+printf '%s  %s\n' "$CHECKSUM" "$TMP_DIR/$ARCHIVE" | sha256sum -c - >&2
+tar -xJf "$TMP_DIR/$ARCHIVE" -C "$TMP_DIR"
+[[ "$("$TMP_DIR/$PACKAGE/bin/node" --version)" == "v$VERSION" ]] || fail "Downloaded Node could not run with the expected version."
+mv "$TMP_DIR/$PACKAGE" "$RUNTIME_ROOT/$PACKAGE"
+printf '%s\n' "$NODE_BIN"

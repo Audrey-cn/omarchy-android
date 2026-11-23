@@ -5,7 +5,9 @@ export GDK_BACKEND=wayland
 export XDG_RUNTIME_DIR=/tmp
 export WAYLAND_DISPLAY=wayland-1
 python3 - << "PY"
-import socket, sqlite3
+import os, socket, sqlite3, sys
+from contextlib import closing
+from pathlib import Path
 s = socket.socket()
 s.settimeout(0.3)
 try:
@@ -15,12 +17,21 @@ except Exception:
     up = False
 finally:
     s.close()
-c = sqlite3.connect("/root/.cc-switch/cc-switch.db")
-if up:
-    c.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(\x27global_proxy_url\x27,\x27http://127.0.0.1:18888\x27)")
-else:
-    c.execute("DELETE FROM settings WHERE key=\x27global_proxy_url\x27")
-c.commit()
-c.close()
+if any(entry.strip() == "*" for name in ("no_proxy", "NO_PROXY")
+       for entry in os.environ.get(name, "").split(",")):
+    up = False
+db = Path("/root/.cc-switch/cc-switch.db")
+if db.is_file():
+    try:
+        # Let CC Switch create and migrate its own database on first launch.
+        with closing(sqlite3.connect(db.as_uri() + "?mode=rw", uri=True)) as c:
+            if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", ("settings",)).fetchone():
+                if up:
+                    c.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", ("global_proxy_url", "http://127.0.0.1:18888"))
+                else:
+                    c.execute("DELETE FROM settings WHERE key=?", ("global_proxy_url",))
+                c.commit()
+    except sqlite3.Error as error:
+        print(f"CC Switch proxy setup skipped: {error}", file=sys.stderr)
 PY
 exec /usr/bin/cc-switch "$@"

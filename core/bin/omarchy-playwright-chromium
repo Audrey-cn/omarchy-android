@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# A real Playwright-managed Chromium/CfT executable, with a separate desktop profile.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+BROWSER="$("$SCRIPT_DIR/omarchy-playwright" browser-path chromium)"
+PROFILE="${HOME:-/root}/.local/share/omarchy-playwright/chromium-desktop"
+mkdir -p "$PROFILE"
+exec "$BROWSER" --no-sandbox --ozone-platform=wayland --user-data-dir="$PROFILE" "$@"

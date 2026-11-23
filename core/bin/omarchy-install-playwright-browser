@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Publish a desktop entry only after this exact browser passes both runtime probes.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+ENGINE="${1:-firefox}"
+[[ $# -le 1 ]] || { echo "Usage: omarchy-install-playwright-browser [firefox|chromium]" >&2; exit 2; }
+case "$ENGINE" in
+  firefox) NAME="Firefox (Playwright)"; ICON=firefox ;;
+  chromium) NAME="Chromium (Playwright, experimental)"; ICON=web-browser ;;
+  *) echo "Use firefox or chromium." >&2; exit 2 ;;
+esac
+APP_DIR="${HOME:-/root}/.local/share/applications"
+mkdir -p "$APP_DIR"
+if [[ "$ENGINE" == firefox ]]; then
+  ENTRY="$APP_DIR/Firefox-Playwright.desktop"
+else
+  ENTRY="$APP_DIR/Chromium-Playwright.desktop"
+  # Retire only legacy entries created by Omarchy's old Chromium adapter.
+  if [[ -f "$APP_DIR/Chromium.desktop" ]] && \
+     grep -Eq '^Exec=/usr/local/bin/omarchy-(playwright-)?chromium([[:space:]]|$)' "$APP_DIR/Chromium.desktop"; then
+    rm -f "$APP_DIR/Chromium.desktop"
+  fi
+fi
+rm -f "$ENTRY"
+"$SCRIPT_DIR/omarchy-playwright" install "$ENGINE"
+"$SCRIPT_DIR/omarchy-playwright" probe "$ENGINE" headless
+"$SCRIPT_DIR/omarchy-playwright" probe "$ENGINE" wayland
+
+TMP_ENTRY="$(mktemp "$APP_DIR/.omarchy-browser.XXXXXX")"
+trap 'rm -f "$TMP_ENTRY"' EXIT
+cat > "$TMP_ENTRY" <<EOF
+[Desktop Entry]
+Name=$NAME
+Comment=Passed this installation's Playwright headless and Wayland probes
+Exec=/usr/local/bin/omarchy-playwright-$ENGINE %u
+Icon=$ICON
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+EOF
+chmod 755 "$TMP_ENTRY"
+mv -f "$TMP_ENTRY" "$ENTRY"
+echo "✓ $NAME 已通过本次 headless 和 Wayland 自检，已添加到应用网格。"
+echo "  实际 Agent 工具链仍需单独验收。"

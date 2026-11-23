@@ -1,0 +1,52 @@
+#!/usr/bin/env node
+// Run with ELECTRON_RUN_AS_NODE=1 and the installed Hermes executable.
+'use strict';
+const path = require('node:path');
+function option(name, fallback) {
+  const index = process.argv.indexOf(name);
+  return index < 0 ? fallback : process.argv[index + 1];
+}
+const moduleDir = option('--module-dir', '/opt/hermes-desktop/resources/app.asar.unpacked/dist/node_modules/node-pty');
+const binding = option('--binding', path.join(moduleDir, 'build/Release/pty.node'));
+console.log(JSON.stringify({ event: 'runtime', arch: process.arch, platform: process.platform,
+  electron: process.versions.electron, node: process.versions.node,
+  modules: process.versions.modules, napi: process.versions.napi }));
+try {
+  // Bypass node-pty's fallback loop so the original loader/GLIBC error survives.
+  require(binding);
+  console.log('PTY_NATIVE_LOAD_OK');
+  if (process.argv.includes('--binding-only')) process.exit(0);
+  const pty = require(moduleDir);
+  const child = pty.spawn('/bin/sh', ['-c',
+    'stty size; IFS= read -r value; printf "OMARCHY_PTY_INPUT:%s\\n" "$value"; stty size'],
+    { name: 'xterm-256color', cols: 80, rows: 24, cwd: '/tmp', env: process.env });
+  let output = '', sent = false, timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    console.error('PTY_SMOKE_TIMEOUT');
+    try { child.kill('SIGKILL'); } catch (_) {}
+    setTimeout(() => process.exit(2), 500).unref();
+  }, 15000);
+  child.onData(text => {
+    output += text;
+    if (!sent && /(?:^|\s)24\s+80(?:\s|$)/.test(output)) {
+      sent = true;
+      child.resize(101, 36);
+      child.write('omarchy-smoke\n');
+    }
+  });
+  child.onExit(({ exitCode, signal }) => {
+    clearTimeout(timer);
+    const ok = !timedOut && exitCode === 0 && sent &&
+      output.includes('OMARCHY_PTY_INPUT:omarchy-smoke') &&
+      /(?:^|\s)36\s+101(?:\s|$)/.test(output);
+    console.log(JSON.stringify({ event: 'pty-exit', exitCode, signal,
+      input: output.includes('OMARCHY_PTY_INPUT:omarchy-smoke'),
+      resize: /(?:^|\s)36\s+101(?:\s|$)/.test(output), ok }));
+    if (!ok) console.error('PTY_SMOKE_OUTPUT', JSON.stringify(output));
+    process.exit(ok ? 0 : 1);
+  });
+} catch (error) {
+  console.error(error.stack || String(error));
+  process.exit(1);
+}

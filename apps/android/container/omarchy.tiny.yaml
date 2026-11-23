@@ -1,0 +1,77 @@
+code: "omarchy"
+name: "Omarchy Android (Ubuntu 24.04)"
+description: |
+  Omarchy Wayland 桌面环境（Sway + Waybar + 原生 6 列应用网格 + 可视化主题选择器 + 中文拼音输入法）。
+  预装 Alacritty、Thunar、Neovim、Git/gh/lazygit、imv、Zathura、mpv 及原版 Omarchy WebApp；
+  支持在「安装 -> AI」菜单按需安装 Claude / Codex / Hermes / CC Switch。
+feature:
+  - type: "audio"
+    name: "音频播放"
+    description: "开启后通过 Unix Socket 将容器内音频转发到手机扬声器/蓝牙耳机。"
+    enabled: true
+  - type: "microphone"
+    name: "麦克风转发"
+    description: "临时开启手机麦克风实时转发到容器内。"
+  - type: "storage"
+    name: "存储感知"
+    description: "自动挂载手机存储与外接 U 盘到 /mnt 目录。"
+    enabled: false
+  - type: "x11"
+    args: [":0", "+extension", "MIT-SHM"]
+    name: "Omarchy Wayland (Termux:X11)"
+    description: "使用内置 Termux:X11 启动 Omarchy Sway Wayland 桌面。"
+    command: |
+      export DISPLAY=:0
+      export XDG_RUNTIME_DIR=/tmp
+      export HOME=/root
+      export SHELL=/bin/bash
+      export LANG=zh_CN.UTF-8
+      export LC_ALL=zh_CN.UTF-8
+      export TZ=Asia/Shanghai
+      export WLR_BACKENDS=x11
+      export WLR_RENDERER=pixman
+      export WLR_NO_HARDWARE_CURSORS=1
+      export DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/omarchy-dbus.sock"
+      export QT_IM_MODULE=fcitx
+      export XMODIFIERS=@im=fcitx
+      mkdir -p /tmp
+      dbus-daemon --session --address="unix:path=/tmp/omarchy-dbus.sock" --nofork --nopidfile >/dev/null 2>&1 &
+      sleep 0.3
+      /usr/local/bin/sway -c /root/.config/sway/config >/tmp/sway.log 2>&1 &
+      for i in $(seq 1 40); do
+        [ -S /tmp/wayland-1 ] && break
+        sleep 0.2
+      done
+      export WAYLAND_DISPLAY=wayland-1
+      setsid fcitx5 -d --replace >/tmp/fcitx5.log 2>&1 &
+      /usr/local/bin/omarchy-theme-engine.py set tokyo-night >/tmp/theme.log 2>&1 &
+      setsid mako >/dev/null 2>&1 &
+      setsid python3 /usr/local/bin/omarchy-deck-bridge.py >/tmp/deck-bridge.log 2>&1 &
+    enabled: true
+options:
+  - type: "options"
+    name: "基础选项"
+    options:
+      - type: "option"
+        name: "挂载安卓字体"
+        description: "挂载 Android 系统字体，保证中文字体渲染清晰。"
+        args:
+          - "--mount=/system/fonts:/usr/share/fonts/androidm"
+        enabled: true
+boot_command: >
+  $BIN_DIR/proot $EXTRA_ARGS -0 --kill-on-exit --link2symlink --sysvipc
+  -L --rootfs=$CONTAINER_DIR --cwd=/root
+  --bind=/dev --bind=/proc --bind=/sys --bind=/dev/urandom:/dev/random
+  --bind=/proc/self/fd:/dev/fd --bind=/proc/self/fd/0:/dev/stdin --bind=/proc/self/fd/1:/dev/stdout --bind=/proc/self/fd/2:/dev/stderr
+  --bind=$CACHE_DIR/tmp:/dev/shm
+  --bind=$CACHE_DIR/tmp:/tmp
+  --bind=$CACHE_DIR/run:/run
+  --mount=/storage/self/primary:/mnt/sdcard
+  /usr/bin/env -i HOME=/root USER=root SHELL=/bin/bash TERM=xterm-256color
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$EXTRA_PATH
+  LD_LIBRARY_PATH=$EXTRA_LD_LIBRARY_PATH
+  DISPLAY=:0 XDG_RUNTIME_DIR=/tmp LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 TZ=Asia/Shanghai
+  DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/omarchy-dbus.sock
+  QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx
+  MOZ_FAKE_NO_SANDBOX=1 QTWEBENGINE_DISABLE_SANDBOX=1 ELECTRON_DISABLE_SANDBOX=1
+  $EXTRA_ENV /bin/bash -l

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Native Wayland Browser / WebApp launcher
+# Legacy browser/WebApp compatibility launcher (PRoot uses WebKitGTK).
+# Real Playwright Chromium is launched by omarchy-playwright-chromium.
 set -euo pipefail
 
 # In Root Chroot mode, forward to Termux host Chromium daemon if available
