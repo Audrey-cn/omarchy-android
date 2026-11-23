@@ -15,27 +15,82 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see http://www.gnu.org/licenses/.
 
+import groovy.json.JsonSlurper
+
 plugins {
     alias(libs.plugins.android.application)
 }
 
+// CI prepares this metadata once; local builds use the exact same version calculator.
+val versionEnvironment = listOf("OMARCHY_ANDROID_VERSION_CODE", "OMARCHY_ANDROID_VERSION_NAME", "OMARCHY_ANDROID_SOURCE_SHA")
+    .map { providers.environmentVariable(it).orNull }
+val androidBuildVersion: Map<*, *> = if (versionEnvironment.all { it != null }) {
+    mapOf("versionCode" to versionEnvironment[0], "versionName" to versionEnvironment[1], "sourceSha" to versionEnvironment[2])
+} else {
+    check(versionEnvironment.all { it == null }) { "Incomplete Android version metadata" }
+    JsonSlurper().parseText(providers.exec {
+        workingDir(rootProject.projectDir)
+        commandLine("python3", rootProject.file("../../scripts/android-build.py").absolutePath, "version")
+    }.standardOutput.asText.get()) as Map<*, *>
+}
+val androidSigningMode = providers.environmentVariable("OMARCHY_ANDROID_SIGNING_MODE").orElse("temporary-local").get()
+check(androidSigningMode in setOf("stable-test", "temporary-pr", "temporary-local")) { "Unknown Android signing mode" }
+val androidVersionCode = androidBuildVersion["versionCode"].toString().toInt()
+check(androidVersionCode in 2..2_100_000_000) { "Android versionCode is outside supported bounds" }
+val androidVersionName = androidBuildVersion["versionName"].toString().let {
+    if (androidSigningMode != "stable-test" && !it.endsWith(".temporary")) "$it.temporary" else it
+}
+
+val managedAssetsDirectory = layout.buildDirectory.dir("generated/managedAssets")
+val extraManagedPayload = providers.environmentVariable("OMARCHY_ANDROID_MANAGED_PAYLOAD_DIR").orNull
+val prepareManagedCoreAssets by tasks.registering(Exec::class) {
+    val repository = rootProject.file("../..")
+    workingDir(repository)
+    inputs.dir(repository.resolve("core/bin"))
+    inputs.dir(repository.resolve("core/ai-suite"))
+    inputs.file(repository.resolve("scripts/prepare-android-managed.py"))
+    inputs.property("sourceSha", androidBuildVersion["sourceSha"].toString())
+    inputs.property("extraManagedPayload", extraManagedPayload ?: "")
+    if (extraManagedPayload != null) inputs.dir(repository.resolve(extraManagedPayload))
+    outputs.dir(managedAssetsDirectory)
+    commandLine("python3", repository.resolve("scripts/prepare-android-managed.py").absolutePath,
+        "--output-dir", managedAssetsDirectory.get().asFile.absolutePath,
+        "--source-sha", androidBuildVersion["sourceSha"].toString())
+    if (extraManagedPayload != null) args("--extra-dir", repository.resolve(extraManagedPayload).absolutePath)
+}
+tasks.named("preBuild") { dependsOn(prepareManagedCoreAssets) }
+
 android {
     namespace = "com.fct.tc4"
     compileSdk = 37
+    sourceSets.getByName("main").assets.srcDir(managedAssetsDirectory)
 
     defaultConfig {
         applicationId = "com.omarchy.android"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = androidVersionCode
+        versionName = androidVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters.add("arm64-v8a")
         }
     }
 
+    val stableTestSigning = if (androidSigningMode == "stable-test") {
+        signingConfigs.create("stableTest") {
+            storeFile = file(providers.environmentVariable("OMARCHY_ANDROID_KEYSTORE_PATH").get())
+            storePassword = providers.environmentVariable("OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD").get()
+            keyAlias = "omarchy-android-test"
+            keyPassword = storePassword
+            storeType = "PKCS12"
+        }
+    } else null
+
     buildTypes {
+        getByName("debug") {
+            if (stableTestSigning != null) signingConfig = stableTestSigning
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -59,6 +114,8 @@ android {
     }
     androidResources {
         noCompress += "zst"
+        // Managed Node/npm payloads contain required dotfiles and underscore directories.
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~"
     }
     packaging {
         jniLibs {

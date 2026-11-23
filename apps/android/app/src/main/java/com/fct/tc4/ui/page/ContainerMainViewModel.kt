@@ -32,11 +32,13 @@ import com.fct.tc4.TinyMicrophone
 import com.fct.tc4.R
 import com.fct.tc4.TinyIpp
 import com.fct.tc4.TinyStorage
+import com.fct.tc4.ManagedCoreAssets
 import com.fct.tc4.ui.misc.ConfigManager
 import com.fct.tc4.ui.misc.Global
 import com.fct.tc4.ui.misc.UpdateChecker
 import com.fct.tc4.ui.misc.UpdateResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,6 +104,18 @@ class ContainerMainViewModel(
             }
             config = loaded
             _configState.value = config
+            try {
+                withContext(Dispatchers.IO) {
+                    ManagedCoreAssets.syncBeforeStart(getApplication(), code)
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                Log.e(TAG, "Managed core update failed", error)
+                _errorMessage.value = getApplication<Application>().getString(
+                    R.string.tc4_managed_core_update_failed, error.message ?: error.javaClass.simpleName)
+                _isInitialized.value = true
+                return@launch
+            }
             setupEnvironment()
             withContext(Dispatchers.IO) {
                 launchContainer()

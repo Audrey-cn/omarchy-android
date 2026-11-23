@@ -15,6 +15,7 @@ K20 实际应用上下文中的真实 memfd reopen 曾返回 `EACCES`。但 Chro
 所有 URL、版本和校验值位于 [sources.env](sources.env)。Tiny 源码固定为 `2919ebdcb865b192490f8c4ca1957a621f13d95b`，保留 `--tiny-storage` 等 fork 代码；a179 补丁仅修改 `fake_id0.c`。两组源码都先应用相同的 `build-compat.patch`，仅为 `ashmem_memfd.c` 补充其 `strcmp`/`memset` 所需的 `<string.h>` 声明，保证实验差异仍只有 a179。
 
 - talloc `2.5.0` 的 SHA-256 与交叉编译答案参照 Termux [固定版本构建脚本](https://github.com/termux/termux-packages/blob/e770a66ab0cd21f698295a482725040cc5feef82/packages/libtalloc/build.sh)。静态链接 talloc，避免给实验 runner 增加动态库查找变量。
+- 静态归档包含该版本所需的 libreplace AArch64 对象，排除 hostcc 和测试对象。构建 PRoot 前，用 talloc 公共分配 API 执行真实 Android 交叉链接检查；该步骤只链接，不将 Android 程序在 Linux 宿主运行。
 - NDK r27d `27.3.13750724`、Android API 28。下载后核对 Google [官方 SHA-1](https://github.com/android/ndk/wiki/Unsupported-Downloads#r27d)，并记录实际 SHA-256。没有未经校验的系统 NDK 复用路径。
 - AArch64 与 ARM32 loader 使用各自 NDK driver。两个产物组使用同一套 loader 源码和配置，并检查最终 loader 字节相同。
 - 补丁先执行 `patch --dry-run --fuzz=0`，失败即停止；没有自动修改或宽松跳过路径。
@@ -66,3 +67,5 @@ SHA256SUMS
 ## 首轮云编译记录
 
 [45129222955](https://github.com/Audrey-cn/omarchy-android/actions/runs/45129222955) 于 2026-11-23 15:11:48（上海）停止在 control PRoot 的 `ashmem_memfd.c` 编译：固定 Tiny 源码遗漏 `<string.h>`，NDK r27 Clang 拒绝 `strcmp` 和 `memset` 的隐式声明。归档校验、Linux 原生探针、Android ARM64 探针和 talloc 交叉编译已先行通过；这次失败不是 Android/Codex 运行测试。上述共用 header 修复保持编译器检查开启，尚需后续云编译确认其余阶段。
+
+[45129721822](https://github.com/Audrey-cn/omarchy-android/actions/runs/45129721822) 的 header 修复后构建于 15:15:59 推进到 control PRoot 最终链接，因静态归档漏收 talloc 2.5 的 libreplace 实现而报 `rep_memset_explicit` 未定义。后续脚本补齐同目标的 libreplace 对象并增加提前交叉链接检查；没有以空实现或普通 `memset` 替代该清理函数。

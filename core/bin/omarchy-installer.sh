@@ -179,6 +179,8 @@ DESKTOP
         tar --zstd -xf "/tmp/$HFILE" -C / --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.BUILDINFO' --exclude='.INSTALL'
         rm -f "/tmp/$HFILE" /tmp/omarchy.db "$APP_DIR/Hermes.desktop"
         /usr/local/bin/omarchy-repair-hermes-pty
+        /usr/local/bin/omarchy-repair-hermes-onboarding
+        /usr/local/bin/omarchy-repair-hermes-onboarding --seed-bootstrap-cache
         for f in /usr/share/applications/*hermes*.desktop; do
             [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/hermes-desktop-launch %u|" "$f"
         done

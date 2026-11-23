@@ -7,6 +7,8 @@ on:
     paths:
       - 'core/**'
       - 'scripts/stage-core.sh'
+      - 'scripts/android-build.py'
+      - 'scripts/prepare-android-managed.py'
       - 'apps/android/**'
       - '.github/workflows/build-container.yml'
   pull_request:
@@ -14,8 +16,13 @@ on:
     paths:
       - 'core/**'
       - 'scripts/stage-core.sh'
+      - 'scripts/android-build.py'
+      - 'scripts/prepare-android-managed.py'
       - 'apps/android/**'
       - '.github/workflows/build-container.yml'
+
+permissions:
+  contents: read
 
 jobs:
   build-rootfs:
@@ -205,6 +212,8 @@ jobs:
         working-directory: apps/android
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: omarchy-ubuntu24-arm64-container
@@ -213,20 +222,38 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
+      - name: Prepare APK version and test signing
+        id: android-build
+        env:
+          OMARCHY_ANDROID_TEST_KEYSTORE_B64: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_B64 || '' }}
+          OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD || '' }}
+        run: python3 ../../scripts/android-build.py prepare --output-dir "$RUNNER_TEMP/omarchy-android-signing"
       - uses: gradle/actions/setup-gradle@v4
       - name: Install Android SDK 37 & NDK/CMake
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0" "cmake;3.22.1" "ndk;27.2.12479018" >/dev/null || true
       - name: Assemble All-in-One OmarchyAndroid APK
+        env:
+          OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD || '' }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew testDebugUnitTest assembleDebug --no-daemon
           mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
           python3 -c 'import zipfile; z = zipfile.ZipFile("app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk"); assert z.getinfo("assets/rootfs.tar.zst").file_size > 0'
           ls -lh app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
+      - name: Verify APK certificate and version
+        run: |
+          python3 ../../scripts/android-build.py verify --apk app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk --metadata "$OMARCHY_ANDROID_BUILD_METADATA" --build-tools "$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          cp "$OMARCHY_ANDROID_BUILD_METADATA" app/build/outputs/apk/debug/build-metadata.json
       - name: Upload All-in-One APK
         uses: actions/upload-artifact@v4
         with:
-          name: OmarchyAndroid-AllInOne-apk
-          path: apps/android/app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
+          name: OmarchyAndroid-AllInOne-apk${{ steps.android-build.outputs.artifact_suffix }}
+          path: |
+            apps/android/app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
+            apps/android/app/build/outputs/apk/debug/build-metadata.json
+          if-no-files-found: error
+      - name: Remove runner signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/omarchy-android-signing/test-signing.p12"

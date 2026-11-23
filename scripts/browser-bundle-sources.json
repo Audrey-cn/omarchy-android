@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "chromium128-pw1.46.1-node24.15.0-linux-arm64",
+  "activation": "explicit-candidate-only",
+  "platform": "linux-arm64",
+  "versions": {
+    "chromium": "128.0.6613.18",
+    "chromiumRevision": "1129",
+    "playwright": "1.46.1",
+    "node": "24.15.0"
+  },
+  "upstreamRegistry": "https://github.com/microsoft/playwright/blob/v1.46.1/packages/playwright-core/browsers.json",
+  "upstreamPlatformRegistry": "https://github.com/microsoft/playwright/blob/v1.46.1/packages/playwright-core/src/server/registry/index.ts",
+  "sources": [
+    {
+      "id": "chromium",
+      "archive": "chromium-linux-arm64-1129.zip",
+      "format": "zip",
+      "stripPrefix": "chrome-linux",
+      "destination": "opt/omarchy-chromium128/browsers/chromium-1129/chrome-linux",
+      "urls": [
+        "https://playwright.azureedge.net/builds/chromium/1129/chromium-linux-arm64.zip",
+        "https://playwright.download.prss.microsoft.com/dbazure/download/playwright/builds/chromium/1129/chromium-linux-arm64.zip"
+      ],
+      "sha256": "67aab2cec5a4927667575452a2b6c57566085c154f47f924d6e3efa47f7bd777",
+      "bytes": 176724222,
+      "hashSource": "SHA256 of the complete official revision 1129 ZIP; extracted architecture and ZIP CRC verified separately"
+    },
+    {
+      "id": "playwright",
+      "archive": "playwright-1.46.1.tgz",
+      "format": "tar",
+      "stripPrefix": "package",
+      "destination": "opt/omarchy-chromium128/node_modules/playwright",
+      "urls": ["https://registry.npmjs.org/playwright/-/playwright-1.46.1.tgz"],
+      "sha256": "e907adef81f8797836c89ffaa10a01bbfa5d94eb26403860cd748b1718bfebd6",
+      "bytes": 719996,
+      "npmIntegrity": "sha512-oPcr1yqoXLCkgKtD5eNUPLiN40rYEM39odNpIb6VE6S7/15gJmA1NzVv6zJYusV0e7tzvkU/utBFNa/Kpxmwng==",
+      "hashSource": "https://registry.npmjs.org/playwright/1.46.1"
+    },
+    {
+      "id": "playwright-core",
+      "archive": "playwright-core-1.46.1.tgz",
+      "format": "tar",
+      "stripPrefix": "package",
+      "destination": "opt/omarchy-chromium128/node_modules/playwright-core",
+      "urls": ["https://registry.npmjs.org/playwright-core/-/playwright-core-1.46.1.tgz"],
+      "sha256": "f8fe9e644f9827fcd5724eefe5bfb42dff43616402a12cfc7d7227e7f04164d0",
+      "bytes": 1881112,
+      "npmIntegrity": "sha512-h9LqIQaAv+CYvWzsZ+h3RsrqCStkBHlgo6/TJlFst3cOTlLghBQlJwPOZKQJTKNaD3QIB7aAVQ+gfWbN3NXB7A==",
+      "hashSource": "https://registry.npmjs.org/playwright-core/1.46.1"
+    },
+    {
+      "id": "node",
+      "archive": "node-v24.15.0-linux-arm64.tar.xz",
+      "format": "tar",
+      "stripPrefix": "node-v24.15.0-linux-arm64",
+      "destination": "opt/omarchy-node/node-v24.15.0-linux-arm64",
+      "urls": ["https://nodejs.org/dist/v24.15.0/node-v24.15.0-linux-arm64.tar.xz"],
+      "sha256": "f3d5a797b5d210ce8e2cb265544c8e482eaedcb8aa409a8b46da7e8595d0dda0",
+      "bytes": 30108656,
+      "hashSource": "https://nodejs.org/dist/v24.15.0/SHASUMS256.txt"
+    }
+  ]
+}

@@ -52,6 +52,7 @@ unset PROOT_UNBUNDLE_LOADER PROOT_WITH_LIBANDROID_SHMEM
 "$CC" --version > "$artifact_dir/compiler-version.txt"
 sha256sum "$experiment_dir/build-android.sh" "$experiment_dir/build-probe.sh" \
   "$experiment_dir/procfd-probe.c" "$experiment_dir/talloc-cross-answers.txt" \
+  "$experiment_dir/talloc-link-smoke.c" \
   "$experiment_dir/sources.env" "$experiment_dir/build-compat.patch" \
   > "$artifact_dir/recipe-sha256.txt"
 
@@ -92,9 +93,34 @@ cp "$experiment_dir/talloc-cross-answers.txt" "$work_dir/talloc/cross-answers.tx
   make -j2
   mapfile -t talloc_objects < <(find bin/default -maxdepth 1 -name 'talloc*.o' -type f | sort)
   [[ ${#talloc_objects[@]} -gt 0 ]]
-  "$AR" rcs "$prefix/lib/libtalloc.a" "${talloc_objects[@]}"
+  # talloc 2.5 uses libreplace's rep_memset_explicit on Android API 28.
+  # Waf also builds hostcc variants; never mix those or tests into this archive.
+  replacement_objects=()
+  declare -A replacement_units=()
+  while IFS= read -r object; do
+    "$ndk_bin/llvm-readelf" --file-header "$object" > "$work_dir/object-header.txt"
+    if ! grep -q 'Machine:.*AArch64' "$work_dir/object-header.txt"; then
+      continue
+    fi
+    object_name=${object##*/}
+    source_unit=${object_name%%.c.*}
+    if [[ -z ${replacement_units[$source_unit]+present} ]]; then
+      replacement_objects+=("$object")
+      replacement_units[$source_unit]=1
+    fi
+  done < <(find bin/default/lib/replace -maxdepth 1 -name '*.o' -type f | sort)
+  [[ ${#replacement_objects[@]} -gt 0 ]]
+  printf '%s\n' "${talloc_objects[@]}" "${replacement_objects[@]}" \
+    > "$artifact_dir/talloc-archive-objects.txt"
+  "$AR" rcs "$prefix/lib/libtalloc.a" "${talloc_objects[@]}" "${replacement_objects[@]}"
+  "$ndk_bin/llvm-nm" --defined-only "$prefix/lib/libtalloc.a" \
+    > "$artifact_dir/talloc-defined-symbols.txt"
+  grep -q 'rep_memset_explicit' "$artifact_dir/talloc-defined-symbols.txt"
   cp talloc.h "$prefix/include/talloc.h"
 )
+"$CC" -std=gnu11 -Wall -Wextra -Werror -I"$prefix/include" \
+  "$experiment_dir/talloc-link-smoke.c" -L"$prefix/lib" -ltalloc \
+  -Wl,--no-undefined -o "$artifact_dir/talloc-link-smoke-android-arm64"
 
 # GNUmakefile uses -m32 to build its ARM loader. NDK requires a separate driver.
 cat > "$work_dir/ndk-cc" <<'WRAPPER'
@@ -141,6 +167,7 @@ cp "$experiment_dir/a179d3e8.patch" "$experiment_dir/build-compat.patch" \
   "$experiment_dir/sources.env" \
   "$experiment_dir/procfd-probe.c" "$experiment_dir/build-android.sh" \
   "$experiment_dir/build-probe.sh" "$experiment_dir/talloc-cross-answers.txt" \
+  "$experiment_dir/talloc-link-smoke.c" \
   "$experiment_dir/README.md" "$artifact_dir/"
 cp "$work_dir/proot-patched/COPYING" "$artifact_dir/PROOT-COPYING"
 cp "$work_dir/talloc/LICENSE" "$artifact_dir/TALLOC-LICENSE"
