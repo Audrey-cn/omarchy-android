@@ -19,12 +19,21 @@ mkdir -p "$TARGET_ROOT/usr/local/bin" \
   "$TARGET_ROOT/root/.config/fcitx5" \
   "$TARGET_ROOT/root/.config/omarchy"
 
-cp -f "$REPO_DIR"/core/bin/* "$TARGET_ROOT/usr/local/bin/"
-cp -f "$REPO_DIR"/core/ai-suite/*launch "$TARGET_ROOT/usr/local/bin/"
+stage_script() {
+  local source="$1" first_line=""
+  # Test/import caches and nested directories are not executable source inputs.
+  [[ -f "$source" && ! -L "$source" ]] || return 0
+  case "$source" in *.pyc|*.pyo) return 0 ;; esac
+  IFS= read -r first_line < "$source" || true
+  [[ "$first_line" == '#!'* ]] || return 0
+  # Several tracked Python/shell sources are 0644; install their command mode here.
+  install -m 755 "$source" "$TARGET_ROOT/usr/local/bin/${source##*/}"
+}
+
+for source in "$REPO_DIR"/core/bin/* "$REPO_DIR"/core/ai-suite/*launch; do
+  stage_script "$source"
+done
 cp -f "$REPO_DIR/core/config/sway/config" "$TARGET_ROOT/root/.config/sway/config"
 cp -f "$REPO_DIR/core/config/fcitx5/profile" "$TARGET_ROOT/root/.config/fcitx5/profile"
-chmod 755 "$TARGET_ROOT"/usr/local/bin/omarchy-* \
-  "$TARGET_ROOT/usr/local/bin/launch-waybar" \
-  "$TARGET_ROOT"/usr/local/bin/*-launch
 
 echo "Staged shared core from $REPO_DIR into $TARGET_ROOT"
