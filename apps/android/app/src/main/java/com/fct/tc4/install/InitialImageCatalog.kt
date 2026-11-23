@@ -76,6 +76,17 @@ object InitialImageCatalog {
         }
     }
     fun compatible(spec: ImageSpec, appVersionCode: Int) = spec.abi == "arm64-v8a" && spec.minAppVersionCode <= appVersionCode
+    fun releasePage(spec: ImageSpec?): String {
+        for (address in spec?.urls.orEmpty()) {
+            val uri = URI(address)
+            val parts = uri.path.split('/').filter { it.isNotEmpty() }
+            if (uri.scheme == "https" && uri.host == "github.com" && parts.size == 6 &&
+                parts.take(4) == listOf("Audrey-cn", "omarchy-android", "releases", "download") &&
+                parts[4].matches(Regex("[A-Za-z0-9._-]{1,160}")))
+                return "https://github.com/Audrey-cn/omarchy-android/releases/tag/${parts[4]}"
+        }
+        return "https://github.com/Audrey-cn/omarchy-android/releases"
+    }
     fun encode(images: List<ImageSpec>): String = images.joinToString(",", "{\"schemaVersion\":1,\"images\":[", "]}") { image ->
         validate(image)
         "{\"id\":${quote(image.id)},\"name\":${quote(image.name)},\"abi\":${quote(image.abi)},\"minAppVersionCode\":${image.minAppVersionCode},\"bytes\":${image.bytes},\"unpackedBytes\":${image.unpackedBytes},\"sha256\":${quote(image.sha256)},\"sourceSha\":${quote(image.sourceSha)},\"urls\":[${image.urls.joinToString(",") { quote(it) }}]}"

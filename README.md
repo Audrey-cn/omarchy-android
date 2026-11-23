@@ -38,7 +38,7 @@
 
 精简 APK 提供首次安装页面：选择初始镜像 → 下载并安装，支持持久断点、暂停后继续和匹配镜像的离线导入。APK 保留 Android 界面、内嵌 X11 与 PRoot，桌面及浏览器内容随初装镜像分发。首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)和[镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，支持 App 版本代码 64 及以上，随包目录也已加入同一镜像。K20 已完成下载恢复、完整镜像校验安装、离线导入和桌面启动验收；测试条件见[实机记录](docs/reports/online-installer-k20-20261123.md)，操作说明见[首次安装与更新](docs/initial-install.md)。
 
-后续 App、X11 和 PRoot 更新沿用同一持久签名密钥，通过 Android 覆盖安装保留现有桌面与个人数据；日常启动不再同步 guest 文件或重新导入镜像。Ubuntu 内的软件使用其 APT 软件源维护。镜像定期修正后供新安装选择，已有桌面无需跟随每次镜像重发。
+后续 App、X11 和 PRoot 更新沿用同一持久签名密钥，通过 Android 覆盖安装保留现有桌面与个人数据；日常启动不再同步 guest 文件或重新导入镜像。Ubuntu 软件包继续使用现有 APT 软件源维护。下一轮将补齐用户显式发起的项目桌面组件更新，负责脚本、界面及适配，当前尚未交付；职责、缺口和验收要求见[更新维护清单](docs/discussions/2026-11-23-update-maintenance.md)。初装镜像低频汇总修正后供新安装选择，已有桌面无需跟随每次镜像重发。
 
 ### Root chroot
 

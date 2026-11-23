@@ -89,17 +89,19 @@ def sh(cmd):
 
 
 def get_swaysock():
-    socks = sorted(glob.glob("/tmp/sway-ipc.*.sock"), key=os.path.getmtime, reverse=True)
-    return socks[0] if socks else "/tmp/sway-ipc.sock"
+    import sys
+    sys.dont_write_bytecode = True
+    from omarchy_session import select_sway_socket
+    return select_sway_socket(os.environ)
 
 
 def launch_bg(cmd):
     env = {
         **os.environ,
         "XDG_RUNTIME_DIR": "/tmp",
-        "WAYLAND_DISPLAY": "wayland-1",
+        "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-1"),
         "SWAYSOCK": get_swaysock(),
-        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/omarchy-dbus.sock",
+        "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/omarchy-dbus.sock"),
     }
     subprocess.Popen(cmd, shell=True, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
@@ -306,13 +308,13 @@ class OmarchyPanel(Gtk.Window):
         def on_vol(s):
             v = int(s.get_value())
             lbl.set_text(f"主音量: {v}%")
-            launch_bg(f"PULSE_SERVER=127.0.0.1 pactl set-sink-volume @DEFAULT_SINK@ {v}%; pkill -RTMIN+8 waybar")
+            launch_bg(f"PULSE_SERVER=127.0.0.1 pactl set-sink-volume @DEFAULT_SINK@ {v}%; /usr/local/bin/omarchy_session.py signal waybar 8")
 
         scale.connect("value-changed", on_vol)
         self.box.pack_start(scale, False, False, 4)
 
         def on_mute(_):
-            launch_bg("PULSE_SERVER=127.0.0.1 pactl set-sink-mute @DEFAULT_SINK@ toggle; pkill -RTMIN+8 waybar")
+            launch_bg("PULSE_SERVER=127.0.0.1 pactl set-sink-mute @DEFAULT_SINK@ toggle; /usr/local/bin/omarchy_session.py signal waybar 8")
             Gtk.main_quit()
 
         self.add_btn("󰝟  静音 / 取消静音", on_mute)
@@ -474,7 +476,7 @@ class OmarchyPanel(Gtk.Window):
         self.add_row(f"USB 代理隧道: {'已连接 (127.0.0.1:18888)' if proxy_ok else '未连接'}", dim=not proxy_ok)
 
         self.add_btn("󰖩  切换 Wi-Fi (打开系统 Wi-Fi 设置)", lambda _: (send_host_action("wifi_settings"), Gtk.main_quit()))
-        self.add_btn("󰑓  刷新状态栏网络状态", lambda _: (send_host_action("refresh_status"), launch_bg("pkill -RTMIN+7 waybar"), Gtk.main_quit()))
+        self.add_btn("󰑓  刷新状态栏网络状态", lambda _: (send_host_action("refresh_status"), launch_bg("/usr/local/bin/omarchy_session.py signal waybar 7"), Gtk.main_quit()))
 
     def build_bluetooth(self):
         self.set_size_request(340, -1)

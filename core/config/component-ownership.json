@@ -1,0 +1,233 @@
+{
+  "schema": 1,
+  "legacy_commit": "8d42b9212a6673578edbe7969807010e397af254",
+  "legacy_sha256": {
+    "cc-switch-launch": [
+      "a2bfd78e20e519a86fa9190842c1334e25a1fcab819b95f0f64b529da2ee7ce0"
+    ],
+    "chatgpt-launch": [
+      "d72dbcff310acfc4340fcfde79c95a74af444bf186357f646f4d068e6abe4ed7"
+    ],
+    "claude-desktop-launch": [
+      "bd51acc2ccb09e7c0dc368c8e3902b43129685faef1a645ce6765c2d467aa56d"
+    ],
+    "hermes-desktop-launch": [
+      "638f3ce84eae5636d140e33a0d6c67e74a6a5f44f810dd059767aa47e73308ab"
+    ],
+    "launch-waybar": [
+      "15957a85e8b8cd997d974219932f59759d127228f1dd4a82dca99ecce6f0a368"
+    ],
+    "omarchy-app-grid": [
+      "7dd460e390664126c60f44553941473765c6c14bc584a24923bb937767dc2b09"
+    ],
+    "omarchy-browser": [
+      "b54fe8530427b7b52fd8ad0ec379cd51cb8610d01533529d4633fe1e9724daea"
+    ],
+    "omarchy-chromium": [
+      "fcb1316eccd3db756c052f743274fd2815e391b41f2c14922f1011e86a14e9e9"
+    ],
+    "omarchy-deck-bridge.py": [
+      "11e6d175463197bdc65ca7d8b71dd1fdda36a62d7f82e4157295e17a0a5ddcb9"
+    ],
+    "omarchy-firefox": [
+      "138a1bce8506bd878e23b68e1fbb876dde72ca17bd426c136e3d1ef84e228a42"
+    ],
+    "omarchy-fix-desktops": [
+      "8dbb4c93a45d213787389d79d1882df874a171a2658092715ad6ba13575ab45e"
+    ],
+    "omarchy-hermes-pty-smoke": [
+      "6afa210c88dfdd64d9863170b849f400a1f7497e51f36459a29bbf2bccea9e23"
+    ],
+    "omarchy-image-picker": [
+      "1914d5a77609d4c361f7050ef38494dfe0d5d0fabfa7b50beab523be5ba95cfe"
+    ],
+    "omarchy-ime-status": [
+      "d031aa4c5d78193e350e470b805e4e56c68e62f6e4e55a6aba3ed5863e21a18e"
+    ],
+    "omarchy-indicator": [
+      "87da6896d774e936a4b240042380844ea305f951d512438712c31bf6e113ae21"
+    ],
+    "omarchy-install-firefox": [
+      "f73b07c5b980133da6c4c70d69f029226b5ad02c72a33d7910001a64da36a10f"
+    ],
+    "omarchy-install-playwright-browser": [
+      "b4b91390142e69e53bb3ac830381c80c582107d2a941f49ccfc7b057439ce331"
+    ],
+    "omarchy-installer.sh": [
+      "967c45535d4c91557c7a101a944f94c9d6a04e9aeb5e31bd275d7cac686b343c"
+    ],
+    "omarchy-launch-webapp": [
+      "b2b7e511b2c692fb341442809b9781b890e64f5706ad07a4c0e1e239c1e01b12"
+    ],
+    "omarchy-menu-ui": [
+      "7f7c9c2ce1fef333e98fc3adf8d208216fa47f5eea2b43a3189822d5887379d9"
+    ],
+    "omarchy-net-status": [
+      "eb158978e26dccb73f1b73c8b90c32fef61c19d37eebb083fd7f3925b1432e05"
+    ],
+    "omarchy-node-runtime": [
+      "ec8e27078489359ab89a5cd0cbeea68fa93c4def38432fa04e336c8fdf6bee1a"
+    ],
+    "omarchy-panel": [
+      "40321a23aa6e44975049938feac3675c7bde24a957f19efd8149caa6777c40a3"
+    ],
+    "omarchy-playwright": [
+      "b827bd1d6905c0c0f90927b5615606f84ee803ef6c87b68511d7672e88316d84"
+    ],
+    "omarchy-playwright-chromium": [
+      "b0915d4270db5d56fab84f0c738fba7fe523dea4610952c858b7e3b215a1f154"
+    ],
+    "omarchy-playwright-firefox": [
+      "867285b50bd0f7a2ace3d7447151dc05b7422798b934e390c68c6e1db9ac11d6"
+    ],
+    "omarchy-playwright-tool.cjs": [
+      "588c2f3c72e6238e914246c095452cfcf17b45f1cb765d18322d9aed3bd852c8"
+    ],
+    "omarchy-playwright128": [
+      "e7e6e5d0f3791991199a951f0f078acc7251e258fd607352850f7c762211d93e",
+      "63bad44f835d3356694d66efd514d54b6dc765c9f1a80b4857d6d26c7e8c0d0b"
+    ],
+    "omarchy-playwright128-check.cjs": [
+      "12b3c33ac98bb95be6f43527986906919612ac1f8747fba582a311b394b078d9"
+    ],
+    "omarchy-repair-hermes-onboarding": [
+      "ebd28d958bbaac34bbc4cd6c9e95478d20be4ccea6cdfff86cbeeec7562e2e01"
+    ],
+    "omarchy-repair-hermes-pty": [
+      "f4233a50904ac5f3ceaab8dcfd8e9af6c7f33f0d7c11f64c13255270db7f8ec5"
+    ],
+    "omarchy-restore-x11-keyboard": [
+      "73bc54557e5e74ebb6d5f7a098f636a1642e215b4fafe6d52b39f3921313d777"
+    ],
+    "omarchy-theme-engine.py": [
+      "0e9149dbb00bd8b3b08bcf27024131d0bfa931ebd6ae8644713667698708cdee"
+    ],
+    "omarchy-toggle-ime": [
+      "b65230f5bff79e5706966c29cceffea2e2856f64555e1a41046f381ddf695d9b"
+    ],
+    "omarchy-update-check": [
+      "844fa644a7969b2b8cbdef4559c2f8f4be122e1f58e6a580fd9c42dda973a6b2"
+    ],
+    "wtype": [
+      "8522f4c498d387d96c2a86e5114c049257fcb2cb6ea415c05371f81ed3420899"
+    ]
+  },
+  "paths": [
+    {
+      "path": "/usr/lib/omarchy-android/desktop",
+      "owner": "omarchy-android-desktop",
+      "kind": "programs and factory defaults",
+      "update": "explicit component install"
+    },
+    {
+      "path": "/usr/local/bin/<listed launcher>",
+      "owner": "project only for matching receipt or fingerprint",
+      "kind": "compatibility entry",
+      "update": "explicit component install"
+    },
+    {
+      "path": "/root/.config",
+      "owner": "user",
+      "kind": "active configuration takes priority over packaged defaults",
+      "update": "user"
+    },
+    {
+      "path": "/root/.local",
+      "owner": "user",
+      "kind": "application data, custom desktop entries, upstream assets",
+      "update": "user or application"
+    },
+    {
+      "path": "/opt",
+      "owner": "per installed application or bundle receipt",
+      "kind": "third-party and project bundles",
+      "update": "per source, otherwise unknown"
+    }
+  ],
+  "upstream_components": {
+    "wayland": [
+      "Omarchy Android",
+      "verified graphics runtime package",
+      "libffi, expat"
+    ],
+    "wayland-protocols": [
+      "Omarchy Android",
+      "verified graphics runtime package",
+      "Wayland build input"
+    ],
+    "libinput": [
+      "Omarchy Android",
+      "verified graphics runtime package",
+      "udev, evdev"
+    ],
+    "wlroots": [
+      "Omarchy Android",
+      "verified graphics runtime package",
+      "Wayland, libinput, pixman"
+    ],
+    "sway": [
+      "Omarchy Android",
+      "verified graphics runtime package",
+      "wlroots, Wayland"
+    ],
+    "JetBrainsMonoNerdFont": [
+      "Omarchy Android",
+      "image/manual font refresh",
+      "fontconfig"
+    ],
+    "lazygit": [
+      "lazygit upstream / project image",
+      "manual upstream binary replacement",
+      "git"
+    ],
+    "omarchy": [
+      "basecamp/omarchy upstream / project image",
+      "reviewed upstream asset refresh",
+      "git"
+    ]
+  },
+  "legacy_image_commit": "e55030353df6bae7496720356f2d4b940495824e",
+  "commands": [
+    "core/ai-suite/cc-switch-launch",
+    "core/ai-suite/chatgpt-launch",
+    "core/ai-suite/claude-desktop-launch",
+    "core/ai-suite/hermes-desktop-launch",
+    "core/bin/launch-waybar",
+    "core/bin/omarchy-app-grid",
+    "core/bin/omarchy-browser",
+    "core/bin/omarchy-chromium",
+    "core/bin/omarchy-component-update",
+    "core/bin/omarchy-deck-bridge.py",
+    "core/bin/omarchy-firefox",
+    "core/bin/omarchy-fix-desktops",
+    "core/bin/omarchy-hermes-pty-smoke",
+    "core/bin/omarchy-image-picker",
+    "core/bin/omarchy-ime-status",
+    "core/bin/omarchy-indicator",
+    "core/bin/omarchy-install-firefox",
+    "core/bin/omarchy-install-hermes",
+    "core/bin/omarchy-install-playwright-browser",
+    "core/bin/omarchy-installer.sh",
+    "core/bin/omarchy-launch-webapp",
+    "core/bin/omarchy-menu-ui",
+    "core/bin/omarchy-net-status",
+    "core/bin/omarchy-node-runtime",
+    "core/bin/omarchy-panel",
+    "core/bin/omarchy-playwright",
+    "core/bin/omarchy-playwright-chromium",
+    "core/bin/omarchy-playwright-firefox",
+    "core/bin/omarchy-playwright-tool.cjs",
+    "core/bin/omarchy-playwright128",
+    "core/bin/omarchy-playwright128-check.cjs",
+    "core/bin/omarchy-repair-hermes-onboarding",
+    "core/bin/omarchy-repair-hermes-pty",
+    "core/bin/omarchy-restore-x11-keyboard",
+    "core/bin/omarchy-runtime-update",
+    "core/bin/omarchy-theme-engine.py",
+    "core/bin/omarchy-toggle-ime",
+    "core/bin/omarchy-update-check",
+    "core/bin/omarchy-updates",
+    "core/bin/wtype",
+    "core/bin/omarchy_session.py"
+  ]
+}

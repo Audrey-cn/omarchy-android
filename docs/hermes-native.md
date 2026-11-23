@@ -96,10 +96,10 @@ PYTHONPATH="$HOME/.hermes/hermes-agent" \
 
 安装和运行日志分别位于 `$HERMES_HOME/logs/bootstrap-*.log` 与 `$HERMES_HOME/logs/desktop.log`。只有实际进入安装阶段才会生成 bootstrap 日志；停留在选择页面时没有该日志不代表安装失败。安装错误应以原阶段错误和进程退出为准，不能靠扩大 renderer 的等待时间掩盖。
 
-官方包本身还带有 `/usr/share/hermes-desktop/install.sh`，但 desktop 的初始下载逻辑不会自动使用它。安装器会调用以下命令，将经过 stamp 和 SHA256 核对的该文件原子发布到固定 commit 的 bootstrap cache：
+官方归档提供 `usr/share/hermes-desktop/install.sh`。新版安装器在暂存目录核验整个归档和脚本，将脚本随应用保存在 `/opt/hermes-desktop/.omarchy-onboarding/install.sh`。启动器首次使用时调用以下命令，仅添加通过 stamp 和 SHA256 核验的 bootstrap cache。旧版安装仍可省略 `--install-script` 使用原系统路径。
 
 ```bash
-omarchy-repair-hermes-onboarding --seed-bootstrap-cache
+omarchy-repair-hermes-onboarding --seed-bootstrap-cache --install-script /opt/hermes-desktop/.omarchy-onboarding/install.sh
 ```
 
 当前已知脚本 SHA256 为 `5854b15670b51a8daae8f59ddfa917062de9f74be261eb73b4b8d719710f8968`。相同缓存可重复使用；已有不同内容或符号链接时拒绝覆盖，需先检查其来源。`--hermes-home DIR` 可指定其他 profile 的数据根。缓存只免去初始 Node `https.get` 拉取 `install.sh` 的网络请求，源码、Python/Node 依赖仍需缓存或网络，不代表完整离线安装。Chromium 的 `--proxy-server` 也不能保证代理 Node 的这一请求；需要代理时限定到本次进程和安装子进程，并保持本地连接绕过代理。
@@ -121,3 +121,7 @@ python3 -m unittest discover -s tests -v
 3. Hermes 后端初始化及一次真实 Agent/工具调用单独验证。Electron 或 GPU 子进程存活不代表窗口和 Agent 都已可用。
 
 上游依据：[Electron 原生模块说明](https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules)、[electron/rebuild 参数与要求](https://github.com/electron/rebuild)、[node-pty 1.1.0 构建定义](https://github.com/microsoft/node-pty/blob/v1.1.0/binding.gyp)、[Omarchy 包构建配方](https://github.com/omacom/omarchy-pkgs/blob/master/pkgbuilds/hermes-desktop/PKGBUILD)。
+
+### 整个 Hermes Desktop 程序目录的恢复
+
+重装已有 Hermes Desktop 时，安装器在同一文件系统内原子交换程序目录，将完整旧目录保存在 `/opt/.omarchy-hermes-recovery/tree`。用户在该目录内新增的文件和修改过的资源随目录保留。在更新中心选择“恢复 Hermes Desktop”，或运行 `omarchy-install-hermes recover`。恢复会核对事务记录中的目录身份，再次交换目录，替换下来的程序和期间添加的文件同样留在恢复目录中。再次重装前，请先将整个恢复目录移到自己的备份位置。模型配置、会话与浏览器资料均在该操作范围之外。

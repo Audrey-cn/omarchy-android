@@ -1,34 +1,54 @@
-#!/usr/bin/env bash
-# Permanent Desktop Entry & Wrapper Guard (also invoked automatically via APT DPkg::Post-Invoke)
-# Ensures apt upgrades NEVER revert Electron/Wayland wrappers or WebApp launchers.
-set -u
+#!/usr/bin/env python3
+"""Publish missing project launchers in XDG system-local applications only."""
 
-APP_DIR="/root/.local/share/applications"
-mkdir -p "$APP_DIR"
+import os
+import tempfile
+from pathlib import Path
 
-pin_desktop() {
-  local pattern="$1"
-  local new_exec="$2"
-  for f in /usr/share/applications/$pattern; do
-    [[ -f "$f" ]] || continue
-    sed -i "s|^Exec=.*|Exec=$new_exec|" "$f"
-    cp -f "$f" "$APP_DIR/$(basename "$f")"
-  done
-}
+LAUNCHERS = [
+    ("cc-switch", "CC Switch", "/usr/bin/cc-switch", "/usr/local/bin/cc-switch-launch"),
+    ("chatgpt", "ChatGPT", "/usr/bin/chatgpt", "/usr/local/bin/chatgpt-launch %u"),
+    (
+        "claude",
+        "Claude Desktop",
+        "/usr/bin/claude-desktop",
+        "/usr/local/bin/claude-desktop-launch %u",
+    ),
+    (
+        "hermes",
+        "Hermes Desktop",
+        "/opt/hermes-desktop/Hermes",
+        "/usr/local/bin/hermes-desktop-launch %u",
+    ),
+    (
+        "code",
+        "Visual Studio Code",
+        "/usr/share/code/code",
+        "/usr/share/code/code --no-sandbox --disable-dev-shm-usage --in-process-gpu --disable-gpu-compositing --ozone-platform=wayland --enable-wayland-ime --password-store=basic %F",
+    ),
+]
 
-pin_desktop "*claude*.desktop" "/usr/local/bin/claude-desktop-launch %u"
-pin_desktop "*Claude*.desktop" "/usr/local/bin/claude-desktop-launch %u"
-pin_desktop "*chatgpt*.desktop" "/usr/local/bin/chatgpt-launch %u"
-pin_desktop "*codex*.desktop" "/usr/local/bin/chatgpt-launch %u"
-pin_desktop "*hermes*.desktop" "/usr/local/bin/hermes-desktop-launch %u"
-pin_desktop "*CC*Switch*.desktop" "/usr/local/bin/cc-switch-launch"
-pin_desktop "*cc-switch*.desktop" "/usr/local/bin/cc-switch-launch"
 
-for f in "$APP_DIR"/*.desktop; do
-  [[ -f "$f" ]] || continue
-  sed -i 's|^Exec=omarchy-launch-webapp |Exec=/usr/local/bin/omarchy-launch-webapp |' "$f"
-  sed -i 's|^Exec=omarchy-webapp-handler-hey.*|Exec=/usr/local/bin/omarchy-launch-webapp https://app.hey.com/|' "$f"
-  sed -i 's|^Exec=omarchy-webapp-handler-zoom.*|Exec=/usr/local/bin/omarchy-launch-webapp https://app.zoom.us/wc|' "$f"
-done
+def publish(directory, slug, name, executable, command):
+    if not os.access(executable, os.X_OK) or not os.access(command.split()[0], os.X_OK):
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"omarchy-android-{slug}.desktop"
+    if os.path.lexists(target):
+        return
+    with tempfile.NamedTemporaryFile(dir=directory, mode="w") as staged:
+        staged.write(
+            f"[Desktop Entry]\nType=Application\nName={name} (Omarchy)\n"
+            f"TryExec={executable}\nExec={command}\nTerminal=false\nCategories=Utility;\n"
+        )
+        staged.flush()
+        os.chmod(staged.name, 0o644)
+        try:
+            os.link(staged.name, target)
+        except FileExistsError:
+            pass
 
-update-desktop-database /usr/share/applications "$APP_DIR" 2>/dev/null || true
+
+if __name__ == "__main__":
+    for item in LAUNCHERS:
+        publish(Path("/usr/local/share/applications"), *item)

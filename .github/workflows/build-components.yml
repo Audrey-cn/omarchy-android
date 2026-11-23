@@ -1,0 +1,112 @@
+name: Build Omarchy Guest Components
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Component version (X.Y.Z)
+        required: true
+        default: '1.0.0'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'scripts/*component*'
+      - 'scripts/*graphics*'
+      - 'scripts/*browser*'
+      - 'runtime/chroot/**'
+      - '.github/workflows/build-components.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate all guest changes together
+        run: |
+          python3 -m unittest discover -s tests -v
+          for script in install.sh scripts/*.sh runtime/*/*.sh; do bash -n "$script"; done
+      - name: Build versioned desktop component
+        env:
+          COMPONENT_VERSION: ${{ inputs.version || '1.0.0' }}
+        run: |
+          python3 scripts/build-desktop-component.py --version "$COMPONENT_VERSION" --output "$RUNNER_TEMP/desktop" --changes 'Explicit desktop updates, independent update sources, configuration preservation and recovery'
+          cp core/bin/omarchy-component-update "$RUNNER_TEMP/desktop/omarchy-component-update"
+          cp docs/component-updates.md "$RUNNER_TEMP/desktop/README.md"
+          cd "$RUNNER_TEMP/desktop"
+          sha256sum omarchy-component-update > bootstrap-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-desktop-component
+          path: ${{ runner.temp }}/desktop/
+          if-no-files-found: error
+
+  verify-release:
+    needs: [desktop, browser, graphics]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: omarchy-*-runtime
+          path: ${{ runner.temp }}/release
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: omarchy-desktop-component
+          path: ${{ runner.temp }}/release
+      - name: Verify all release payloads and provenance together
+        env:
+          COMPONENT_VERSION: ${{ inputs.version || '1.0.0' }}
+        run: python3 scripts/verify-component-release.py "$RUNNER_TEMP/release" --source-sha "$GITHUB_SHA" --version "$COMPONENT_VERSION" --write-evidence
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-verified-components
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+
+  browser:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build verified browser runtime
+        env:
+          COMPONENT_VERSION: ${{ inputs.version || '1.0.0' }}
+        run: |
+          python3 scripts/build-browser-bundle.py --sources scripts/browser-bundle-sources.json --cache-dir "$RUNNER_TEMP/browser-cache" --output-dir "$RUNNER_TEMP/browser-build"
+          python3 scripts/runtime-component.py browser "$RUNNER_TEMP/browser-build/managed-core/files" "$RUNNER_TEMP/runtime" "$COMPONENT_VERSION"
+          sudo bash scripts/runtime-component-probe.sh "$RUNNER_TEMP/runtime" browser
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-browser-runtime
+          path: ${{ runner.temp }}/runtime/
+          if-no-files-found: error
+
+  graphics:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build verified graphics runtime
+        env:
+          COMPONENT_VERSION: ${{ inputs.version || '1.0.0' }}
+        run: |
+          sudo bash scripts/build-graphics-runtime.sh "$RUNNER_TEMP/runtime" "$COMPONENT_VERSION"
+          sudo bash scripts/runtime-component-probe.sh "$RUNNER_TEMP/runtime" graphics
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omarchy-graphics-runtime
+          path: ${{ runner.temp }}/runtime/
+          if-no-files-found: error

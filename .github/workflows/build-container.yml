@@ -2,9 +2,15 @@ name: Build Omarchy Initial Desktop Image
 
 on:
   workflow_dispatch:
+    inputs:
+      component_run_id:
+        description: Optional same-source verified component workflow run ID
+        required: false
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build-rootfs:
@@ -20,9 +26,30 @@ jobs:
           sudo apt-get install -y debootstrap zstd curl tar
 
       - name: Build pinned Chromium, Playwright and Node from verified public sources
+        if: inputs.component_run_id == ''
         run: |
           python3 scripts/build-browser-bundle.py --sources scripts/browser-bundle-sources.json \
             --cache-dir "$RUNNER_TEMP/browser-sources" --output-dir "$RUNNER_TEMP/browser-bundle"
+
+      - name: Build image runtime and desktop packages from this checkout
+        if: inputs.component_run_id == ''
+        run: |
+          out="$RUNNER_TEMP/components"
+          python3 scripts/build-desktop-component.py --version 1.0.0 --output "$out" --changes "Initial desktop update channel"
+          python3 scripts/runtime-component.py browser "$RUNNER_TEMP/browser-bundle/managed-core/files" "$out" 1.0.0
+          sudo bash scripts/build-graphics-runtime.sh "$out" 1.0.0
+
+      - name: Reuse the same verified component artifacts
+        if: inputs.component_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: omarchy-verified-components
+          run-id: ${{ inputs.component_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/components
+
+      - name: Verify component source and actual package contents
+        run: python3 scripts/verify-component-release.py "$RUNNER_TEMP/components" --source-sha "$GITHUB_SHA" --version 1.0.0
 
       - name: Build clean Ubuntu 24.04 ARM64 Omarchy rootfs
         run: |
@@ -33,12 +60,7 @@ jobs:
           sudo bash scripts/stage-core.sh "$ROOTFS"
           sudo install -d "$ROOTFS/usr/share/doc/omarchy-image"
           sudo install -m644 LICENSE LICENSES.md apps/android/COPYING "$ROOTFS/usr/share/doc/omarchy-image/"
-          test -d "$ROOTFS/opt" && test ! -L "$ROOTFS/opt"
-          for component in omarchy-node omarchy-chromium128; do
-            test ! -e "$ROOTFS/opt/$component"
-            sudo mv -T "$RUNNER_TEMP/browser-bundle/managed-core/files/opt/$component" "$ROOTFS/opt/$component"
-            sudo chown -R 0:0 "$ROOTFS/opt/$component"
-          done
+          sudo cp -r "$RUNNER_TEMP/components" "$ROOTFS/tmp/omarchy-packages"
 
           sudo cp -L --remove-destination /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
           sudo mount --bind /dev "$ROOTFS/dev"
@@ -68,77 +90,19 @@ jobs:
             fonts-noto-cjk fonts-noto-color-emoji fonts-dejavu-core papirus-icon-theme \
             python3 python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 gir1.2-webkit2-4.1 \
             grim slurp \
-            fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5 \
-            build-essential ninja-build pkg-config scdoc python3-pip \
-            libexpat1-dev libffi-dev libevdev-dev libmtdev-dev \
-            libwayland-dev wayland-protocols libpixman-1-dev libxkbcommon-dev \
-            libdrm-dev libinput-dev libudev-dev libseat-dev libgbm-dev \
-            libxcb1-dev libxcb-composite0-dev libxcb-render-util0-dev libxcb-xfixes0-dev \
-            libxcb-icccm4-dev libxcb-xinput-dev libxcb-shm0-dev libxcb-present-dev \
-            libxcb-dri3-dev libxcb-res0-dev libxcb-ewmh-dev \
-            libjson-c-dev libpcre2-dev libcairo2-dev libpango1.0-dev libgdk-pixbuf-2.0-dev
+            fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
 
-          # Upgrade meson to >=1.5 (Ubuntu 24.04 apt meson 1.3.2 doesn't support c_std=c23)
-          pip3 install --break-system-packages 'meson>=1.5,<1.8'
-
-          # Build wayland 1.23.1 + wayland-protocols 1.38 + wlroots 0.18.2 + sway 1.10.1
-          # (pure SHM/Pixman X11 backend WITHOUT DRI3 DRM FD — required for Android PRoot!)
-          export PKG_CONFIG_PATH=/usr/local/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig
-          export PATH=/usr/local/bin:$PATH
-          mkdir -p /tmp/build-sway
-          cd /tmp/build-sway
-
-          curl -fsSL "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.23.1/downloads/wayland-1.23.1.tar.xz" | tar -xJ
-          cd wayland-1.23.1
-          meson setup build --prefix=/usr/local -Ddocumentation=false -Dtests=false -Ddtd_validation=false
-          ninja -C build -j$(nproc)
-          ninja -C build install
-          ldconfig
-
-          cd /tmp/build-sway
-          curl -fsSL "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.38/downloads/wayland-protocols-1.38.tar.xz" | tar -xJ
-          cd wayland-protocols-1.38
-          meson setup build --prefix=/usr/local -Dtests=false
-          ninja -C build -j$(nproc)
-          ninja -C build install
-
-          cd /tmp/build-sway
-          curl -fsSL "https://gitlab.freedesktop.org/libinput/libinput/-/archive/1.26.2/libinput-1.26.2.tar.gz" | tar -xz
-          cd libinput-1.26.2
-          meson setup build --prefix=/usr/local -Dlibwacom=false -Ddebug-gui=false -Dtests=false -Ddocumentation=false -Dzshcompletiondir=no -Dudev-dir=/usr/local/lib/udev
-          ninja -C build -j$(nproc)
-          ninja -C build install
-          ldconfig
-
-          cd /tmp/build-sway
-          curl -fsSL "https://gitlab.freedesktop.org/wlroots/wlroots/-/releases/0.18.2/downloads/wlroots-0.18.2.tar.gz" | tar -xz
-          cd wlroots-0.18.2
-          # Force pure SHM/Pixman X11 backend without DRI3 DRM FD
-          sed -i 's/x11->have_dri3 = true;/x11->have_dri3 = false;/g' backend/x11/backend.c || true
-          meson setup build --prefix=/usr/local -Dbackends=x11 -Drenderers= -Dallocators= -Dxwayland=disabled -Dexamples=false
-          ninja -C build -j$(nproc)
-          ninja -C build install
-          ldconfig
-
-          cd /tmp/build-sway
-          curl -fsSL "https://github.com/swaywm/sway/releases/download/1.10.1/sway-1.10.1.tar.gz" | tar -xz
-          cd sway-1.10.1
-          meson setup build --prefix=/usr/local -Dman-pages=disabled -Dtray=disabled
-          ninja -C build -j$(nproc)
-          ninja -C build install
-          cd /
-          for dir in /tmp/build-sway/*; do
-            component=${dir##*/}
-            install -d "$DOC/$component"
-            find "$dir" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'COPYING*' \) -exec cp -t "$DOC/$component" {} +
+          # Activate exactly the same candidate artifacts used by installed guests.
+          export OMARCHY_RUNTIME_KIND=proot-app OMARCHY_RUNTIME_API=1 OMARCHY_APK_VERSION_CODE=64
+          dir=/tmp/omarchy-packages
+          /usr/local/bin/omarchy-component-update install desktop --candidate-dir "$dir" \
+            --catalog-sha256 "$(sha256sum "$dir/desktop-component.json" | cut -d' ' -f1)" --runtime-kind proot
+          apt-get install -y --no-install-recommends "$dir"/*_arm64.deb
+          for cmd in sway swaymsg swaybar swaynag; do
+            ln -s "/opt/omarchy-graphics/bin/$cmd" "/usr/local/bin/$cmd"
           done
-          record_source wayland 1.23.1 https://gitlab.freedesktop.org/wayland/wayland/-/tags/1.23.1
-          record_source wayland-protocols 1.38 https://gitlab.freedesktop.org/wayland/wayland-protocols/-/tags/1.38
-          record_source libinput 1.26.2 https://gitlab.freedesktop.org/libinput/libinput/-/tags/1.26.2
-          record_source wlroots 0.18.2 https://gitlab.freedesktop.org/wlroots/wlroots/-/tags/0.18.2
-          record_source sway 1.10.1 https://github.com/swaywm/sway/tree/1.10.1
-          rm -rf /tmp/build-sway
           /usr/local/bin/sway --version
+          jq -r '.sources[] | [.id,.version,.url] | @tsv' /usr/share/doc/omarchy-graphics-runtime/sources.json >> "$SOURCES"
 
           sed -i 's/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/' /etc/locale.gen
           sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
@@ -148,29 +112,35 @@ jobs:
 
           # Install JetBrainsMono Nerd Font + Omarchy icon font (fixes Waybar & UI icons)
           mkdir -p /usr/share/fonts/truetype/omarchy /usr/share/fonts/truetype/jetbrains-mono-nerd
-          FONT_VER=$(curl -fsSL https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest | jq -er .tag_name)
+          FONT_VER=v3.5.1
           FONT_URL="https://github.com/ryanoasis/nerd-fonts/releases/download/$FONT_VER/JetBrainsMono.tar.xz"
           record_source JetBrainsMonoNerdFont "$FONT_VER" "$FONT_URL"
           mkdir /tmp/nerd-font
-          curl -fsSL --retry 3 "$FONT_URL" | tar -xJ -C /tmp/nerd-font
+          curl -fsSL --retry 3 "$FONT_URL" -o /tmp/fonts.tar.xz
+          echo "04d5e8f903693f9dd13e16f867e994834e681eb3c72c0d337a770dcda09010cf  /tmp/fonts.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/fonts.tar.xz -C /tmp/nerd-font
           find /tmp/nerd-font -type f \( -name '*NerdFont-Regular.ttf' -o -name '*NerdFont-Bold.ttf' -o -name '*NerdFontMono-Regular.ttf' -o -name '*NerdFontPropo-Regular.ttf' \) -exec cp -t /usr/share/fonts/truetype/jetbrains-mono-nerd {} +
           test -n "$(ls -A /usr/share/fonts/truetype/jetbrains-mono-nerd)"
           mkdir "$DOC/JetBrainsMonoNerdFont"
           find /tmp/nerd-font -type f \( -iname '*license*' -o -iname 'OFL*' \) -exec cp -t "$DOC/JetBrainsMonoNerdFont" {} +
 
           # Install lazygit and the license shipped with the upstream binary.
-          curl -fsSL --retry 3 https://api.github.com/repos/jesseduffield/lazygit/releases/latest -o /tmp/lazygit-release.json
+          curl -fsSL --retry 3 https://api.github.com/repos/jesseduffield/lazygit/releases/tags/v0.66.3 -o /tmp/lazygit-release.json
           LG_TAG=$(jq -er .tag_name /tmp/lazygit-release.json)
           LG_URL=$(jq -er '[.assets[] | select(.name | ascii_downcase | endswith("_linux_arm64.tar.gz")) | .browser_download_url] | select(length == 1) | .[0]' /tmp/lazygit-release.json)
           record_source lazygit "$LG_TAG" "$LG_URL"
           mkdir /tmp/lazygit "$DOC/lazygit"
-          curl -fsSL --retry 3 "$LG_URL" | tar -xz -C /tmp/lazygit
+          curl -fsSL --retry 3 "$LG_URL" -o /tmp/lazygit.tar.gz
+          echo "ac0b48237f3d0283813e7154ec063237e519532feb0470c0881a1793ee78fd42  /tmp/lazygit.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/lazygit.tar.gz -C /tmp/lazygit
           install -m755 /tmp/lazygit/lazygit /usr/local/bin/lazygit
           install -m644 /tmp/lazygit/LICENSE "$DOC/lazygit/"
 
           # Install official Omarchy assets; this checkout's core was staged before chroot
           mkdir -p /root/.local/share/applications /root/.local/share/icons/hicolor/256x256/apps /usr/share/pixmaps /root/.config/sway /root/.config/fcitx5 /root/.config/omarchy /root/.config/alacritty
-          git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
+          git init /root/.local/share/omarchy
+          git -C /root/.local/share/omarchy fetch --depth 1 https://github.com/basecamp/omarchy.git 2be61599ef89b65c94dfff9e64932bedeb2ebc47
+          git -C /root/.local/share/omarchy checkout --detach FETCH_HEAD
           record_source omarchy "$(git -C /root/.local/share/omarchy rev-parse HEAD)" https://github.com/basecamp/omarchy
           find /root/.local/share/omarchy -maxdepth 3 -name "*.ttf" -exec cp -f {} /usr/share/fonts/truetype/omarchy/ \;
           fc-cache -f

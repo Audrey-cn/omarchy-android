@@ -21,8 +21,10 @@ MENU_JSONC = f"{OMARCHY_PATH}/default/omarchy/omarchy-menu.jsonc"
 I18N_ZH = f"{OMARCHY_PATH}/default/i18n/zh-CN/menu.json"
 
 def get_swaysock():
-    socks = sorted(glob.glob("/tmp/sway-ipc.*.sock"), key=os.path.getmtime, reverse=True)
-    return socks[0] if socks else "/tmp/sway-ipc.sock"
+    import sys
+    sys.dont_write_bytecode = True
+    from omarchy_session import select_sway_socket
+    return select_sway_socket(os.environ)
 
 def wl_env():
     return {
@@ -30,9 +32,9 @@ def wl_env():
         "OMARCHY_PATH": OMARCHY_PATH,
         "PATH": f"/usr/local/sbin:/usr/local/bin:{OMARCHY_PATH}/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "XDG_RUNTIME_DIR": "/tmp",
-        "WAYLAND_DISPLAY": "wayland-1",
+        "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-1"),
         "SWAYSOCK": get_swaysock(),
-        "DISPLAY": ":0",
+        "DISPLAY": os.environ.get("DISPLAY", ":0"),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
     }
@@ -49,8 +51,16 @@ def load_menu_data():
             zh = json.load(f)
     return menu, zh
 
+def session_running(name):
+    import sys
+    sys.dont_write_bytecode = True
+    from omarchy_session import matching_processes
+    return bool(matching_processes({name}, wl_env()))
+
 def kill_wofi():
-    subprocess.run("for p in $(pidof wofi 2>/dev/null); do kill -9 $p 2>/dev/null; done", shell=True)
+    environment = wl_env()
+    from omarchy_session import stop_session_processes
+    stop_session_processes({"wofi"}, environment)
 
 def browser_menu_entries(upstream_children):
     """Expose actual local adapters, retaining other brands as explicit unavailable entries."""
@@ -92,6 +102,10 @@ def run_in_terminal(title, shell_cmd):
     subprocess.Popen(["alacritty", "-e", "bash", "-c", script], env=wl_env())
 
 def handle_special_route(route):
+    if route == "update":
+        kill_wofi()
+        run_in_terminal("更新中心", "/usr/local/bin/omarchy-updates menu")
+        return True
     if route == "install.browser.chromium-agent":
         kill_wofi()
         subprocess.Popen(["/usr/local/bin/omarchy-playwright-chromium", "--agent"], env=wl_env())
@@ -150,13 +164,13 @@ def execute_item_action(key, item, zh_label):
         pfile = "/etc/sudoers.d/omarchy-nopasswd"
         if os.path.exists(pfile):
             os.remove(pfile)
-            subprocess.run("pkill -RTMIN+10 waybar 2>/dev/null || true", shell=True)
+            subprocess.run(["/usr/local/bin/omarchy_session.py", "signal", "waybar", "10"], env=wl_env())
             run_in_terminal("免密 sudo (Passwordless Sudo)", "echo '已关闭免密 sudo (Passwordless Sudo Disabled).'")
         else:
             with open(pfile, "w") as f:
                 f.write("ALL ALL=(ALL) NOPASSWD: ALL\n")
             os.chmod(pfile, 0o440)
-            subprocess.run("pkill -RTMIN+10 waybar 2>/dev/null || true", shell=True)
+            subprocess.run(["/usr/local/bin/omarchy_session.py", "signal", "waybar", "10"], env=wl_env())
             run_in_terminal("免密 sudo (Passwordless Sudo)", "echo '✓ 已启用免密 sudo (/etc/sudoers.d/omarchy-nopasswd)!'")
         return
     if key == "setup.security.sudoless-docker":
@@ -205,8 +219,8 @@ def execute_item_action(key, item, zh_label):
 
     # 3. Appearance (Top Bar Background / Position / Hide / Gaps)
     if key.startswith("appearance.top-bar.hide") or key.startswith("appearance.top-bar.show"):
-        if subprocess.run("pidof waybar", shell=True, stdout=subprocess.DEVNULL).returncode == 0:
-            subprocess.run("for p in $(pidof waybar); do kill -9 $p; done", shell=True)
+        if session_running("waybar"):
+            __import__("omarchy_session").stop_session_processes({"waybar"}, wl_env())
         else:
             subprocess.Popen(["/usr/local/bin/launch-waybar"], env=wl_env())
         return
@@ -282,19 +296,7 @@ def execute_item_action(key, item, zh_label):
         run_in_terminal(f"移除 (Remove): {zh_label}", cmd)
         return
     if key.startswith("update."):
-        upd_cmd = (
-            "if bash -c '</dev/tcp/127.0.0.1/18888' 2>/dev/null; then "
-            "export http_proxy=http://127.0.0.1:18888 https_proxy=http://127.0.0.1:18888; fi; "
-            "echo '[1/3] 同步官方 basecamp/omarchy 仓库...'; "
-            "git -C /root/.local/share/omarchy pull --ff-only || true; "
-            "echo ''; echo '[2/3] 更新 Ubuntu 24.04 ARM64 软件包...'; "
-            "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && apt-get autoremove -y; "
-            "echo ''; echo '[3/3] 刷新桌面状态栏与更新状态...'; "
-            "pkill -RTMIN+11 waybar 2>/dev/null || true; "
-            "/usr/local/bin/launch-waybar >/dev/null 2>&1 & "
-            "echo '✓ Omarchy (Ubuntu ARM64) 更新完成！'"
-        )
-        run_in_terminal(f"更新 (Update): {zh_label}", upd_cmd)
+        run_in_terminal("更新中心", "/usr/local/bin/omarchy-updates menu")
         return
 
     # 6. Learn / WebApps / Manual
@@ -317,9 +319,9 @@ def execute_item_action(key, item, zh_label):
             run_in_terminal(zh_label, action)
 
 def navigate_menu(route="root"):
-    menu, zh = load_menu_data()
     if handle_special_route(route):
         return
+    menu, zh = load_menu_data()
 
     # Find direct children of `route`
     children = []
@@ -397,12 +399,12 @@ if __name__ == "__main__":
     arg = sys.argv[1] if len(sys.argv) > 1 else ""
     if not arg:
         # Toggle off if wofi is already open
-        if subprocess.run("pidof wofi", shell=True, stdout=subprocess.DEVNULL).returncode == 0:
+        if session_running("wofi"):
             kill_wofi()
             sys.exit(0)
         navigate_menu("root")
     elif arg in ("apps", "walker", "grid"):
-        if subprocess.run("pidof wofi", shell=True, stdout=subprocess.DEVNULL).returncode == 0:
+        if session_running("wofi"):
             kill_wofi()
             sys.exit(0)
         show_app_grid()

@@ -5,6 +5,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.ArrayAdapter
@@ -77,6 +78,13 @@ class DesktopSetupActivity : AppCompatActivity() {
         cancel = button("取消下载") { startService(Intent(this, DesktopInstallService::class.java).setAction(DesktopInstallService.CANCEL)) }
         local = button("从本地镜像安装") { pickLocal.launch(arrayOf("*/*")) }
         refresh = button("刷新可用镜像") { loadImages(true) }
+        button("下载较慢？查看离线下载方式") {
+            android.app.AlertDialog.Builder(this).setTitle("离线下载后导入")
+                .setMessage("可以暂停当前任务，在浏览器或支持断点的下载工具中取得同版本 rootfs.tar.zst，再通过“从本地镜像安装”导入。导入仍会核对版本、大小和 SHA256。")
+                .setPositiveButton("打开镜像发行页") { _, _ ->
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(InitialImageCatalog.releasePage(InitialDesktopState.state.value.image ?: selected()))))
+                }.setNegativeButton("返回", null).show()
+        }
         text("默认建议使用 Wi-Fi。镜像只用于首次安装；Ubuntu 内的软件通过系统自己的软件源维护。", 14f)
         setContentView(ScrollView(this).apply { addView(layout) })
         versions.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {

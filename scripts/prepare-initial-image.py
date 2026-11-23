@@ -101,6 +101,13 @@ def build(root, output, source_sha):
                  "opt/omarchy-chromium128/browsers/chromium-1129/chrome-linux/chrome",
                  "opt/omarchy-chromium128/node_modules/playwright/package.json"):
         path = root / name
+        if path.is_symlink():
+            links = {"usr/local/bin/sway": "/opt/omarchy-graphics/bin/sway",
+                     **{f"usr/local/bin/{cmd}": f"/usr/lib/omarchy-android/desktop/bin/{cmd}"
+                        for cmd in ("omarchy-node-runtime", "omarchy-playwright128")}}
+            if str(path.readlink()) != links.get(name):
+                raise ValueError("Unexpected initial image launcher: " + name)
+            path = root / links[name].lstrip("/")
         if path.is_symlink() or not path.is_file() or path.stat().st_size == 0:
             raise ValueError("Incomplete initial image: " + name)
     output.parent.mkdir(parents=True, exist_ok=True)

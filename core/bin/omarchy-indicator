@@ -106,6 +106,6 @@ case "$ACTION" in
         fi
         ;;
     esac
-    pkill -RTMIN+10 waybar 2>/dev/null || true
+    /usr/local/bin/omarchy_session.py signal waybar 10 2>/dev/null || true
     ;;
 esac

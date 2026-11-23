@@ -50,10 +50,14 @@ internal fun effectiveImageResourceKey(uri: URI): String {
 
 private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
 
+class RetryableImageResponse(val status: Int, val retryAfterSeconds: Long?) :
+    IOException("Image server temporarily unavailable (HTTP $status)")
+
 class ResumableImageDownloader(
     private val connectTimeoutMs: Int = 15000,
     private val readTimeoutMs: Int = 15000,
-    private val allowHttpForTests: Boolean = false
+    private val allowHttpForTests: Boolean = false,
+    private val onSource: (Int, Int) -> Unit = { _, _ -> }
 ) {
     init {
         require(connectTimeoutMs > 0 && readTimeoutMs > 0) { "Download timeouts must be positive" }
@@ -105,6 +109,7 @@ class ResumableImageDownloader(
             for (sourceIndex in sources) {
                 if (shouldPause()) return@exclusively null
                 try {
+                    onSource(sourceIndex + 1, spec.urls.size)
                     return@exclusively transfer(
                         spec, cache, specFingerprint, sourceIndex,
                         resume?.takeIf { it.entity.sourceIndex == sourceIndex }, shouldPause, progress
@@ -151,7 +156,11 @@ class ResumableImageDownloader(
                     }
                     resume.offset
                 }
-                else -> throw IOException("Image server returned HTTP $status")
+                else -> {
+                    if (status == 429 || status in 500..599)
+                        throw RetryableImageResponse(status, singleHeader(response, "Retry-After")?.toLongOrNull()?.coerceIn(0, 5))
+                    throw IOException("Image server returned HTTP $status")
+                }
             }
             val contentLength = singleHeader(response, "Content-Length")
             if (contentLength != null && contentLength.toLongOrNull() != spec.bytes - offset) {

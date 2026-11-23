@@ -1,8 +1,19 @@
-#!/bin/bash
-for p in $(pidof waybar polybar 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
-sleep 0.2
-DBUS_SESSION_BUS_ADDRESS="unix:path=/tmp/omarchy-dbus.sock" \
-XDG_RUNTIME_DIR=/tmp \
-WAYLAND_DISPLAY=wayland-1 \
-SWAYSOCK=$(ls -t /tmp/sway-ipc.*.sock 2>/dev/null | head -n 1) \
-nohup waybar -c /root/.config/waybar/config.jsonc -s /root/.config/waybar/style.css >/tmp/waybar.log 2>&1 &
+#!/usr/bin/env python3
+"""Replace this Sway session's bar, preserving other Android/Root desktops."""
+import os
+import subprocess
+import sys
+import time
+sys.dont_write_bytecode = True
+from omarchy_session import stop_session_processes, select_sway_socket
+
+environment = dict(os.environ)
+environment.setdefault("XDG_RUNTIME_DIR", "/tmp")
+environment.setdefault("WAYLAND_DISPLAY", "wayland-1")
+environment.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/omarchy-dbus.sock")
+environment["SWAYSOCK"] = select_sway_socket(environment)
+stop_session_processes({"waybar", "polybar"}, environment)
+time.sleep(0.2)
+with open("/tmp/waybar.log", "ab") as log:
+    subprocess.Popen(["waybar", "-c", "/root/.config/waybar/config.jsonc", "-s", "/root/.config/waybar/style.css"],
+                     env=environment, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)

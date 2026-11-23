@@ -1,0 +1,744 @@
+#!/usr/bin/env python3
+"""Explicit, release-verified desktop component installation and one-step recovery."""
+
+import argparse
+import contextlib
+import fcntl
+from functools import lru_cache
+import hashlib
+import http.client
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.parse
+import urllib.request
+
+PKG = "omarchy-android-desktop"
+REPO = "Audrey-cn/omarchy-android"
+API = "https://api.github.com/repos/" + REPO + "/releases"
+DOWNLOAD = "https://github.com/" + REPO + "/releases/download/desktop-v"
+PRIVATE = Path("/usr/lib/omarchy-android/desktop")
+LAUNCH = Path("/usr/local/bin")
+STATE = Path("/var/lib/omarchy-android/desktop-updater")
+VER = r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}"
+LIMIT = 16 * 1024 * 1024
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def version_key(version):
+    if not isinstance(version, str) or not re.fullmatch(VER, version):
+        raise ValueError("Invalid desktop version")
+    return tuple(map(int, version.split(".")))
+
+
+def atomic(path, data):
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as tmp:
+        tmp.write(data)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    os.replace(tmp.name, path)
+    fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def save(path, obj):
+    atomic(path, json.dumps(obj, sort_keys=True).encode())
+
+
+def fetch(url, cap, *, binary=False):
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "omarchy-android-desktop",
+            "Accept": "application/octet-stream" if binary else "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as conn:
+        host = urllib.parse.urlsplit(conn.geturl())
+        if host.scheme != "https" or host.hostname not in (
+            "github.com",
+            "api.github.com",
+            "release-assets.githubusercontent.com",
+            "objects.githubusercontent.com",
+        ):
+            raise ValueError("Unexpected release download origin")
+        data = conn.read(cap + 1)
+    if len(data) > cap:
+        raise ValueError("Release response exceeds size limit")
+    return data
+
+
+@lru_cache(maxsize=1)
+def release_assets(version):
+    version_key(version)
+    tag = "desktop-v" + version
+    release = json.loads(fetch(API + "/tags/" + tag, 2 * 1024 * 1024))
+    if release["tag_name"] != tag or release["draft"] or release["prerelease"]:
+        raise ValueError("Unexpected desktop release identity")
+    assets = {}
+    for name in ("desktop-component.json", f"{PKG}_{version}_all.deb"):
+        matches = [item for item in release["assets"] if item.get("name") == name]
+        if len(matches) != 1:
+            raise ValueError("Missing or ambiguous desktop release asset: " + name)
+        item = matches[0]
+        asset_id = item.get("id")
+        url = f"{API}/assets/{asset_id}"
+        if type(asset_id) is not int or asset_id <= 0 or item.get("url") != url:
+            raise ValueError("Unexpected desktop asset API identity: " + name)
+        assets[name] = url
+    return assets
+
+
+def download_asset(version, name, cap):
+    try:
+        url = release_assets(version)[name]
+        return fetch(url, cap, binary=True)
+    except (OSError, http.client.HTTPException):
+        # Only transport failures use the deterministic owned Release URL.
+        # Ambiguous assets, identity failures and malformed metadata stay errors.
+        return fetch(DOWNLOAD + version + "/" + name, cap, binary=True)
+
+
+def catalog(version=None):
+    if not version:
+        versions = []
+        for page in range(1, 11):
+            rows = json.loads(fetch(f"{API}?per_page=100&page={page}", 4 * LIMIT))
+            if not isinstance(rows, list):
+                raise ValueError("Invalid release index")
+            for row in rows:
+                match = re.fullmatch("desktop-v(" + VER + ")", row["tag_name"])
+                if match and not row["draft"] and not row["prerelease"]:
+                    versions.append(match[1])
+            if len(rows) < 100:
+                break
+        else:
+            raise ValueError("Release index exceeds pagination limit")
+        if not versions:
+            raise ValueError("No published desktop component release")
+        version = max(versions, key=version_key)
+    version_key(version)
+    cat = json.loads(download_asset(version, "desktop-component.json", 65536))
+    return validate_catalog(cat, version)
+
+
+def local_file(path, cap):
+    if not path.is_file():
+        raise ValueError("Missing candidate file: " + str(path))
+    with path.open("rb") as source:
+        data = source.read(cap + 1)
+    if len(data) > cap:
+        raise ValueError("Candidate exceeds file limit: " + str(path))
+    return data
+
+
+def candidate_catalog(directory, expected, version):
+    if not expected or not re.fullmatch("[a-f0-9]{64}", expected):
+        raise ValueError("Provide the catalog SHA-256 from your verified CI artifact")
+    data = local_file(directory / "desktop-component.json", 65536)
+    if digest(data) != expected:
+        raise ValueError("Candidate catalog SHA-256 mismatch")
+    cat = json.loads(data)
+    return validate_catalog(cat, version or cat["version"])
+
+
+def validate_catalog(cat, version):
+    version_key(version)
+    if (
+        cat.get("schema") != 1
+        or cat.get("version") != version
+        or cat.get("package") != PKG
+        or cat.get("filename") != f"{PKG}_{version}_all.deb"
+        or not re.fullmatch("[a-f0-9]{64}", cat.get("sha256", ""))
+        or type(cat.get("size")) != int
+        or not 0 < cat["size"] <= LIMIT
+        or not isinstance(cat.get("changes"), str)
+    ):
+        raise ValueError("Invalid desktop release catalog")
+    return cat
+
+
+def check_compat(req):
+    expected = {"os": "ubuntu", "codename": "noble", "architecture": "arm64"}
+    if any(req.get(k) != v for k, v in expected.items()):
+        raise ValueError("Unsupported release platform")
+    osinfo = dict(
+        line.split("=", 1)
+        for line in Path("/etc/os-release").read_text().splitlines()
+        if "=" in line
+    )
+    if (
+        osinfo.get("ID", "").strip('"') != "ubuntu"
+        or osinfo.get("VERSION_CODENAME", "").strip('"') != "noble"
+        or run("dpkg", "--print-architecture") != "arm64"
+    ):
+        raise ValueError("Requires Ubuntu noble ARM64 guest")
+    kind = os.environ.get("OMARCHY_RUNTIME_KIND", "proot")
+    if kind == "proot-app":
+        kind = "proot"
+    if kind not in ("proot", "chroot") or kind not in req["runtime_kinds"]:
+        raise ValueError("Unsupported guest runtime " + kind)
+    for key, env in [
+        ("min_apk_version_code", "OMARCHY_APK_VERSION_CODE"),
+        ("min_runtime_api", "OMARCHY_RUNTIME_API"),
+    ]:
+        minimum = req[key]
+        if type(minimum) != int or minimum < 0:
+            raise ValueError("Invalid compatibility requirement " + key)
+        if kind == "chroot" and key == "min_apk_version_code":
+            continue
+        if minimum and int(os.getenv(env, "0")) < minimum:
+            raise ValueError(
+                f"Requires {env} >= {minimum} (actual {os.getenv(env, 'unknown')})"
+            )
+
+
+def run(*args):
+    result = subprocess.run(args, capture_output=True, text=True)
+    if result.returncode:
+        raise ValueError(
+            " ".join(map(str, args)) + ": " + (result.stderr.strip() or "failed")
+        )
+    return result.stdout.strip()
+
+
+def package_state():
+    result = subprocess.run(
+        ["dpkg-query", "-W", "-f=${db:Status-Abbrev}|${Version}", PKG],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 1 and "no packages found" in result.stderr:
+        return None, None
+    if result.returncode:
+        raise ValueError(result.stderr.strip())
+    code, version = result.stdout.split("|")
+    if code[1] == "n" or code.startswith("rc"):
+        return None, None
+    return code, version
+
+
+def status():
+    code, version = package_state()
+    interrupted = (STATE / "pending.json").exists() or (
+        code is not None and code != "ii "
+    )
+    return dict(
+        state="interrupted" if interrupted else ("installed" if version else "legacy"),
+        installed_version=version,
+        available_version=None,
+        recovery_available=(STATE / "last.json").exists()
+        or (STATE / "pending.json").exists(),
+    )
+
+
+def inventory():
+    """List local receipts and unclassified directly installed applications without executing them."""
+    record = PRIVATE / "ownership.json"
+    if not record.is_file():
+        record = (
+            Path(__file__).resolve().parent.parent / "config/component-ownership.json"
+        )
+    rules = json.loads(record.read_text()) if record.is_file() else {}
+    rows = []
+    for line in run(
+        "dpkg-query",
+        "-W",
+        "-f=${db:Status-Abbrev}\t${binary:Package}\t${Version}\t${Depends}\n",
+    ).splitlines():
+        fields = line.split("\t", 3)
+        if len(fields) < 3 or fields[0].strip() != "ii":
+            continue
+        _, name, version, *deps = fields
+        rows.append(
+            dict(
+                name=name,
+                installed_version=version,
+                source="dpkg database; repository origin requires apt-cache policy",
+                owner="installed Debian package",
+                update_method="APT if a configured source supplies a candidate, otherwise manual",
+                dependencies=deps[0] if deps else "",
+                verification="queried local dpkg",
+            )
+        )
+    upstream = Path("/usr/share/doc/omarchy-image/upstream-components.tsv")
+    if upstream.is_file():
+        for line in upstream.read_text().splitlines()[1:]:
+            name, version, source = line.split("\t")
+            owner, method, deps = rules.get("upstream_components", {}).get(
+                name, ["unknown", "unknown", "unknown"]
+            )
+            rows.append(
+                dict(
+                    name=name,
+                    installed_version=None,
+                    image_version=version,
+                    source=source,
+                    owner=owner,
+                    update_method=method,
+                    dependencies=deps,
+                    verification="image receipt only; local files unverified",
+                )
+            )
+    manifest = PRIVATE / "manifest.json"
+    if manifest.is_file():
+        data = json.loads(manifest.read_text())
+        rows.append(
+            dict(
+                name=PKG,
+                installed_version=data["version"],
+                source=REPO + "@" + data["source_commit"],
+                owner="Omarchy Android",
+                update_method="explicit desktop component install",
+                dependencies=data["depends"],
+                verification="package manifest",
+                files=sorted(data["files"]),
+            )
+        )
+    browser_receipt = Path("/opt/omarchy-chromium128/source-manifest.json")
+    bundled = set()
+    if browser_receipt.is_file():
+        receipt = json.loads(browser_receipt.read_text())
+        for component in receipt["sources"]:
+            ident = component["id"]
+            key = "playwright" if ident == "playwright-core" else ident
+            rows.append(
+                dict(
+                    name=ident,
+                    installed_version=receipt["versions"].get(key),
+                    owner="Omarchy Android",
+                    source=component["urls"],
+                    update_method="explicit browser runtime package",
+                    dependencies="matching Chromium / Playwright / Node bundle",
+                    verification="bundle source receipt, not a live executable probe",
+                )
+            )
+            bundled.add("/" + str(Path(*Path(component["destination"]).parts[:2])))
+    for directory in ("/opt", "/usr/local/bin"):
+        if Path(directory).is_dir():
+            for path in sorted(Path(directory).iterdir()):
+                if str(path) in bundled or (
+                    path.is_symlink() and path.readlink().parent == PRIVATE / "bin"
+                ):
+                    continue
+                rows.append(
+                    dict(
+                        name=str(path),
+                        installed_version=None,
+                        source="unknown",
+                        owner="unknown",
+                        update_method="unknown",
+                        dependencies="unknown",
+                        verification="filesystem entry only; check application or runtime receipt",
+                    )
+                )
+    return dict(components=rows, paths=rules.get("paths", []))
+
+
+def inspect_package(path, cat):
+    for field, val in [
+        ("Package", PKG),
+        ("Version", cat["version"]),
+        ("Architecture", "all"),
+    ]:
+        if run("dpkg-deb", "-f", path, field) != val:
+            raise ValueError("Wrong Debian package " + field)
+    files = {}
+    # These are hash-verified project artifacts. Still enforce the private payload boundary.
+    for flag in ("--ctrl-tarfile", "--fsys-tarfile"):
+        with subprocess.Popen(["dpkg-deb", flag, path], stdout=subprocess.PIPE) as proc:
+            with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
+                for item in archive:
+                    name = item.name.removeprefix("./")
+                    p = Path(name)
+                    if p.is_absolute() or ".." in p.parts:
+                        raise ValueError("Invalid Debian archive path")
+                    base = Path("usr/lib/omarchy-android/desktop")
+                    if flag == "--ctrl-tarfile":
+                        if not (
+                            item.isfile()
+                            and name == "control"
+                            or item.isdir()
+                            and name in ("", ".")
+                        ):
+                            raise ValueError("Unexpected control entry " + name)
+                    elif item.isdir() and (
+                        p == base or p in base.parents or base in p.parents
+                    ):
+                        continue
+                    elif item.isfile() and base in p.parents and item.size <= LIMIT:
+                        rel = str(p.relative_to(base))
+                        if rel in files:
+                            raise ValueError("Duplicate package entry")
+                        files[rel] = archive.extractfile(item).read()
+                    else:
+                        raise ValueError("Unexpected component payload " + name)
+            while proc.stdout.read(65536):
+                pass
+            proc.stdout.close()
+            if proc.wait():
+                raise ValueError("Unable to inspect Debian archive")
+    raw_manifest = files.pop("manifest.json")
+    manifest = json.loads(raw_manifest)
+    if (
+        manifest["version"] != cat["version"]
+        or manifest["package"] != PKG
+        or manifest["files"] != {k: digest(v) for k, v in files.items()}
+    ):
+        raise ValueError("Component file manifest mismatch")
+    return (
+        manifest,
+        json.loads(files["ownership.json"])["legacy_sha256"],
+        digest(raw_manifest),
+    )
+
+
+def owned_files():
+    if not PRIVATE.exists():
+        return {}
+    manifest = PRIVATE / "manifest.json"
+    if manifest.is_symlink() or not manifest.is_file():
+        raise ValueError("Unrecognized component directory " + str(PRIVATE))
+    raw = manifest.read_bytes()
+    content = json.loads(raw)
+    files = content["files"].copy()
+    files["manifest.json"] = digest(raw)
+    for name, sha in files.items():
+        target = PRIVATE / name
+        if (
+            target.is_symlink()
+            or not target.is_file()
+            or digest(target.read_bytes()) != sha
+        ):
+            raise ValueError("Locally changed component file: " + str(target))
+    return files
+
+
+def validate_destinations(manifest, previous):
+    for name in [*manifest["files"], "manifest.json"]:
+        target = PRIVATE / name
+        if any(p.is_symlink() for p in target.parents) or (
+            os.path.lexists(target) and name not in previous
+        ):
+            raise ValueError("Unmanaged component path: " + str(target))
+
+
+def launcher_plan(manifest, legacy, backup):
+    entries = {}
+    for name, sha in manifest["files"].items():
+        if not name.startswith("bin/"):
+            continue
+        cmd = Path(name).name
+        target = LAUNCH / cmd
+        dest = str(PRIVATE / name)
+        if target.is_symlink() and os.readlink(target) == dest:
+            entries[cmd] = "linked"
+        elif not os.path.lexists(target):
+            entries[cmd] = "absent"
+        elif (
+            not target.is_symlink()
+            and target.is_file()
+            and digest(target.read_bytes()) in [*legacy.get(cmd, []), sha]
+        ):
+            shutil.copy2(target, backup / cmd)
+            entries[cmd] = "legacy"
+        else:
+            raise ValueError(
+                "Launcher conflict: "
+                + str(target)
+                + "; move your local copy aside and retry"
+            )
+    return entries
+
+
+def activate(cmd, target):
+    with tempfile.TemporaryDirectory(dir=LAUNCH) as temp:
+        link = Path(temp) / "entry"
+        link.symlink_to(target)
+        os.replace(link, LAUNCH / cmd)
+
+
+@contextlib.contextmanager
+def locked():
+    STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (STATE / "lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ValueError("Another component update is active") from exc
+        yield
+
+
+def install(cat, directory=None):
+    if os.geteuid() != 0:
+        raise ValueError("Component install requires guest root")
+    with locked():
+        if status()["state"] == "interrupted":
+            raise ValueError("Interrupted component transaction; run recover first")
+        current = (
+            json.loads((STATE / "current.json").read_text())
+            if (STATE / "current.json").exists()
+            else None
+        )
+        installed = status()["installed_version"]
+        if installed != (current or {}).get("version") or (
+            not installed and os.path.lexists(PRIVATE)
+        ):
+            raise ValueError(
+                "Unrecognized component installation; inspect package ownership before migration"
+            )
+        if installed and version_key(installed) > version_key(cat["version"]):
+            raise ValueError("Use recover to restore the previous component version")
+        print(
+            "Verifying desktop candidate"
+            if directory
+            else "Downloading and verifying desktop component",
+            file=sys.stderr,
+        )
+        if directory:
+            data = local_file(directory / cat["filename"], cat["size"])
+        else:
+            data = download_asset(cat["version"], cat["filename"], cat["size"])
+        if len(data) != cat["size"] or digest(data) != cat["sha256"]:
+            raise ValueError("Desktop download size or SHA-256 mismatch")
+        package = STATE / (cat["sha256"] + ".deb")
+        atomic(package, data)
+        manifest, legacy, _ = inspect_package(package, cat)
+        previous_files = owned_files()
+        validate_destinations(manifest, previous_files)
+        if current:
+            cached = STATE / (current["sha256"] + ".deb")
+            if not cached.exists() or digest(cached.read_bytes()) != current["sha256"]:
+                raise ValueError("Missing verified previous component package")
+            previous_manifest, _, _ = inspect_package(cached, current)
+            if previous_manifest["files"] != {
+                k: v for k, v in previous_files.items() if k != "manifest.json"
+            }:
+                raise ValueError(
+                    "Installed manifest differs from the previous verified package"
+                )
+            retired = [
+                k
+                for k in previous_files
+                if k.startswith("bin/") and k not in manifest["files"]
+            ]
+            if retired:
+                raise ValueError(
+                    "Release removes existing launchers without a migration: "
+                    + ", ".join(retired)
+                )
+        if current and current["version"] == cat["version"]:
+            if current["sha256"] != cat["sha256"]:
+                raise ValueError(
+                    "The release reused an installed version with different contents"
+                )
+            commands = [
+                Path(name).name for name in manifest["files"] if name.startswith("bin/")
+            ]
+            if all(
+                (LAUNCH / cmd).is_symlink()
+                and (LAUNCH / cmd).readlink() == PRIVATE / "bin" / cmd
+                for cmd in commands
+            ):
+                return
+        backup = Path(tempfile.mkdtemp(prefix="launchers-", dir=STATE))
+        try:
+            entries = launcher_plan(manifest, legacy, backup)
+        except Exception:
+            shutil.rmtree(backup)
+            raise
+        transaction = dict(
+            previous=current, candidate=cat, entries=entries, backup=backup.name
+        )
+        save(STATE / "pending.json", transaction)
+        print("Installing desktop package and activating launchers", file=sys.stderr)
+        run("dpkg", "--install", package)
+        if package_state() != ("ii ", cat["version"]):
+            raise ValueError("Package did not reach installed state")
+        for cmd in entries:
+            activate(cmd, PRIVATE / "bin" / cmd)
+        save(STATE / "current.json", cat)
+        save(STATE / "last.json", transaction)
+        (STATE / "pending.json").unlink()
+
+
+def verify_recovery_tree(transaction):
+    accepted = {}
+    for release in (transaction["previous"], transaction["candidate"]):
+        if not release:
+            continue
+        cached = STATE / (release["sha256"] + ".deb")
+        if digest(local_file(cached, LIMIT)) != release["sha256"]:
+            raise ValueError("Recovery package cache hash mismatch")
+        manifest, _, manifest_sha = inspect_package(cached, release)
+        for name, sha in {**manifest["files"], "manifest.json": manifest_sha}.items():
+            accepted.setdefault(name, set()).add(sha)
+    if any(parent.is_symlink() for parent in (PRIVATE, *PRIVATE.parents)):
+        raise ValueError("Recovery component directory is a symlink: " + str(PRIVATE))
+    for target in PRIVATE.rglob("*"):
+        if not target.is_symlink() and target.is_dir():
+            continue
+        hashes = accepted.get(str(target.relative_to(PRIVATE)), set())
+        if (
+            not hashes
+            or target.is_symlink()
+            or not target.is_file()
+            or digest(local_file(target, LIMIT)) not in hashes
+        ):
+            raise ValueError("Recovery component file conflict: " + str(target))
+
+
+def recover():
+    if os.geteuid() != 0:
+        raise ValueError("Component recovery requires guest root")
+    with locked():
+        pending = STATE / "pending.json"
+        source = pending if pending.exists() else STATE / "last.json"
+        if not source.exists():
+            raise ValueError("No component recovery receipt")
+        tx = json.loads(source.read_text())
+        prev = tx["previous"]
+        backup = STATE / tx["backup"]
+        for cmd, kind in tx["entries"].items():
+            path = LAUNCH / cmd
+            if path.is_symlink() and os.readlink(path) == str(PRIVATE / "bin" / cmd):
+                continue
+            if not os.path.lexists(path) and kind == "absent":
+                continue
+            if (
+                kind == "legacy"
+                and not path.is_symlink()
+                and path.is_file()
+                and path.read_bytes() == (backup / cmd).read_bytes()
+            ):
+                continue
+            raise ValueError("Recovery launcher conflict: " + str(path))
+        verify_recovery_tree(tx)
+        if not pending.exists():
+            owned_files()
+        save(pending, tx)
+        if prev:
+            cached = STATE / (prev["sha256"] + ".deb")
+            if digest(cached.read_bytes()) != prev["sha256"]:
+                raise ValueError("Previous component cache hash mismatch")
+            run("dpkg", "--install", cached)
+            if package_state() != ("ii ", prev["version"]):
+                raise ValueError("Previous package did not reach installed state")
+        elif package_state()[0]:
+            run("dpkg", "--remove", PKG)
+        for cmd, kind in tx["entries"].items():
+            path = LAUNCH / cmd
+            if kind == "legacy":
+                with tempfile.TemporaryDirectory(dir=LAUNCH) as temp:
+                    restored = Path(temp) / cmd
+                    shutil.copy2(backup / cmd, restored)
+                    os.replace(restored, path)
+            elif kind == "absent":
+                path.unlink(missing_ok=True)
+        if prev:
+            save(STATE / "current.json", prev)
+        else:
+            (STATE / "current.json").unlink(missing_ok=True)
+        (STATE / "last.json").unlink(missing_ok=True)
+        pending.unlink()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    for action in ("status", "check", "install", "recover", "inventory"):
+        opt = sub.add_parser(action)
+        opt.add_argument("--json", action="store_true")
+        if action in ("check", "install"):
+            opt.add_argument("--apk-version-code", type=int)
+            opt.add_argument("--runtime-api", type=int)
+            opt.add_argument("--runtime-kind", choices=["proot", "proot-app", "chroot"])
+        if action == "install":
+            opt.add_argument("component", choices=["desktop"])
+            opt.add_argument("--version")
+            opt.add_argument("--candidate-dir", type=Path)
+            opt.add_argument("--catalog-sha256")
+    args = parser.parse_args()
+    for field, env in [
+        ("apk_version_code", "OMARCHY_APK_VERSION_CODE"),
+        ("runtime_api", "OMARCHY_RUNTIME_API"),
+        ("runtime_kind", "OMARCHY_RUNTIME_KIND"),
+    ]:
+        value = getattr(args, field, None)
+        if value is not None:
+            os.environ[env] = str(value)
+    result = {}
+    try:
+        result = status()
+        if args.action in ("check", "install"):
+            directory = getattr(args, "candidate_dir", None)
+            if directory:
+                cat = candidate_catalog(directory, args.catalog_sha256, args.version)
+            else:
+                if getattr(args, "catalog_sha256", None):
+                    raise ValueError("--catalog-sha256 requires --candidate-dir")
+                cat = catalog(getattr(args, "version", None))
+            result.update(
+                available_version=cat["version"],
+                **{k: cat[k] for k in ("changes", "compatibility", "sha256", "size")},
+            )
+            if result["state"] == "interrupted":
+                raise ValueError("Interrupted desktop installation; run recover")
+            try:
+                check_compat(cat["compatibility"])
+            except ValueError:
+                result["state"] = "incompatible"
+                raise
+            if args.action == "install":
+                install(cat, directory)
+                result.update(status())
+                result["available_version"] = cat["version"]
+            installed = result["installed_version"]
+            result["state"] = (
+                "available"
+                if not installed or version_key(installed) < version_key(cat["version"])
+                else "current"
+                if installed == cat["version"]
+                else "ahead"
+            )
+        elif args.action == "inventory":
+            result = inventory()
+        elif args.action == "recover":
+            recover()
+            result = status()
+        rc = 0
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        http.client.HTTPException,
+        tarfile.TarError,
+        subprocess.SubprocessError,
+        EOFError,
+    ) as exc:
+        if result.get("state") not in ("incompatible", "interrupted"):
+            result["state"] = (
+                "interrupted" if (STATE / "pending.json").exists() else "failed"
+            )
+        result["error"] = str(exc)
+        rc = 1
+    print(json.dumps(result, ensure_ascii=False, indent=None if args.json else 2))
+    return rc
+
+
+if __name__ == "__main__":
+    os.environ["LC_ALL"] = "C"
+    sys.exit(main())

@@ -146,7 +146,10 @@ def load_pixbuf(icon_name, size=56):
 
 
 def launch_app(app):
-    socks = sorted(glob.glob("/tmp/sway-ipc.*.sock"), key=os.path.getmtime, reverse=True)
+    import sys
+    sys.dont_write_bytecode = True
+    from omarchy_session import select_sway_socket
+    sway_socket = select_sway_socket(os.environ)
     env = {
         **os.environ,
         "SHELL": "/bin/bash",
@@ -154,10 +157,10 @@ def launch_app(app):
         "USER": "root",
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "XDG_RUNTIME_DIR": "/tmp",
-        "WAYLAND_DISPLAY": "wayland-1",
-        "SWAYSOCK": socks[0] if socks else "/tmp/sway-ipc.sock",
-        "DISPLAY": ":0",
-        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/omarchy-dbus.sock",
+        "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-1"),
+        "SWAYSOCK": sway_socket,
+        "DISPLAY": os.environ.get("DISPLAY", ":0"),
+        "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/omarchy-dbus.sock"),
     }
     name = app.get("name", "")
     # Smart focus: if heavy desktop app already has a Sway window, jump straight to it!

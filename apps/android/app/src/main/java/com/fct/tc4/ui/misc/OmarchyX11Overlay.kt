@@ -952,6 +952,25 @@ object OmarchyX11Overlay {
                 sendCmd("keybindings")
             }
 
+            addMenuItem("更新与维护", "查看 App、Ubuntu 软件、桌面组件和第三方应用的更新", "#9ece6a") {
+                val updater = File(activity.dataDir, "omarchy/usr/local/bin/omarchy-updates")
+                if (updater.isFile || java.nio.file.Files.isSymbolicLink(updater.toPath())) sendCmd("updates")
+                else android.app.AlertDialog.Builder(activity)
+                    .setTitle("桌面组件更新")
+                    .setMessage("当前桌面尚未安装更新入口。请按发行说明显式安装桌面组件包，现有配置会保留。")
+                    .setPositiveButton("查看发行说明") { _, _ -> activity.startActivity(Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/Audrey-cn/omarchy-android/releases"))) }
+                    .setNegativeButton("返回", null).show()
+            }
+
+            addMenuItem("当前窗口：浮动 / 平铺", "切换当前 Linux 窗口的布局，保留窗口内容", "#7aa2f7") {
+                sendJson("""{"type":"key","key":"t","super":true}""")
+            }
+
+            addMenuItem("当前窗口：全屏 / 恢复", "切换当前 Linux 窗口的全屏状态", "#7aa2f7") {
+                sendCmd("fullscreen")
+            }
+
             val doubaoReady = isDoubaoInstalled()
             addMenuItem(
                 if (doubaoReady) "切换系统输入法（已安装豆包输入法）" else "推荐安装豆包输入法（语音 + 中文）",

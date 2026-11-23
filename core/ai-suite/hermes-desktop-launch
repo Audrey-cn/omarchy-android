@@ -27,4 +27,8 @@ if [[ -e "$KEYBOARD_RESTORE" || -L "$KEYBOARD_RESTORE" ]]; then
     exit "$STATUS"
   }
 fi
+BOOTSTRAP=/opt/hermes-desktop/.omarchy-onboarding/install.sh
+if [[ -f "$BOOTSTRAP" ]]; then
+  "$SCRIPT_DIR/omarchy-repair-hermes-onboarding" --seed-bootstrap-cache --install-script "$BOOTSTRAP" || exit $?
+fi
 exec /opt/hermes-desktop/Hermes --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-gpu-compositing --disable-gpu-sandbox --disable-software-rasterizer --ozone-platform=wayland --enable-wayland-ime --password-store=basic --lang=zh-CN $PROXY_FLAGS "$@"
