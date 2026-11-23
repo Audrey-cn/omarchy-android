@@ -52,7 +52,8 @@ unset PROOT_UNBUNDLE_LOADER PROOT_WITH_LIBANDROID_SHMEM
 "$CC" --version > "$artifact_dir/compiler-version.txt"
 sha256sum "$experiment_dir/build-android.sh" "$experiment_dir/build-probe.sh" \
   "$experiment_dir/procfd-probe.c" "$experiment_dir/talloc-cross-answers.txt" \
-  "$experiment_dir/sources.env" > "$artifact_dir/recipe-sha256.txt"
+  "$experiment_dir/sources.env" "$experiment_dir/build-compat.patch" \
+  > "$artifact_dir/recipe-sha256.txt"
 
 # A native Linux run validates the actual probe's write/mmap checks, not Android.
 env -u CC -u CFLAGS -u LDFLAGS /usr/bin/cc -std=gnu11 -O2 -Wall -Wextra -Werror \
@@ -63,6 +64,12 @@ bash "$experiment_dir/build-probe.sh" "$artifact_dir/procfd-probe-android-arm64"
 mkdir "$work_dir/talloc" "$work_dir/proot-control"
 tar -xzf "$work_dir/talloc.tar.gz" -C "$work_dir/talloc" --strip-components=1
 tar -xzf "$work_dir/tiny.tar.gz" -C "$work_dir/proot-control" --strip-components=1
+# Identical declaration-only fix in both variants; keep the a179 comparison isolated.
+(
+  cd "$work_dir/proot-control"
+  patch --dry-run --fuzz=0 -p1 < "$experiment_dir/build-compat.patch"
+  patch --fuzz=0 -p1 < "$experiment_dir/build-compat.patch"
+)
 cp -a "$work_dir/proot-control" "$work_dir/proot-patched"
 (
   cd "$work_dir/proot-patched"
@@ -130,7 +137,8 @@ for variant in control patched; do
 done
 cmp "$artifact_dir/control/loader-aarch64" "$artifact_dir/patched/loader-aarch64"
 cmp "$artifact_dir/control/loader-arm" "$artifact_dir/patched/loader-arm"
-cp "$experiment_dir/a179d3e8.patch" "$experiment_dir/sources.env" \
+cp "$experiment_dir/a179d3e8.patch" "$experiment_dir/build-compat.patch" \
+  "$experiment_dir/sources.env" \
   "$experiment_dir/procfd-probe.c" "$experiment_dir/build-android.sh" \
   "$experiment_dir/build-probe.sh" "$experiment_dir/talloc-cross-answers.txt" \
   "$experiment_dir/README.md" "$artifact_dir/"
@@ -142,12 +150,14 @@ diff -u "$work_dir/proot-control/src/extension/fake_id0/fake_id0.c" \
 export TINY_SHA UPSTREAM_SHA TALLOC_VERSION NDK_VERSION ANDROID_API
 export OMARCHY_PROOT_ARTIFACT_DIR="$artifact_dir"
 python3 - <<'PY'
-import json, os, pathlib, subprocess
+import hashlib, json, os, pathlib, subprocess
 receipt = {key: os.environ[key] for key in
            ['TINY_SHA', 'UPSTREAM_SHA', 'TALLOC_VERSION', 'NDK_VERSION', 'ANDROID_API']}
 receipt['repository_commit'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
 receipt['github_run_id'] = os.environ.get('GITHUB_RUN_ID')
 receipt['status'] = 'cross_compiled_not_device_validated'
+receipt['build_compatibility_patch_sha256'] = hashlib.sha256(pathlib.Path(
+    os.environ['OMARCHY_PROOT_ARTIFACT_DIR'], 'build-compat.patch').read_bytes()).hexdigest()
 pathlib.Path(os.environ['OMARCHY_PROOT_ARTIFACT_DIR'], 'receipt.json').write_text(
     json.dumps(receipt, indent=2) + '\n')
 PY

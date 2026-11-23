@@ -12,7 +12,7 @@ K20 实际应用上下文中的真实 memfd reopen 曾返回 `EACCES`。但 Chro
 
 ## 固定输入与构建
 
-所有 URL、版本和校验值位于 [sources.env](sources.env)。Tiny 源码固定为 `2919ebdcb865b192490f8c4ca1957a621f13d95b`，保留 `--tiny-storage` 等 fork 代码；补丁仅修改 `fake_id0.c`。
+所有 URL、版本和校验值位于 [sources.env](sources.env)。Tiny 源码固定为 `2919ebdcb865b192490f8c4ca1957a621f13d95b`，保留 `--tiny-storage` 等 fork 代码；a179 补丁仅修改 `fake_id0.c`。两组源码都先应用相同的 `build-compat.patch`，仅为 `ashmem_memfd.c` 补充其 `strcmp`/`memset` 所需的 `<string.h>` 声明，保证实验差异仍只有 a179。
 
 - talloc `2.5.0` 的 SHA-256 与交叉编译答案参照 Termux [固定版本构建脚本](https://github.com/termux/termux-packages/blob/e770a66ab0cd21f698295a482725040cc5feef82/packages/libtalloc/build.sh)。静态链接 talloc，避免给实验 runner 增加动态库查找变量。
 - NDK r27d `27.3.13750724`、Android API 28。下载后核对 Google [官方 SHA-1](https://github.com/android/ndk/wiki/Unsupported-Downloads#r27d)，并记录实际 SHA-256。没有未经校验的系统 NDK 复用路径。
@@ -62,3 +62,7 @@ SHA256SUMS
 - 退出 `0` 表示至少一种 memfd 路径达到上述探针条件；`10` 表示没有，`3` 表示 memfd 创建失败，`2` 为探针准备失败，`77` 为非 Linux。退出 `0` 不代表 Codex、全部路径或免 Root Android 已通过。
 
 所有写入只作用于探针自身 4 KiB 分配。探针不会读取用户应用数据，不伪造 `F_GETFL`、不绕过 Chromium `CHECK`、不修改 SELinux/target SDK，也不注册默认 runtime。宿主 Linux 正常结果不能外推 Android；最终至少需要 Codex 窗口稳定、子进程、输入和实际 Agent 操作验收。
+
+## 首轮云编译记录
+
+[45129222955](https://github.com/Audrey-cn/omarchy-android/actions/runs/45129222955) 于 2026-11-23 15:11:48（上海）停止在 control PRoot 的 `ashmem_memfd.c` 编译：固定 Tiny 源码遗漏 `<string.h>`，NDK r27 Clang 拒绝 `strcmp` 和 `memset` 的隐式声明。归档校验、Linux 原生探针、Android ARM64 探针和 talloc 交叉编译已先行通过；这次失败不是 Android/Codex 运行测试。上述共用 header 修复保持编译器检查开启，尚需后续云编译确认其余阶段。
