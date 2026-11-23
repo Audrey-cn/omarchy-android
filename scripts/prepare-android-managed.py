@@ -65,8 +65,12 @@ def build(repo, output, extra, source_sha=None):
     if output.is_symlink() or output == output.parent:
         raise ValueError("Invalid generated asset output directory")
     if output.exists():
+        if not output.is_dir():
+            raise ValueError("Generated asset output is not a directory")
         marker = output / MARKER
-        if marker.is_symlink() or not marker.is_file() or marker.read_text() != MARKER_TEXT:
+        # Gradle precreates @OutputDirectory before invoking an Exec task.
+        # Empty directories contain nothing to preserve; nonempty trees need our marker.
+        if any(output.iterdir()) and (marker.is_symlink() or not marker.is_file() or marker.read_text() != MARKER_TEXT):
             raise ValueError("Refusing to remove output without the managed-assets generator marker")
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".managed-assets-", dir=output.parent))

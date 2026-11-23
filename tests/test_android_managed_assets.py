@@ -103,6 +103,14 @@ class AndroidManagedAssetsTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(sentinel.read_text(), "keep")
 
+    def test_gradle_precreated_empty_output_directory_is_accepted(self):
+        # Gradle creates @OutputDirectory before invoking the Exec task action.
+        self.output.mkdir()
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads((self.output / "managed-core/manifest.json").read_text())
+        self.assertEqual(len(manifest["files"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
