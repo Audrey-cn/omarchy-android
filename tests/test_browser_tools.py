@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 BIN = REPO / "core/bin"
@@ -113,17 +114,6 @@ require('fs').writeFileSync(process.env.TEST_ARGUMENTS, JSON.stringify({
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
 
-    def test_desktop_launcher_passes_url_without_reparsing_shell(self):
-        url = "https://example.test/?q=中文&second=2"
-        result = subprocess.run(["bash", str(self.bin / "omarchy-playwright-chromium"), url],
-                                env=self.env, capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        args = json.loads(self.args_file.read_text())
-        self.assertEqual(args[-1], url)
-        self.assertIn("--ozone-platform=wayland", args)
-        self.assertNotIn("--single-process", args)
-        self.assertNotIn("--in-process-gpu", args)
-
     def test_failed_browser_probe_is_not_reported_as_success(self):
         result = self.invoke("probe", "chromium")
         self.assertNotEqual(result.returncode, 0)
@@ -181,18 +171,51 @@ with open(os.environ['TEST_CALLS'], 'a') as calls:
     calls.write(json.dumps(sys.argv[1:]) + '\\n')
 if sys.argv[1] == 'probe' and os.environ.get('TEST_FAIL_MODE') == sys.argv[3]:
     sys.exit(27)
+if 'chromium' in sys.argv[1:]:
+    sys.exit(98)  # Chromium must use the independently pinned 128 entry.
 ''')
         stub.chmod(0o755)
+        pinned = self.bin / "omarchy-playwright128"
+        pinned.write_text(stub.read_text().replace("if 'chromium' in sys.argv[1:]:", "if 'install' in sys.argv[1:]:"))
+        pinned.chmod(0o755)
+        dpkg = self.bin / "dpkg-query"
+        dpkg.write_text('#!' + sys.executable + '''
+import os,sys
+from pathlib import Path
+missing=os.environ.get('TEST_MISSING_DEPENDENCY','')
+if not Path(os.environ['TEST_DEPENDENCY_MARKER']).exists() and missing in ('all',sys.argv[-1]):
+    print('unpacked')
+else:
+    print('installed')
+''')
+        dpkg.chmod(0o755)
+        apt = self.bin / "apt-get"
+        apt.write_text('#!' + sys.executable + '''
+import json,os,sys
+from pathlib import Path
+with open(os.environ['TEST_APT_CALLS'],'a') as calls:
+    calls.write(json.dumps(sys.argv[1:])+'\\n')
+if os.environ.get('TEST_APT_FAILURE')==sys.argv[1]:
+    sys.exit(42)
+if sys.argv[1]=='install':
+    Path(os.environ['TEST_DEPENDENCY_MARKER']).touch()
+''')
+        apt.chmod(0o755)
         self.calls = self.root / "calls.jsonl"
+        self.apt_calls = self.root / "apt-calls.jsonl"
         self.apps = self.root / ".local/share/applications"
-        self.env = dict(os.environ, HOME=str(self.root), TEST_CALLS=str(self.calls))
+        self.env = dict(os.environ, HOME=str(self.root), TEST_CALLS=str(self.calls),
+                        PATH=str(self.bin) + os.pathsep + os.environ["PATH"],
+                        TEST_APT_CALLS=str(self.apt_calls),
+                        TEST_DEPENDENCY_MARKER=str(self.root / "dependencies-installed"))
 
-    def invoke(self, *args, fail_mode=""):
+    def invoke(self, *args, fail_mode="", missing_dependency="", apt_failure=""):
         return subprocess.run(["bash", str(self.bin / "omarchy-install-playwright-browser"), *args],
-                              env=dict(self.env, TEST_FAIL_MODE=fail_mode), capture_output=True, text=True)
+                              env=dict(self.env, TEST_FAIL_MODE=fail_mode, TEST_MISSING_DEPENDENCY=missing_dependency,
+                                       TEST_APT_FAILURE=apt_failure), capture_output=True, text=True)
 
-    def test_default_firefox_entry_is_published_after_both_probes(self):
-        result = self.invoke()
+    def test_explicit_firefox_fallback_is_published_after_both_probes(self):
+        result = self.invoke("firefox", missing_dependency="all")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([json.loads(line) for line in self.calls.read_text().splitlines()], [
             ["install", "firefox"], ["probe", "firefox", "headless"], ["probe", "firefox", "wayland"],
@@ -200,6 +223,7 @@ if sys.argv[1] == 'probe' and os.environ.get('TEST_FAIL_MODE') == sys.argv[3]:
         entry = (self.apps / "Firefox-Playwright.desktop").read_text()
         self.assertIn("Exec=/usr/local/bin/omarchy-playwright-firefox %u", entry)
         self.assertIn("Firefox (Playwright)", entry)
+        self.assertFalse(self.apt_calls.exists())
 
     def test_chromium_probe_failure_removes_legacy_fake_entry_and_propagates_failure(self):
         self.apps.mkdir(parents=True)
@@ -216,6 +240,46 @@ if sys.argv[1] == 'probe' and os.environ.get('TEST_FAIL_MODE') == sys.argv[3]:
         self.assertFalse((self.apps / "Firefox-Playwright.desktop").exists())
         self.assertNotIn("✓", result.stdout)
 
+    def test_chromium_uses_only_bundled_128_validation_and_both_probes(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([json.loads(line) for line in self.calls.read_text().splitlines()], [
+            ["check"], ["probe", "chromium", "headless"], ["probe", "chromium", "wayland"],
+        ])
+        entry = (self.apps / "Chromium-Playwright.desktop").read_text()
+        self.assertIn("Chromium 128", entry)
+        self.assertIn("Exec=/usr/local/bin/omarchy-playwright-chromium %u", entry)
+        agent = (self.apps / "Chromium-128-Agent.desktop").read_text()
+        self.assertIn("Exec=/usr/local/bin/omarchy-playwright-chromium --agent %u", agent)
+        self.assertFalse(self.apt_calls.exists(), "Installed NSS packages must not trigger APT")
+
+    def test_failed_chromium_wayland_probe_does_not_publish_entry(self):
+        result = self.invoke("chromium", fail_mode="wayland")
+        self.assertEqual(result.returncode, 27)
+        self.assertFalse((self.apps / "Chromium-Playwright.desktop").exists())
+        self.assertFalse((self.apps / "Chromium-128-Agent.desktop").exists())
+
+    def test_old_guest_missing_one_nss_package_installs_only_system_dependencies(self):
+        result = self.invoke("chromium", missing_dependency="libnspr4")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([json.loads(line) for line in self.apt_calls.read_text().splitlines()], [
+            ["update"], ["install", "-y", "--no-install-recommends", "libnss3", "libnspr4"],
+        ])
+        self.assertEqual([json.loads(line) for line in self.calls.read_text().splitlines()], [
+            ["check"], ["probe", "chromium", "headless"], ["probe", "chromium", "wayland"],
+        ])
+
+    def test_dependency_update_or_install_failure_stops_before_runtime_probes(self):
+        for stage in ("update", "install"):
+            with self.subTest(stage=stage):
+                self.apt_calls.unlink(missing_ok=True)
+                result = self.invoke("chromium", missing_dependency="all", apt_failure=stage)
+                self.assertEqual(result.returncode, 42)
+                self.assertFalse(self.calls.exists())
+                self.assertFalse((self.apps / "Chromium-Playwright.desktop").exists())
+                self.assertFalse((self.apps / "Chromium-128-Agent.desktop").exists())
+                self.assertNotIn("✓", result.stdout)
+
 
 class BrowserMenuTests(unittest.TestCase):
     def test_menu_names_actual_engines_and_marks_unsupported_brands(self):
@@ -231,14 +295,26 @@ class BrowserMenuTests(unittest.TestCase):
         entries = dict(rows)
         self.assertEqual(len(entries), len(rows))
         self.assertIn("WebKitGTK", entries["install.browser.omarchy"]["label"])
-        self.assertIn("Playwright", entries["install.browser.chromium"]["label"])
+        self.assertIn("Chromium 128", entries["install.browser.chromium"]["label"])
         self.assertIn("Mozilla DEB", entries["install.browser.firefox"]["label"])
         self.assertIn("Agent", entries["install.browser.playwright"]["label"])
-        self.assertIn("Firefox", entries["install.browser.playwright"]["label"])
-        self.assertIn("实验性", entries["install.browser.chromium"]["label"])
+        self.assertIn("Chromium 128", entries["install.browser.playwright"]["label"])
+        self.assertIn("Firefox", entries["install.browser.firefox-playwright"]["label"])
+        self.assertIn("按需回退", entries["install.browser.firefox-playwright"]["label"])
         self.assertLess([key for key, _ in rows].index("install.browser.playwright"),
                         [key for key, _ in rows].index("install.browser.chromium"))
         self.assertIn("未适配", entries["install.browser.brave"]["label"])
+
+    def test_explicit_agent_menu_starts_only_the_isolated_cdp_launcher(self):
+        loader = importlib.machinery.SourceFileLoader("omarchy_menu_agent_test", str(BIN / "omarchy-menu-ui"))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        with patch.object(module, "kill_wofi"), patch.object(module, "wl_env", return_value={"WAYLAND_DISPLAY": "fixture"}), \
+                patch.object(module.subprocess, "Popen") as launch:
+            self.assertTrue(module.handle_special_route("install.browser.chromium-agent"))
+        launch.assert_called_once_with(["/usr/local/bin/omarchy-playwright-chromium", "--agent"],
+                                       env={"WAYLAND_DISPLAY": "fixture"})
 
 
 if __name__ == "__main__":

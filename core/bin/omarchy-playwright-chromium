@@ -1,8 +1,37 @@
 #!/usr/bin/env bash
-# A real Playwright-managed Chromium/CfT executable, with a separate desktop profile.
+# Real pinned GUI Chromium; CDP is opt-in and has a separate Agent profile.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-BROWSER="$("$SCRIPT_DIR/omarchy-playwright" browser-path chromium)"
-PROFILE="${HOME:-/root}/.local/share/omarchy-playwright/chromium-desktop"
+AGENT=0
+if [[ "${1:-}" == --agent ]]; then AGENT=1; shift; fi
+ASCII_SPACE=$' \t\n\v\f\r'
+for ARG in "$@"; do
+  # Chromium trims ASCII whitespace before recognizing a switch. Check that
+  # normalized copy, but forward the original argv unchanged for URLs.
+  CHECK="${ARG#"${ARG%%[!$ASCII_SPACE]*}"}"
+  CHECK="${CHECK%"${CHECK##*[!$ASCII_SPACE]}"}"
+  case "$CHECK" in
+    -*)
+      # Chromium's POSIX parser accepts both '-' and '--' switch prefixes.
+      SWITCH="${CHECK#-}"
+      SWITCH="${SWITCH#-}"
+      case "$SWITCH" in
+        agent|agent=*|remote-debugging*|remote-allow-origins*|user-data-dir*|profile-directory*|headless*|ozone-platform*)
+          echo "omarchy-playwright-chromium: profile/display/CDP options are managed; use --agent for loopback CDP." >&2
+          exit 2 ;;
+      esac
+      ;;
+  esac
+done
+BROWSER="$("$SCRIPT_DIR/omarchy-playwright128" browser-path chromium)"
+PROFILE="${HOME:-/root}/.local/share/omarchy-chromium128/desktop"
+if [[ "$AGENT" == 1 ]]; then
+  PROFILE="${HOME:-/root}/.local/share/omarchy-chromium128/agent"
+fi
 mkdir -p "$PROFILE"
-exec "$BROWSER" --no-sandbox --ozone-platform=wayland --user-data-dir="$PROFILE" "$@"
+if [[ "$AGENT" == 1 ]]; then
+  exec "$BROWSER" --no-sandbox --ozone-platform=wayland --user-data-dir="$PROFILE" \
+    --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 "$@"
+else
+  exec "$BROWSER" --no-sandbox --ozone-platform=wayland --user-data-dir="$PROFILE" "$@"
+fi

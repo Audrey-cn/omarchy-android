@@ -64,6 +64,7 @@ jobs:
           apt-get update -qq
           apt-get install -y --no-install-recommends \
             ca-certificates sudo locales tzdata dbus dbus-x11 x11-xserver-utils fontconfig gnupg \
+            libnss3 libnspr4 \
             waybar wofi swaybg mako-notifier libnotify-bin wl-clipboard wtype \
             alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
             imv zathura zathura-pdf-poppler mpv \
@@ -234,6 +235,22 @@ jobs:
           OMARCHY_ANDROID_TEST_KEYSTORE_B64: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_B64 || '' }}
           OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD || '' }}
         run: python3 ../../scripts/android-build.py prepare --output-dir "$RUNNER_TEMP/omarchy-android-signing"
+      - name: Verify source archives and build pinned browser payload
+        run: |
+          BUNDLE_DIR="$RUNNER_TEMP/omarchy-browser-managed-payload"
+          python3 ../../scripts/build-browser-bundle.py \
+            --sources ../../scripts/browser-bundle-sources.json \
+            --cache-dir "$RUNNER_TEMP/omarchy-browser-source-cache" \
+            --output-dir "$BUNDLE_DIR"
+          python3 - "$BUNDLE_DIR/managed-core/manifest.json" "$OMARCHY_ANDROID_SOURCE_SHA" <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as stream:
+              manifest = json.load(stream)
+          if manifest["sourceSha"] != sys.argv[2]:
+              raise SystemExit("Browser payload source SHA differs from prepared APK metadata")
+          print("Prepared pinned browser payload:", len(manifest["files"]), "files from", manifest["sourceSha"])
+          PY
+          printf 'OMARCHY_ANDROID_MANAGED_PAYLOAD_DIR=%s\n' "$BUNDLE_DIR" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
       - name: Install Android SDK 37 & NDK/CMake
         run: |

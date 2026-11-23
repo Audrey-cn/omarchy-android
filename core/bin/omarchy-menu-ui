@@ -55,9 +55,11 @@ def kill_wofi():
 def browser_menu_entries(upstream_children):
     """Expose actual local adapters, retaining other brands as explicit unavailable entries."""
     supported = [
+        ("install.browser.playwright", {"label": "Agent 浏览器：Chromium 128（检查并自检）", "icon": "󰊯"}),
+        ("install.browser.chromium-agent", {"label": "启动 Agent 浏览器（Chromium 128，CDP）", "icon": "󰊯"}),
+        ("install.browser.chromium", {"label": "Chromium 128（内置，检查并自检）", "icon": "󰊯"}),
+        ("install.browser.firefox-playwright", {"label": "Firefox (Playwright，按需回退)", "icon": "󰈹"}),
         ("install.browser.omarchy", {"label": "Omarchy Browser (WebKitGTK)", "icon": "󰖟"}),
-        ("install.browser.playwright", {"label": "Agent 浏览器：Firefox (Playwright，安装并自检)", "icon": "󰈹"}),
-        ("install.browser.chromium", {"label": "Chromium (Playwright，实验性)", "icon": "󰊯"}),
         ("install.browser.firefox", {"label": "Firefox (Mozilla DEB)", "icon": "󰈹"}),
     ]
     keys = {key for key, _ in supported}
@@ -90,6 +92,10 @@ def run_in_terminal(title, shell_cmd):
     subprocess.Popen(["alacritty", "-e", "bash", "-c", script], env=wl_env())
 
 def handle_special_route(route):
+    if route == "install.browser.chromium-agent":
+        kill_wofi()
+        subprocess.Popen(["/usr/local/bin/omarchy-playwright-chromium", "--agent"], env=wl_env())
+        return True
     if route == "apps":
         show_app_grid()
         return True
