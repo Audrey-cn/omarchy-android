@@ -25,7 +25,7 @@
 - Sway 平铺窗口管理、Waybar 顶栏、GtkLayerShell 状态弹窗与 6 列原生应用网格。
 - Omarchy 主题与壁纸，联动 Sway、Waybar、Wofi、App Grid 和 Alacritty 配色。
 - Fcitx5 中文拼音、Android 输入法穿透、悬浮键盘与横竖屏控制。
-- Alacritty、Thunar、Neovim、Lazygit、imv、Zathura、mpv 和轻量 WebKitGTK 浏览器。
+- Alacritty、Thunar、Neovim、Lazygit、imv、Zathura、mpv；免 Root 一体包内置固定 Chromium 128，保留轻量 WebKitGTK 浏览器。
 - 按需安装 CC Switch、Codex / ChatGPT Desktop、Claude Desktop、Hermes Desktop 等 AI 工具。
 - Root 路线提供 `evdev` 外接键盘与触控板独占，支持 `Alt` / `Super` 桌面快捷键。
 
@@ -35,7 +35,7 @@
 
 ### 免 Root 一体包
 
-下载入口统一为本仓库的 [Releases](https://github.com/Audrey-cn/omarchy-android/releases)。选择 `OmarchyAndroid-AllInOne.apk`，仅支持 `arm64-v8a`；APK 包含桌面镜像时，首次打开会导入镜像并初始化桌面。
+当前 K20 Pro 验证版为 [v1.0.62-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.62-test)，下载附件 `OmarchyAndroid-1.0.62-test.apk`，仅支持 `arm64-v8a`。一体包首次打开会自动导入桌面镜像；本轮已验证持续签名升级、数据保留和真实 Hermes Agent，详见[实机记录](docs/reports/k20-round2-20261123.md)。
 
 构建工作流生成的 `OmarchyAndroid-apk` 是普通容器壳包；没有嵌入 `rootfs.tar.zst` 时，需要另行导入容器。`OmarchyAndroid-AllInOne-apk` 才是一体包构建产物。详见[应用说明](apps/android/README.md)。
 

@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "2237be355906fbe6065ce1815711eee52b2d646e",
+  "agent": "run_agent.AIAgent.run_conversation",
+  "model": "qwen3.8-flash",
+  "requestedProvider": "custom",
+  "toolset": "browser-cdp",
+  "downloadMode": "profile-default-unique-filename",
+  "passed": true,
+  "toolCalls": [
+    {
+      "method": "Target.createTarget",
+      "success": true
+    },
+    {
+      "method": "Runtime.evaluate",
+      "success": true
+    },
+    {
+      "method": "Page.bringToFront",
+      "success": true
+    },
+    {
+      "method": "Page.captureScreenshot",
+      "success": true
+    },
+    {
+      "method": "Target.createTarget",
+      "success": true
+    },
+    {
+      "method": "Runtime.evaluate",
+      "success": true
+    },
+    {
+      "method": "Target.closeTarget",
+      "success": true
+    }
+  ],
+  "checks": {
+    "fixtureServed": true,
+    "unicodeDomRead": true,
+    "clickEventReceived": true,
+    "browserDownloadServed": true,
+    "downloadTargetAbsentAtStart": true,
+    "downloadAtExpectedPath": true,
+    "downloadMatchesExpected": true,
+    "screenshotPngSaved": true
+  },
+  "downloadTarget": {
+    "directory": "/root/Downloads",
+    "fileName": "hermes-fixture-6866b9457f80428da873aec04a2a862e.txt",
+    "absentAtStart": true
+  },
+  "profileEnvironmentLoaded": true,
+  "selectedCredentialAvailable": true,
+  "screenshots": [
+    {
+      "file": "screenshot-1.png",
+      "sha256": "7cbaf292d1eddf281548ac6329e8ed29158affc0074254af9599a0ae83b9927d",
+      "bytes": 67650,
+      "width": 2340,
+      "height": 1080
+    }
+  ],
+  "download": {
+    "file": "/root/Downloads/hermes-fixture-6866b9457f80428da873aec04a2a862e.txt",
+    "bytes": 55,
+    "sha256": "64f3919c426249f095f0b323779de24928383d8265037112770917101fdab1ef"
+  },
+  "run": {
+    "completed": true,
+    "failed": false,
+    "apiCalls": 8,
+    "finalMarker": true
+  },
+  "toolEvents": [
+    {
+      "method": "Target.createTarget",
+      "status": "started"
+    },
+    {
+      "method": "Target.createTarget",
+      "status": "ok"
+    },
+    {
+      "method": "Runtime.evaluate",
+      "status": "started"
+    },
+    {
+      "method": "Runtime.evaluate",
+      "status": "ok"
+    },
+    {
+      "method": "Page.bringToFront",
+      "status": "started"
+    },
+    {
+      "method": "Page.bringToFront",
+      "status": "ok"
+    },
+    {
+      "method": "Page.captureScreenshot",
+      "status": "started"
+    },
+    {
+      "method": "Page.captureScreenshot",
+      "status": "ok"
+    },
+    {
+      "method": "Target.createTarget",
+      "status": "started"
+    },
+    {
+      "method": "Target.createTarget",
+      "status": "ok"
+    },
+    {
+      "method": "Runtime.evaluate",
+      "status": "started"
+    },
+    {
+      "method": "Runtime.evaluate",
+      "status": "ok"
+    },
+    {
+      "method": "Target.closeTarget",
+      "status": "started"
+    },
+    {
+      "method": "Target.closeTarget",
+      "status": "ok"
+    }
+  ],
+  "callbackCounts": {
+    "step": 8,
+    "tool-generated": 7,
+    "stream-delta": 122
+  }
+}

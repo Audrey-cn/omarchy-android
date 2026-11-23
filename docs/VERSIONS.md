@@ -70,15 +70,34 @@ APK 更新不会把新 rootfs 解压到已有 guest；启动前通过独立 mana
 - `managed-core/manifest.json` 包含 `schemaVersion: 1`、40 位 `sourceSha`，以及 `files` 数组；每项为 `path`（相对 guest 根目录）、`sha256`（64 位小写十六进制）与 `mode`（420/0644 或 493/0755）。每份 regular file 放在 `managed-core/files/<path>`。生成器和运行时都拒绝路径穿越、符号链接、重复条目、坏哈希和清单外路径。
 - 管理范围为 `usr/local/bin/<文件名>`、`opt/omarchy-chromium128/**`、`opt/omarchy-node/**`。APK 构建通过 `OMARCHY_ANDROID_MANAGED_PAYLOAD_DIR` 接入固定浏览器/Node 资产树；它必须与核心清单使用同 schema、同源码 SHA，生成器逐份校验后才合并。开发时不传该目录仍可生成仅含核心脚本的资产，不能把这种本地构建当作完整内置运行时交付。
 - 首次升级旧容器时，内容不同的既有 managed 文件会先精确备份到应用私有 `files/managed-core/omarchy/legacy-backup/<原路径>`；随后只更新已知旧哈希或不存在的目标。之后检测到用户改过的内容，或新管理路径已有其他文件，会保留文件、显示冲突并停止启动，避免悄悄覆盖。
-- 先在私有临时目录验证所有待更新 payload，再逐文件原子替换；清单退役文件只在哈希仍匹配时删除。最后才原子保存 `files/managed-core/omarchy/manifest.tsv` 回执。中断后可识别已发布的新哈希并重试，不重新导入 rootfs。每次启动核对 managed 文件内容；固定浏览器/Node 的 stable61 fresh 首次完整同步已在 K20 成功，旧 guest 恢复和后续更新仍需单独验证。
+- 先在私有临时目录验证所有待更新 payload，再逐文件原子替换；清单退役文件只在哈希仍匹配时删除。最后才原子保存 `files/managed-core/omarchy/manifest.tsv` 回执。中断后可识别已发布的新哈希并重试，不重新导入 rootfs。每次启动核对 managed 文件内容；stable61 fresh 首次完整同步及旧 guest 恢复后的 5,114 文件 legacy adoption 均已在 K20 成功，stable61→62 同签名更新后回执源码 SHA 正常推进，已有 guest 未重新导入。
 
 原数据归档已完整校验；历史备份本身不等于跨版本恢复验收。切换持续签名后的恢复，以及连续两版覆盖安装保留数据的设备结果，以验证记录为准。
 
-当前已完成 fresh 安装验证的持续签名一体包为 **stable61**，产品源码为 `main` 的 `27f1ae4`：
+首个完成 fresh 安装、旧 guest 恢复与应用回归的持续签名一体包为 **stable61**，产品源码为 `main` 的 `27f1ae4`：
 
 | 身份 | SHA-256 |
 | --- | --- |
 | 持续签名证书 | `bcb2f64501107f9425a0efe9193f3703acddb6e34daa54196978de7720c86c17` |
 | APK | `4bd577df7e5f28f6b67fc497046bfbae90b6a24597b63fa82e4aec04928d14ea` |
 
-K20 已正常卸载旧临时签名包后安装该包，空数据自动导入 rootfs、5,114 受管文件首次同步，以及内置 Chromium/Node 检查和完整 headless/键盘场景 Wayland 探针通过。旧 guest 恢复、数据保留和下一版同证书覆盖升级仍在验证，不能将 fresh 成功写成迁移完成。最新证据见[第二轮记录](reports/k20-round2-20261123.md)；`e876b3b` 等先前环境的历史边界保留在[首轮记录](reports/cloud-k20-validation-20261123.md)。
+K20 已正常卸载旧临时签名包后安装该包，空数据自动导入 rootfs、5,114 受管文件首次同步，以及内置 Chromium/Node 检查和完整 headless/键盘场景 Wayland 探针通过。之后旧 guest 完成一致恢复，五项关键配置/偏好哈希一致，仅更换 fresh `aid_*` 记录并保留其他 Linux 记录；移出 fresh managed 回执后，legacy adoption 成功。
+
+恢复后的实际应用域中，Sway/键盘场景、Hermes PTY、GUI Gateway 与原 Qwen 实际回复、节奏中文输入及 Chromium/Hermes/Codex 登录页共存已通过对应检查。stable61 的[真实 Agent 回执](reports/evidence/k20-agent-stable61-20261123.json)八项独立检查全部通过；13 API / 14 工具调用中的截图超时和不支持方法错误保留，恢复前台后取得新截图。Codex 没有账户登录或任务验收。GUI 模型与 Agent 已使用手机直接联网，本轮 USB 18888 代理映射已移除。
+
+**stable62** 成品已通过云端检查及下载校验，源码为 `7a33447689ee11182ef00b9938e2052f69fb069e`，证书与上表相同：
+
+| 产物 | SHA-256 |
+| --- | --- |
+| 下载 ZIP | `ca7d98157fff4094ce564fcebbeefcc4026aeeb6a73731f4cac4b3deb963091a` |
+| APK | `ed3177d0b9a13eef8e6a965a957d4e3bc107a77d3d6a2058114f8ccbb2ce45bf` |
+
+K20 正常 `adb install -r --user 0` 已成功覆盖至 stable62，没有卸载、清数据、恢复或 rootfs 导入；PM 版本 61→62、相同 UID/证书及实际安装 base APK 哈希均已核对。启动前，11 项持久文件逐 SHA-256 一致，`tc4.xml` 及原自动启动设置也完全保留。
+
+普通主入口冷启动已自动进入 Sway，没有重新导入 rootfs；11 项持久文件启动后仍逐哈希一致，自动启动设置与已安装容器集合保留。managed `sourceSha` 已推进至上述 stable62 源码。实际 `untrusted_app` PRoot 指向本版 `nativeLibraryDir`，三件运行时哈希与清单匹配，进程 Gid/Groups 与 guest `aid_*` 集合一致。实际应用域的 headless、`wtype -k Tab` 后完整 Wayland 探针和 Hermes PTY 载入/输入/resize 全部通过，Chromium/Hermes/Codex 三窗正常启动；Codex 仍未验收登录后任务。
+
+stable62 的[新真实 Agent 回执](reports/evidence/k20-agent-stable62-20261123.json)为 `passed: true`：实际应用域 Sway 会话中的官方 AIAgent，使用独立 profile、原 Qwen 模型和手机直接联网，完成 8 次 API / 7 次工具调用，工具全部成功、八项独立检查全部通过。默认 Downloads 下的新 UUID 文件为 55B，完整内容哈希匹配；新截图为 2340×1080 PNG、67650B，SHA-256 `7cbaf292d1eddf281548ac6329e8ed29158affc0074254af9599a0ae83b9927d`，已再次核对并人工查看中文页面。三窗启动后保持 Chromium 前台，本轮没有截图超时；stable61 的失败记录保留。
+
+**本轮 K20 的 fresh 安装、旧 guest 恢复、stable61→62 同签名覆盖升级、数据保留、冷启动及真实 Hermes Agent 回归已完成。** 对应版本页为 [`v1.0.62-test`](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.62-test)，已公开发布并设为 latest，GitHub 返回的附件大小与 SHA-256 已核对。
+
+Codex 账户登录后的实际任务未验收。其它 Tiny 容器未新增实机测试，其运行时选择逻辑已通过策略测试。独立系统镜像发布、双安装形态、Android 独立分区安装留待后续讨论。完整证据见[第二轮记录](reports/k20-round2-20261123.md)；`e876b3b` 等先前环境的历史边界保留在[首轮记录](reports/cloud-k20-validation-20261123.md)。
