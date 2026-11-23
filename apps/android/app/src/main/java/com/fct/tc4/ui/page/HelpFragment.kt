@@ -79,6 +79,11 @@ class HelpFragment : Fragment() {
 
     private fun buildHelpItems(): List<HelpItem> = listOf(
         HelpItem(
+            titleRes = R.string.tc4_help_about_title,
+            descriptionRes = R.string.tc4_help_about_desc,
+            url = "https://github.com/Audrey-cn/omarchy-android"
+        ),
+        HelpItem(
             titleRes = R.string.tc4_help_source_code_title,
             descriptionRes = R.string.tc4_help_source_code_desc,
             url = "https://github.com/Audrey-cn/omarchy-android"
@@ -97,6 +102,11 @@ class HelpFragment : Fragment() {
             titleRes = R.string.tc4_help_license_title,
             descriptionRes = R.string.tc4_help_license_desc,
             url = null
+        ),
+        HelpItem(
+            titleRes = R.string.tc4_help_support_title,
+            descriptionRes = R.string.tc4_help_support_desc,
+            url = "https://github.com/sponsors/Audrey-cn"
         ),
     )
 }

@@ -23,6 +23,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.graphics.Color
+import android.text.Spannable
+import android.text.SpannableString
+import android.text.style.ForegroundColorSpan
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,11 +64,30 @@ class SettingsFragment : Fragment() {
     private val requestStoragePermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
+        viewModel.refresh()
+        val root = _binding?.root ?: return@registerForActivityResult
         if (granted) {
-            Snackbar.make(binding.root, getString(R.string.tc4_permission_file_granted), Snackbar.LENGTH_SHORT).show()
+            Snackbar.make(root, getString(R.string.tc4_permission_file_granted), Snackbar.LENGTH_SHORT).show()
         } else {
-            Snackbar.make(binding.root, getString(R.string.tc4_permission_file_denied), Snackbar.LENGTH_SHORT).show()
+            Snackbar.make(root, getString(R.string.tc4_permission_file_denied), Snackbar.LENGTH_SHORT).show()
         }
+    }
+
+    private val requestMicrophonePermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.refresh()
+        val root = _binding?.root ?: return@registerForActivityResult
+        val message = if (granted) R.string.tc4_permission_microphone_granted else R.string.tc4_permission_microphone_denied
+        val snackbar = Snackbar.make(root, getString(message), Snackbar.LENGTH_LONG)
+        if (!granted) {
+            snackbar.setAction(R.string.tc4_permission_open_settings) {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${requireContext().packageName}")
+                })
+            }
+        }
+        snackbar.show()
     }
 
     override fun onCreateView(
@@ -137,6 +160,9 @@ class SettingsFragment : Fragment() {
                         data = Uri.parse("package:${requireContext().packageName}")
                     }
                 )
+            }
+            "microphone" -> {
+                if (!item.isGranted) requestMicrophonePermission.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
     }
@@ -239,7 +265,12 @@ private class ActionVH(
     fun bind(item: ActionSetting, position: Int, itemCount: Int) {
         super.bind(position, itemCount)
         val ctx = itemView.context
-        binding.itemTitle.text = ctx.getString(item.titleRes)
+        val title = ctx.getString(item.titleRes)
+        binding.itemTitle.text = if (item.isGranted) {
+            SpannableString(ctx.getString(R.string.tc4_permission_granted_title, title)).apply {
+                setSpan(ForegroundColorSpan(Color.rgb(76, 175, 80)), 0, 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        } else title
         binding.itemDescription.text = ctx.getString(item.descriptionRes)
         binding.itemCard.setOnClickListener {
             onAction(item)

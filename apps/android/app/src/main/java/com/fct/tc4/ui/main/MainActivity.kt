@@ -46,7 +46,6 @@ import com.fct.tc4.ui.misc.Global
 import com.fct.tc4.ui.page.TerminalFragment
 import com.fct.tc4.ui.page.ContainerManageViewModel
 import com.google.android.material.snackbar.Snackbar
-import com.termux.x11.CmdEntryPointService
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -379,15 +378,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             else -> {}
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if (!isChangingConfigurations) {
-            startService(Intent(
-                this, CmdEntryPointService::class.java
-            ).apply { action = CmdEntryPointService.ACTION_STOP })
         }
     }
 

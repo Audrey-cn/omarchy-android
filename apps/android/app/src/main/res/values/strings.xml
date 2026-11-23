@@ -342,14 +342,14 @@
     <string name="omarchy_overlay_fullscreen_desc">Toggle fullscreen for the current Linux window.</string>
     <string name="omarchy_overlay_ime_installed_title">Choose input method (Doubao IME installed)</string>
     <string name="omarchy_overlay_ime_install_title">Try Doubao IME (voice + Chinese)</string>
-    <string name="omarchy_overlay_ime_installed_desc">Choose an input method, then tap the handle microphone to type in desktop apps.</string>
+    <string name="omarchy_overlay_ime_installed_desc">Choose an input method, then long-press the edge handle to type in desktop apps.</string>
     <string name="omarchy_overlay_ime_install_desc">Use Doubao IME for voice and Chinese input in Linux apps.</string>
     <string name="omarchy_overlay_lock_portrait">Switch &amp; lock to portrait</string>
     <string name="omarchy_overlay_lock_landscape">Switch &amp; lock to landscape</string>
     <string name="omarchy_overlay_orientation_desc">In portrait, the desktop resizes when the system keyboard opens.</string>
     <string name="omarchy_overlay_replay_title">Replay the getting started guide</string>
     <string name="omarchy_overlay_replay_desc">Explore scaling, handle gestures, Super / Alt shortcuts, and input methods.</string>
-    <string name="omarchy_overlay_handle">Floating handle: swipe inward for input, double-tap for keyboard, tap for dock, drag to reposition.</string>
+    <string name="omarchy_overlay_handle">Floating handle: long-press for voice / IME, double-tap for keyboard, tap for dock, drag to reposition.</string>
     <string name="omarchy_overlay_keyboard_toggle">Show or hide floating keyboard</string>
     <string name="omarchy_overlay_voice_ime">Voice &amp; system input method</string>
     <string name="omarchy_overlay_dock_collapse">Collapse floating dock</string>
@@ -407,7 +407,7 @@
     <string name="omarchy_onboarding_permissions_title">Voice input &amp; recommended permissions</string>
     <string name="omarchy_onboarding_ime_installed">✓ Doubao IME detected</string>
     <string name="omarchy_onboarding_ime_install">Try Doubao IME</string>
-    <string name="omarchy_onboarding_ime_installed_desc">Select it as your input method, then tap the handle microphone for voice or Chinese input.</string>
+    <string name="omarchy_onboarding_ime_installed_desc">Select it as your input method, then long-press the edge handle for voice or Chinese input.</string>
     <string name="omarchy_onboarding_ime_install_desc">Use voice and Chinese input directly in Linux terminals and apps.</string>
     <string name="omarchy_onboarding_ime_choose">Choose input method</string>
     <string name="omarchy_onboarding_ime_download">Download Doubao IME</string>
@@ -472,4 +472,25 @@
     <string name="omarchy_setup_progress_saved">Download progress saved. Return to the app for details.</string>
     <string name="omarchy_setup_interrupted">The previous task was interrupted. Your progress is saved and can be resumed.</string>
     <string name="omarchy_setup_state_unavailable">Previous task details are unavailable. Please select an image again.</string>
+
+    <!-- Omarchy session, permissions, and project support -->
+    <string name="tc4_settings_microphone_title">Microphone</string>
+    <string name="tc4_settings_microphone_desc">Allow audio capture for voice input and desktop audio apps. Your chosen input method manages its own microphone permission.</string>
+    <string name="tc4_permission_granted_title">✓ %1$s</string>
+    <string name="tc4_permission_microphone_granted">Microphone permission granted</string>
+    <string name="tc4_permission_microphone_denied">Microphone access is off. You can enable it in app settings.</string>
+    <string name="tc4_permission_open_settings">App settings</string>
+    <string name="tc4_help_about_title">About Omarchy Android</string>
+    <string name="tc4_help_about_desc">Maintained by Audrey · Source, documentation, and community.</string>
+    <string name="tc4_help_support_title">Support / Sponsor</string>
+    <string name="tc4_help_support_desc">Support ongoing maintenance and improvements on GitHub.</string>
+    <string name="omarchy_keep_alive_channel">Desktop background session</string>
+    <string name="omarchy_keep_alive_title">Omarchy Desktop</string>
+    <string name="omarchy_keep_alive_text">Omarchy Desktop running in background · Tap to return</string>
+    <string name="omarchy_onboarding_long_press">Long-press</string>
+    <string name="omarchy_onboarding_microphone_granted">✓ Microphone allowed</string>
+    <string name="omarchy_onboarding_microphone_grant">Allow microphone</string>
+    <string name="omarchy_overlay_ime_hide">Hide system keyboard</string>
+    <string name="omarchy_xserver_restart_failed">The previous display session could not be cleaned up. Exit the container and try again.</string>
+    <string name="omarchy_container_start_failed">The desktop could not start. Exit the container and try again.</string>
 </resources>

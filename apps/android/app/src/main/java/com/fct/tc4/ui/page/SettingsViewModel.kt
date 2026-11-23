@@ -18,8 +18,14 @@
 package com.fct.tc4.ui.page
 
 import android.app.Application
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Environment
+import android.os.PowerManager
 import androidx.annotation.StringRes
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -53,7 +59,8 @@ data class SwitchSetting(
 data class ActionSetting(
     override val id: String,
     @StringRes override val titleRes: Int,
-    @StringRes override val descriptionRes: Int
+    @StringRes override val descriptionRes: Int,
+    val isGranted: Boolean = false
 ) : SettingsItem()
 
 // ===================== ViewModel =====================
@@ -97,6 +104,7 @@ class SettingsViewModel(
     }
 
     fun refresh() {
+        val app = getApplication<Application>()
         val directTouch = x11Prefs.getString("touchMode", "1") == "2"
         val hideCutout = x11Prefs.getBoolean("hideCutout", true)
         val fullscreen = x11Prefs.getBoolean("fullscreen", true)
@@ -175,12 +183,24 @@ class SettingsViewModel(
             ActionSetting(
                 id = "manage_files",
                 titleRes = R.string.tc4_settings_manage_files_title,
-                descriptionRes = R.string.tc4_settings_manage_files_desc
+                descriptionRes = R.string.tc4_settings_manage_files_desc,
+                isGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Environment.isExternalStorageManager()
+                } else {
+                    ContextCompat.checkSelfPermission(app, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                }
+            ),
+            ActionSetting(
+                id = "microphone",
+                titleRes = R.string.tc4_settings_microphone_title,
+                descriptionRes = R.string.tc4_settings_microphone_desc,
+                isGranted = ContextCompat.checkSelfPermission(app, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             ),
             ActionSetting(
                 id = "battery_unlimited",
                 titleRes = R.string.tc4_settings_battery_title,
-                descriptionRes = R.string.tc4_settings_battery_desc
+                descriptionRes = R.string.tc4_settings_battery_desc,
+                isGranted = app.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(app.packageName) == true
             )
         )
     }

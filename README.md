@@ -49,9 +49,9 @@ You need an **ARM64 Android device** and enough free space for the download, ext
 
 | Gesture on the handle | Action |
 | --- | --- |
-| **Swipe inward** | Open Android IME input; use Doubao IME for Chinese and voice input. |
-| **Double-tap** | Show or hide the transparent floating keyboard. |
 | **Tap** | Expand the dock for keyboard, input, orientation lock and unified settings. |
+| **Double-tap** | Show or hide the transparent floating keyboard. |
+| **Long-press (350 ms)** | Open Android IME input with haptic feedback; use Doubao IME for Chinese and voice input. |
 | **Drag** | Reposition vertically and snap to the left or right edge. |
 
 ### Six core shortcuts
@@ -120,3 +120,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for the project map, checks and PR workf
 The Android application is based on **[Tiny Container](https://github.com/Cateners/tiny_container)** by Caten Hu and retains **GPL-3.0-or-later** and its original notices; see [COPYING](apps/android/COPYING). The shared desktop core, Termux runtimes, Deck and original repository documentation retain the root [MIT license](LICENSE). Third-party code, themes, fonts and tools retain their own licenses. See [LICENSES.md](LICENSES.md) for the component boundaries.
 
 Thank you to [Omarchy](https://github.com/basecamp/omarchy) for the desktop inspiration, [Tiny Container](https://github.com/Cateners/tiny_container) for the Android container foundation, [Termux:X11](https://github.com/termux/termux-x11), [PRoot](https://github.com/proot-me/proot), [Sway](https://github.com/swaywm/sway), [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots), and their contributors.
+
+## Support
+
+Maintained by [Audrey](https://github.com/Audrey-cn/omarchy-android). If this project helps you, you can support its development through [GitHub Sponsors](https://github.com/sponsors/Audrey-cn), or contribute a device report, translation or fix in the [repository](https://github.com/Audrey-cn/omarchy-android).

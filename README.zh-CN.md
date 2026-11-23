@@ -49,9 +49,9 @@
 
 | 手柄手势 | 功能 |
 | --- | --- |
-| **向内轻滑** | 调起 Android 输入法；搭配豆包输入法进行中文与语音输入。 |
-| **双击** | 显示或收起透明悬浮键盘。 |
 | **轻点** | 展开控制栏，使用键盘、输入法、横竖屏锁定与统一设置。 |
+| **双击** | 显示或收起透明悬浮键盘。 |
+| **长按（350 毫秒）** | 轻震后调起 Android 输入法；搭配豆包输入法进行中文与语音输入。 |
 | **拖动** | 自由调整高度，自动吸附左侧或右侧屏幕边缘。 |
 
 ### 六个核心快捷键
@@ -120,3 +120,7 @@ cd omarchy-android
 Android 应用基于 Caten Hu 的 **[Tiny Container](https://github.com/Cateners/tiny_container)**，沿用 **GPL-3.0-or-later** 及原有声明，详见 [COPYING](apps/android/COPYING)。共享桌面核心、Termux 运行时、Deck 与本仓原创文档沿用根目录的 [MIT 许可证](LICENSE)。第三方代码、主题、字体和工具保留各自许可证，组件边界见 [LICENSES.md](LICENSES.md)。
 
 感谢 [Omarchy](https://github.com/basecamp/omarchy) 的桌面设计灵感、[Tiny Container](https://github.com/Cateners/tiny_container) 的 Android 容器基础，以及 [Termux:X11](https://github.com/termux/termux-x11)、[PRoot](https://github.com/proot-me/proot)、[Sway](https://github.com/swaywm/sway)、[wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) 和这些项目的贡献者。
+
+## 支持项目
+
+由 [Audrey](https://github.com/Audrey-cn/omarchy-android) 维护。如果这个项目对你有帮助，欢迎通过 [GitHub Sponsors](https://github.com/sponsors/Audrey-cn) 支持后续开发，也可以在[仓库](https://github.com/Audrey-cn/omarchy-android)贡献设备报告、翻译或修复。

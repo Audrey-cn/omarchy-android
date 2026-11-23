@@ -18,6 +18,7 @@
 package com.fct.tc4.ui.page
 
 import android.app.Application
+import android.app.ActivityManager
 import android.content.Intent
 import android.system.Os
 import android.system.OsConstants
@@ -27,6 +28,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import androidx.core.content.ContextCompat
 import com.fct.tc4.TinyAudio
 import com.fct.tc4.TinyMicrophone
 import com.fct.tc4.R
@@ -35,10 +37,14 @@ import com.fct.tc4.TinyStorage
 import com.fct.tc4.ProotRuntimePolicy
 import com.fct.tc4.ui.misc.ConfigManager
 import com.fct.tc4.ui.misc.Global
+import com.fct.tc4.ui.misc.OmarchyKeepAliveService
 import com.fct.tc4.ui.misc.UpdateChecker
 import com.fct.tc4.ui.misc.UpdateResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,6 +82,8 @@ class ContainerMainViewModel(
 
     /** 是否启动过 X server（避免未启动时就发送 ACTION_STOP 导致创建 :xserver 进程） */
     private var xserverStarted = false
+    private var exited = false
+    private val initializationJob: Job
 
     private lateinit var config: Map<String, Any>
 
@@ -95,7 +103,7 @@ class ContainerMainViewModel(
     val updateEvent: SharedFlow<String> = _updateEvent.asSharedFlow()
 
     init {
-        viewModelScope.launch {
+        initializationJob = viewModelScope.launch {
             val loaded = ConfigManager.load(code)
             if (loaded == null) {
                 _errorMessage.value = getApplication<Application>().getString(R.string.tc4_container_config_lost, code)
@@ -104,6 +112,11 @@ class ContainerMainViewModel(
             }
             config = loaded
             _configState.value = config
+            if (config["boot_command"] !is String) {
+                _errorMessage.value = getApplication<Application>().getString(R.string.tc4_container_missing_boot_cmd, code)
+                _isInitialized.value = true
+                return@launch
+            }
             // The desktop is persistent user state. App/native updates must not
             // replace or retire guest files when APK payloads change or disappear.
             // New Linux contents are delivered only through explicit initial install.
@@ -111,10 +124,23 @@ class ContainerMainViewModel(
                 _isInitialized.value = true
                 return@launch
             }
-            withContext(Dispatchers.IO) {
-                launchContainer()
+            startKeepAliveService()
+            var launchCompleted = false
+            try {
+                withContext(Dispatchers.IO) {
+                    launchContainer()
+                }
+                launchCompleted = _errorMessage.value == null
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.e(TAG, "Container startup failed", error)
+                _errorMessage.value = getApplication<Application>().getString(R.string.omarchy_container_start_failed)
+            } finally {
+                if (!launchCompleted) stopKeepAliveService()
             }
             _isInitialized.value = true
+            if (!launchCompleted) return@launch
 
             // 自动检测更新
             if (Global.autoCheckUpdate) {
@@ -139,12 +165,17 @@ class ContainerMainViewModel(
     }
 
     fun exitContainer() {
+        if (exited) return
+        exited = true
+        initializationJob.cancel()
         Global.onSessionSignal9 = null // 主动退出，不触发 signal 9 跳转
         killXServer()
+        stopKeepAliveService()
         TinyAudio.stop()
         TinyMicrophone.stop()
         TinyIpp.stop()
         TinyStorage.stop()
+        if (!::config.isInitialized) return
         val pid = Global.terminalSession?.pid ?: 0
         if (pid > 0) {
             Os.kill(-pid, OsConstants.SIGQUIT)
@@ -238,7 +269,7 @@ class ContainerMainViewModel(
         // 处理 storage feature：生成 --tiny-storage 和初始 --bind= 参数
         collectStorageArgs(merged.args)
         for (cmd in merged.preStartHostCommands) {
-            Global.sendCommand(cmd)
+            sendStartupCommand(cmd)
         }
 
         val bootCmd = config["boot_command"] as? String
@@ -255,14 +286,22 @@ class ContainerMainViewModel(
 
         // 写入临时脚本文件，绕过 PTY 单行 4096 字节限制
         val bootScript = File("${getApplication<Application>().filesDir}/boot_${code}.sh")
+        currentCoroutineContext().ensureActive()
         bootScript.writeText("exec $resolvedBootCmd")
-        Global.sendCommand("source ${bootScript.absolutePath}")
+        sendStartupCommand("source ${bootScript.absolutePath}")
 
         for (cmd in merged.postStartContainerCommands) {
-            Global.sendCommand(cmd)
+            sendStartupCommand(cmd)
         }
 
         launchEnabledFeature()
+    }
+
+    private suspend fun sendStartupCommand(command: String) = withContext(Dispatchers.Main) {
+        // Exit/reset also runs on Main. Never dispatch an old startup command
+        // into the fresh host shell after exitContainer replaces Global's session.
+        if (exited) throw CancellationException("Container exited")
+        Global.sendCommand(command)
     }
 
     // ===================== 图形界面处理 =====================
@@ -271,23 +310,24 @@ class ContainerMainViewModel(
     private suspend fun launchEnabledFeature() {
         val features = config["feature"] as? List<Map<String, Any>> ?: emptyList()
         for (feature in features) {
+            currentCoroutineContext().ensureActive()
             val type = feature["type"] as? String ?: continue
             if (feature["enabled"] as? Boolean != true) continue
             when (type) {
                 "audio" -> {
-                    TinyAudio.start()
+                    withContext(Dispatchers.Main) { if (!exited) TinyAudio.start() }
                 }
                 "print" -> {
-                    TinyIpp.start()
+                    withContext(Dispatchers.Main) { if (!exited) TinyIpp.start() }
                 }
                 "storage" -> {
-                    TinyStorage.start()
+                    withContext(Dispatchers.Main) { if (!exited) TinyStorage.start() }
                 }
                 "webview" -> {
                     if (!Global.autoLaunchGui) continue
                     val link = feature["link"] as? String ?: continue
                     val command = feature["command"] as? String ?: continue
-                    Global.sendCommand(command)
+                    sendStartupCommand(command)
                     val port = extractPort(link)
                     Log.d(TAG, "webview: link=$link port=$port waiting for port...")
                     if (port == null) continue
@@ -304,7 +344,7 @@ class ContainerMainViewModel(
                     val adaptToScreenSize = feature["adapt_to_screen_size"] as? Boolean ?: continue
                     val scaleRatio = (feature["scale_ratio"] as? Number)?.toDouble() ?: continue
                     val useUnixSocket = feature["use_unix_socket"] as? Boolean ?: true
-                    Global.sendCommand(command)
+                    sendStartupCommand(command)
                     if (useUnixSocket) {
                         if (!waitForFile("${getApplication<Application>().filesDir}/tmp/.tiny.vnc")) {
                             continue
@@ -324,22 +364,54 @@ class ContainerMainViewModel(
                     if (!Global.autoLaunchGui) continue
                     val args = feature["args"] as? List<String> ?: continue
                     val command = feature["command"] as? String ?: continue
-                    viewModelScope.launch {
-                        launchXServer(args)
-                    }
+                    if (!launchXServer(args)) continue
                     if (!waitForFile("${getApplication<Application>().filesDir}/tmp/.X11-unix/X${extractDisplay(args)}")) {
                         continue
                     }
-                    Global.sendCommand(command)
+                    sendStartupCommand(command)
                     _navigationEvents.tryEmit(GuiNavigationEvent.OpenX11)
                 }
             }
         }
     }
 
-    private fun launchXServer(xserverArgs: List<String>) {
-        xserverStarted = true
+    private suspend fun launchXServer(xserverArgs: List<String>): Boolean = withContext(Dispatchers.Main) {
+        currentCoroutineContext().ensureActive()
+        if (exited) return@withContext false
+        if (xserverStarted) return@withContext true
         val app = getApplication<Application>()
+        val socket = File(app.filesDir, "tmp/.X11-unix/X${extractDisplay(xserverArgs)}")
+        // CmdEntryPointService starts a new native main() on EVERY ACTION_START.
+        // A ViewModel recreation must stop a surviving :xserver before starting
+        // again; a leftover socket must never satisfy the readiness wait early.
+        if (isXServerProcessAlive()) {
+            try {
+                app.startService(Intent(app, CmdEntryPointService::class.java).apply {
+                    action = CmdEntryPointService.ACTION_STOP
+                })
+            } catch (error: RuntimeException) {
+                Log.e(TAG, "Previous X server could not be stopped", error)
+                _errorMessage.value = app.getString(R.string.omarchy_xserver_restart_failed)
+                return@withContext false
+            }
+            delay(350)
+            val stopped = withTimeoutOrNull(1500) {
+                while (isXServerProcessAlive()) delay(50)
+                true
+            } ?: false
+            if (!stopped) {
+                Log.e(TAG, "Previous X server did not stop; refusing duplicate native startup")
+                _errorMessage.value = app.getString(R.string.omarchy_xserver_restart_failed)
+                return@withContext false
+            }
+        }
+        currentCoroutineContext().ensureActive()
+        if (exited) return@withContext false
+        if (socket.exists() && !socket.delete()) {
+            Log.e(TAG, "Cannot remove stale X server socket: $socket")
+            _errorMessage.value = app.getString(R.string.omarchy_xserver_restart_failed)
+            return@withContext false
+        }
         val envKeys = arrayOf(
             "TMPDIR", "XKB_CONFIG_ROOT",
             "TERMUX_X11_DEBUG", "TERMUX_X11_OVERRIDE_PACKAGE"
@@ -350,27 +422,69 @@ class ContainerMainViewModel(
             "1",
             app.packageName
         )
-        app.startService(Intent(app, CmdEntryPointService::class.java).apply {
-            action = CmdEntryPointService.ACTION_START
-            putExtra(CmdEntryPointService.EXTRA_ARGS, xserverArgs.toTypedArray())
-            putExtra(CmdEntryPointService.EXTRA_ENV_KEYS, envKeys)
-            putExtra(CmdEntryPointService.EXTRA_ENV_VALUES, envVals)
-        })
+        try {
+            app.startService(Intent(app, CmdEntryPointService::class.java).apply {
+                action = CmdEntryPointService.ACTION_START
+                putExtra(CmdEntryPointService.EXTRA_ARGS, xserverArgs.toTypedArray())
+                putExtra(CmdEntryPointService.EXTRA_ENV_KEYS, envKeys)
+                putExtra(CmdEntryPointService.EXTRA_ENV_VALUES, envVals)
+            })
+        } catch (error: RuntimeException) {
+            Log.e(TAG, "X server service could not be started", error)
+            _errorMessage.value = app.getString(R.string.omarchy_xserver_restart_failed)
+            return@withContext false
+        }
+        xserverStarted = true
+        true
+    }
+
+    private fun isXServerProcessAlive(): Boolean {
+        val app = getApplication<Application>()
+        return app.getSystemService(ActivityManager::class.java).runningAppProcesses
+            ?.any { it.processName == "${app.packageName}:xserver" } == true
+    }
+
+    private fun startKeepAliveService() {
+        val app = getApplication<Application>()
+        try {
+            ContextCompat.startForegroundService(app, Intent(app, OmarchyKeepAliveService::class.java))
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Android did not permit background residency", error)
+        }
+    }
+
+    private fun stopKeepAliveService() {
+        val app = getApplication<Application>()
+        app.stopService(Intent(app, OmarchyKeepAliveService::class.java))
     }
 
     private fun killXServer() {
         if (xserverStarted) {
-            getApplication<Application>().startService(Intent(
-                getApplication(), CmdEntryPointService::class.java
-            ).apply { action = CmdEntryPointService.ACTION_STOP })
             xserverStarted = false
+            // ACTION_START can still be queued before :xserver appears in the
+            // process list. Queue STOP too so an immediate exit cannot orphan it.
+            val app = getApplication<Application>()
+            try {
+                app.startService(Intent(app, CmdEntryPointService::class.java).apply {
+                    action = CmdEntryPointService.ACTION_STOP
+                })
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "X server stop service was rejected; stopping this app's process directly", error)
+                app.stopService(Intent(app, CmdEntryPointService::class.java))
+                app.getSystemService(ActivityManager::class.java).runningAppProcesses
+                    ?.filter { it.processName == "${app.packageName}:xserver" }
+                    ?.forEach { android.os.Process.killProcess(it.pid) }
+            }
         }
     }
 
     override fun onCleared() {
-        super.onCleared()
+        exited = true
+        initializationJob.cancel()
         Global.onSessionSignal9 = null // 防止回调泄漏
         killXServer()
+        stopKeepAliveService()
+        super.onCleared()
     }
 
     private fun extractDisplay(args: List<String>): String {

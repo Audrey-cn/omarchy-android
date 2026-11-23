@@ -1,10 +1,14 @@
 package com.fct.tc4.ui.misc
 
+import android.Manifest
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
@@ -48,6 +52,8 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.fct.tc4.R
 import com.termux.x11.MainActivity as X11Activity
 import kotlinx.coroutines.CoroutineScope
@@ -76,7 +82,7 @@ import kotlin.math.sqrt
  * - Custom vector icons (Keyboard, Mic, Orientation Lock, Settings Gear) — zero raw emojis.
  * - Refined floating 0.70x keyboard: custom thin Tokyo Night opacity slider + iOS/Android-style
  *   bottom drag pill bar (zero "拖动" button clutter).
- * - Interactive 4-step arrow-guided spotlight onboarding (1.5x Monitor scale, Edge Handle,
+ * - Interactive 4-step arrow-guided onboarding (1.5x Monitor scale, Edge Handle,
  *   Super+K keybindings, Doubao IME & system permissions, skippable anytime).
  * - Hard-locked Portrait / Landscape orientation + Portrait soft-keyboard viewport shrink.
  */
@@ -211,29 +217,17 @@ object OmarchyX11Overlay {
         }
     }
 
-    /** Draws a glowing spotlight ring + curved directional arrow for interactive onboarding. */
+    /** Draws only a gentle curved arrow, independent of screen aspect ratio. */
     private class GuideArrowOverlay(context: Context) : View(context) {
         var targetX = 0f
         var targetY = 0f
         var fromX = 0f
         var fromY = 0f
         var showArrow = false
-        var ringRadius = 26f
-
-        private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = Color.parseColor("#7aa2f7")
-            strokeWidth = 6f
-        }
-        private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = Color.parseColor("#557aa2f7")
-            strokeWidth = 18f
-        }
         private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             color = Color.parseColor("#9ece6a")
-            strokeWidth = 6f
+            strokeWidth = 2f * resources.displayMetrics.density
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
@@ -241,14 +235,11 @@ object OmarchyX11Overlay {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             if (!showArrow) return
-            canvas.drawCircle(targetX, targetY, ringRadius, glowPaint)
-            canvas.drawCircle(targetX, targetY, ringRadius, ringPaint)
-
-            // Stop outside the spotlight and use the curve tangent for a smooth, pointed head.
+            // Leave a little air before the target and follow the curve tangent.
             val dx = targetX - fromX
             val dy = targetY - fromY
             val distance = sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
-            val gap = ringRadius + 6f * resources.displayMetrics.density
+            val gap = 8f * resources.displayMetrics.density
             val endX = targetX - dx / distance * gap
             val endY = targetY - dy / distance * gap
             val ctrlX = (fromX + endX) * 0.5f
@@ -374,7 +365,7 @@ object OmarchyX11Overlay {
         private val netExec = Executors.newSingleThreadExecutor()
         private val prefs = activity.getSharedPreferences("omarchy_overlay_prefs", Context.MODE_PRIVATE)
 
-        private var attached = false
+        @Volatile private var attached = false
         private var overlayHost: FrameLayout? = null
         private var nightOverlay: View? = null
         private var edgeTabView: View? = null
@@ -389,6 +380,13 @@ object OmarchyX11Overlay {
         private var onboardingScaleInitialized = false
         private var oskView: View? = null
         private var imeAnchor: EditText? = null
+        private var imeAccessoryView: View? = null
+        private val accessoryModBtns = HashMap<String, Button>()
+        private val startupTasks = mutableListOf<Runnable>()
+        private var edgeLongPressTask: Runnable? = null
+        private var edgeGlowAnimator: ObjectAnimator? = null
+        private var edgeGlowView: View? = null
+        private var permissionRefreshTask: Runnable? = null
 
         private var resizeTask: Runnable? = null
         private var autoCollapseTask: Runnable? = null
@@ -435,6 +433,8 @@ object OmarchyX11Overlay {
                 positionEdgeTab()
                 if (dockExpanded) positionExpandedDock()
                 scheduleResize(w, max(320, h - lastImeH))
+                updateImeAccessory()
+                currentOnboardingStep?.let { showOnboardingStep(it) }
                 if (oskVisible) {
                     hideOsk()
                     showOsk()
@@ -492,7 +492,8 @@ object OmarchyX11Overlay {
             mainHandler.postDelayed(queuePollTask, 500L)
 
             listOf(1200L, 3000L, 5500L).forEach { delay ->
-                mainHandler.postDelayed({
+                val task = Runnable {
+                    if (!attached) return@Runnable
                     val w = content.width
                     val h = content.height
                     if (w >= 300 && h >= 300) {
@@ -501,7 +502,9 @@ object OmarchyX11Overlay {
                         positionEdgeTab()
                         sendResize(w, max(320, h - lastImeH))
                     }
-                }, delay)
+                }
+                startupTasks.add(task)
+                mainHandler.postDelayed(task, delay)
             }
 
             if (onboardingProgress().shouldShowAutomatically) {
@@ -513,6 +516,14 @@ object OmarchyX11Overlay {
             attached = false
             cancelOnboardingProbe()
             mainHandler.removeCallbacks(queuePollTask)
+            startupTasks.forEach { mainHandler.removeCallbacks(it) }
+            startupTasks.clear()
+            edgeLongPressTask?.let { mainHandler.removeCallbacks(it) }
+            permissionRefreshTask?.let { mainHandler.removeCallbacks(it) }
+            permissionRefreshTask = null
+            edgeGlowAnimator?.cancel()
+            edgeGlowAnimator = null
+            edgeGlowView = null
             resizeTask?.let { mainHandler.removeCallbacks(it) }
             autoCollapseTask?.let { mainHandler.removeCallbacks(it) }
             pendingSingleTap?.let { mainHandler.removeCallbacks(it) }
@@ -531,6 +542,10 @@ object OmarchyX11Overlay {
             currentOnboardingStep = null
             oskView = null
             imeAnchor = null
+            imeAccessoryView = null
+            accessoryModBtns.clear()
+            modBtns.clear()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) content?.setOnApplyWindowInsetsListener(null)
             netExec.shutdownNow()
         }
 
@@ -551,7 +566,10 @@ object OmarchyX11Overlay {
             val fullH = content.height
             if (fullW < 300 || fullH < 300) return
             val imeH = if (rawImeH > dp(100)) rawImeH else 0
-            if (imeH == lastImeH) return
+            if (imeH == lastImeH) {
+                updateImeAccessory()
+                return
+            }
             lastImeH = imeH
 
             val x11Root = content.getChildAt(0)
@@ -562,6 +580,7 @@ object OmarchyX11Overlay {
                     x11Root.layoutParams = lp
                 }
             }
+            updateImeAccessory()
             scheduleResize(fullW, max(320, fullH - imeH))
         }
 
@@ -610,15 +629,21 @@ object OmarchyX11Overlay {
         private fun sendResize(w: Int, h: Int) = sendJson("""{"type":"resize","w":$w,"h":$h}""")
 
         private fun sendJson(jsonLine: String) {
-            netExec.execute {
-                try {
-                    Socket("127.0.0.1", 18901).use { s ->
-                        val os = s.getOutputStream()
-                        os.write((jsonLine + "\n").toByteArray(Charsets.UTF_8))
-                        os.flush()
-                    }
-                } catch (_: Exception) {}
-            }
+            if (!attached || netExec.isShutdown) return
+            // detach() may shut the executor down between the guard and execute().
+            try {
+                netExec.execute {
+                    if (!attached) return@execute
+                    try {
+                        Socket("127.0.0.1", 18901).use { socket ->
+                            socket.getOutputStream().apply {
+                                write((jsonLine + "\n").toByteArray(Charsets.UTF_8))
+                                flush()
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
         }
 
         private fun s(id: Int, vararg args: Any): String = activity.getString(id, *args)
@@ -679,140 +704,142 @@ object OmarchyX11Overlay {
             imm?.showInputMethodPicker()
         }
 
-        // ==================== Edge-Snapping Collapsed Tab (1-Gesture Direct + Smooth Spring) ====================
+        // ==================== Edge handle: tap, double-tap, long-press and drag ====================
 
-        private fun makeEdgeTabBg(rightEdge: Boolean): GradientDrawable {
-            val r = dp(18).toFloat()
-            return GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(Color.parseColor("#E6282e45"), Color.parseColor("#DC1a1b26"))
-            ).apply {
-                setStroke(dp(1), Color.parseColor("#B87aa2f7"))
-                cornerRadii = if (rightEdge) {
-                    floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r)
-                } else {
-                    floatArrayOf(0f, 0f, r, r, r, r, 0f, 0f)
+        private fun setEdgeGlow(touched: Boolean) {
+            edgeGlowAnimator?.cancel()
+            val glow = edgeGlowView ?: return
+            glow.alpha = if (touched) 1f else 0.58f
+            if (!touched && attached) {
+                edgeGlowAnimator = ObjectAnimator.ofFloat(glow, "alpha", 0.58f, 0.70f, 0.58f).apply {
+                    duration = 3200L
+                    repeatCount = ValueAnimator.INFINITE
+                    start()
                 }
+            }
+        }
+
+        private fun updateEdgeGestureExclusion(tab: View) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                tab.systemGestureExclusionRects = listOf(Rect(0, 0, tab.width, tab.height))
             }
         }
 
         private fun buildEdgeTab(host: FrameLayout) {
             val tab = FrameLayout(activity).apply {
-                background = makeEdgeTabBg(dockedRight)
-                elevation = dp(14).toFloat()
-                alpha = 0.78f
                 contentDescription = s(R.string.omarchy_overlay_handle)
+                setOnClickListener { expandDock() }
+                setOnLongClickListener {
+                    triggerAndroidIme()
+                    true
+                }
             }
-            val chevron = VectorIconView(
-                activity,
-                if (dockedRight) VectorKind.CHEVRON_LEFT else VectorKind.CHEVRON_RIGHT,
-                Color.parseColor("#7aa2f7"),
-                16
-            )
-            tab.addView(chevron, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER
+            val glow = object : View(activity) {
+                private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.parseColor("#7AA2F7")
+                    setShadowLayer(dp(4).toFloat(), 0f, 0f, Color.parseColor("#7AA2F7"))
+                }
+                init { setLayerType(View.LAYER_TYPE_SOFTWARE, null) }
+                override fun onDraw(canvas: Canvas) {
+                    val halfWidth = 1.75f * resources.displayMetrics.density
+                    val halfHeight = dp(16).toFloat()
+                    canvas.drawRoundRect(
+                        width / 2f - halfWidth, height / 2f - halfHeight,
+                        width / 2f + halfWidth, height / 2f + halfHeight,
+                        halfWidth, halfWidth, paint
+                    )
+                }
+            }
+            tab.addView(glow, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
             ))
+            edgeGlowView = glow
+            setEdgeGlow(false)
 
             var downRawX = 0f; var downRawY = 0f
             var origX = 0f; var origY = 0f
             var moved = false
-            var inwardSwipe = false
-            val swipeThresholdPx = dp(26).toFloat()
+            var longPressed = false
+            var doubleTap = false
 
             tab.setOnTouchListener { v, e ->
-                val parentW = host.width.coerceAtLeast(activity.resources.displayMetrics.widthPixels)
-                val parentH = host.height.coerceAtLeast(activity.resources.displayMetrics.heightPixels)
-                when (e.action) {
+                val parentW = host.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
+                val parentH = host.height.takeIf { it > 0 } ?: activity.resources.displayMetrics.heightPixels
+                when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
+                        v.animate().cancel()
                         downRawX = e.rawX; downRawY = e.rawY
                         origX = v.x; origY = v.y
                         moved = false
-                        inwardSwipe = false
-                        v.animate().scaleX(1.08f).scaleY(1.06f).alpha(1f).setDuration(90L).start()
+                        longPressed = false
+                        doubleTap = pendingSingleTap != null && SystemClock.elapsedRealtime() - lastTabTapAt <= 280L
+                        pendingSingleTap?.let { mainHandler.removeCallbacks(it) }
+                        pendingSingleTap = null
+                        setEdgeGlow(true)
+                        edgeLongPressTask?.let { mainHandler.removeCallbacks(it) }
+                        edgeLongPressTask = Runnable {
+                            edgeLongPressTask = null
+                            if (attached && !moved) {
+                                longPressed = true
+                                lastTabTapAt = 0L
+                                v.performLongClick()
+                            }
+                        }.also { mainHandler.postDelayed(it, 350L) }
                         true
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val dx = e.rawX - downRawX
                         val dy = e.rawY - downRawY
-                        val inwardDelta = if (dockedRight) -dx else dx
-                        if (!moved && inwardDelta > dp(12) && abs(dx) > abs(dy) * 1.35f) {
-                            inwardSwipe = true
-                        }
-                        if (inwardSwipe) {
-                            // Subtle elastic horizontal peek to confirm inward swipe -> Doubao IME
-                            val peek = inwardDelta.coerceIn(0f, dp(18).toFloat())
-                            v.x = if (dockedRight) origX - peek else origX + peek
-                            if (inwardDelta >= swipeThresholdPx) moved = true
-                        } else if (abs(dx) > 10 || abs(dy) > 10) {
+                        // The movement threshold is deliberately in pixels, matching the touch contract.
+                        if (dx * dx + dy * dy > 100f) {
                             moved = true
-                            v.x = (origX + dx).coerceIn(0f, (parentW - v.width).toFloat())
-                            v.y = (origY + dy).coerceIn(dp(40).toFloat(), (parentH - v.height - dp(24)).toFloat())
+                            edgeLongPressTask?.let { mainHandler.removeCallbacks(it) }
+                            edgeLongPressTask = null
+                        }
+                        if (moved && !longPressed) {
+                            v.x = OverlayBounds.horizontal(origX + dx, parentW, v.width)
+                            v.y = OverlayBounds.vertical(origY + dy, parentH, v.height, dp(40), dp(24))
                         }
                         true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        val dx = e.rawX - downRawX
-                        val dy = e.rawY - downRawY
-                        val inwardDelta = if (dockedRight) -dx else dx
-                        if (inwardSwipe && inwardDelta >= swipeThresholdPx && abs(dx) > abs(dy) * 1.2f) {
-                            // 1-gesture direct trigger: inward swipe -> Doubao IME / Voice
-                            val targetX = if (dockedRight) (parentW - v.width).toFloat() else 0f
-                            v.animate().x(targetX).scaleX(1f).scaleY(1f).alpha(0.78f)
-                                .setInterpolator(OvershootInterpolator(0.7f)).setDuration(180L).start()
-                            v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                            triggerAndroidIme()
-                        } else if (!moved && !inwardSwipe) {
-                            v.scaleX = 1f; v.scaleY = 1f
+                        edgeLongPressTask?.let { mainHandler.removeCallbacks(it) }
+                        edgeLongPressTask = null
+                        val cancelled = e.actionMasked == MotionEvent.ACTION_CANCEL
+                        if (!cancelled && !moved && !longPressed) {
                             v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            val now = SystemClock.elapsedRealtime()
-                            if (now - lastTabTapAt <= 280L) {
-                                // 1-gesture direct trigger: double-tap -> Toggle Floating Keyboard
-                                pendingSingleTap?.let { mainHandler.removeCallbacks(it) }
-                                pendingSingleTap = null
+                            if (doubleTap) {
                                 lastTabTapAt = 0L
                                 if (oskVisible) hideOsk() else showOsk()
                             } else {
-                                lastTabTapAt = now
-                                pendingSingleTap?.let { mainHandler.removeCallbacks(it) }
-                                val r = Runnable {
+                                lastTabTapAt = SystemClock.elapsedRealtime()
+                                pendingSingleTap = Runnable {
                                     pendingSingleTap = null
-                                    expandDock()
-                                }
-                                pendingSingleTap = r
-                                mainHandler.postDelayed(r, 230L)
+                                    if (attached) v.performClick()
+                                }.also { mainHandler.postDelayed(it, 280L) }
                             }
                         } else {
-                            if (!inwardSwipe) {
-                                dockedRight = (v.x + v.width / 2f) >= parentW / 2f
-                                dockYFraction = (v.y / parentH.toFloat()).coerceIn(0.12f, 0.85f)
-                                prefs.edit()
-                                    .putBoolean("dock_right", dockedRight)
-                                    .putFloat("dock_y_frac", dockYFraction)
-                                    .apply()
-                                v.background = makeEdgeTabBg(dockedRight)
-                                chevron.kind = if (dockedRight) VectorKind.CHEVRON_LEFT else VectorKind.CHEVRON_RIGHT
-                                chevron.invalidate()
+                            lastTabTapAt = 0L
+                            if (moved && !longPressed) {
+                                dockedRight = v.x + v.width / 2f >= parentW / 2f
+                                dockYFraction = (v.y / max(1, parentH).toFloat()).coerceIn(0.12f, 0.85f)
+                                prefs.edit().putBoolean("dock_right", dockedRight)
+                                    .putFloat("dock_y_frac", dockYFraction).apply()
                             }
-                            val targetX = if (dockedRight) (parentW - v.width).toFloat() else 0f
-                            v.animate()
-                                .x(targetX)
-                                .scaleX(1f).scaleY(1f)
-                                .alpha(0.78f)
-                                .setInterpolator(OvershootInterpolator(0.75f))
-                                .setDuration(240L)
-                                .start()
                         }
+                        val targetX = if (dockedRight) max(0f, (parentW - v.width).toFloat()) else 0f
+                        v.animate().x(targetX).setInterpolator(OvershootInterpolator(0.75f))
+                            .setDuration(220L).start()
+                        setEdgeGlow(false)
                         true
                     }
                     else -> false
                 }
             }
-
-            host.addView(tab, FrameLayout.LayoutParams(dp(24), dp(58)))
+            tab.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateEdgeGestureExclusion(tab) }
+            host.addView(tab, FrameLayout.LayoutParams(dp(12), dp(56)))
             edgeTabView = tab
-            tab.post { positionEdgeTab() }
+            tab.post { if (attached) positionEdgeTab() }
         }
 
         private fun positionEdgeTab() {
@@ -820,10 +847,11 @@ object OmarchyX11Overlay {
             val tab = edgeTabView ?: return
             val w = host.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
             val h = host.height.takeIf { it > 0 } ?: activity.resources.displayMetrics.heightPixels
-            val tw = tab.width.takeIf { it > 0 } ?: dp(24)
-            val th = tab.height.takeIf { it > 0 } ?: dp(58)
-            tab.x = if (dockedRight) (w - tw).toFloat() else 0f
-            tab.y = (h * dockYFraction).coerceIn(dp(40).toFloat(), (h - th - dp(24)).toFloat())
+            val tw = tab.width.takeIf { it > 0 } ?: dp(12)
+            val th = tab.height.takeIf { it > 0 } ?: dp(56)
+            tab.x = OverlayBounds.horizontal(if (dockedRight) w.toFloat() else 0f, w, tw)
+            tab.y = OverlayBounds.vertical(h * dockYFraction, h, th, dp(40), dp(24))
+            updateEdgeGestureExclusion(tab)
         }
 
         // ==================== Expanded Floating Dock (Refined Tokyo Night Glass) ====================
@@ -940,8 +968,8 @@ object OmarchyX11Overlay {
             val h = host.height.takeIf { it > 0 } ?: activity.resources.displayMetrics.heightPixels
             val dw = dock.width.takeIf { it > 0 } ?: dp(220)
             val dh = dock.height.takeIf { it > 0 } ?: dp(46)
-            dock.x = if (dockedRight) (w - dw - dp(10)).toFloat().coerceAtLeast(dp(8).toFloat()) else dp(10).toFloat()
-            dock.y = (h * dockYFraction).coerceIn(dp(40).toFloat(), (h - dh - dp(24)).toFloat())
+            dock.x = OverlayBounds.horizontal((if (dockedRight) w - dw - dp(10) else dp(10)).toFloat(), w, dw)
+            dock.y = OverlayBounds.vertical(h * dockYFraction, h, dh, dp(40), dp(24))
         }
 
         private fun collapseDock() {
@@ -963,7 +991,7 @@ object OmarchyX11Overlay {
             edgeTabView?.let { tab ->
                 tab.visibility = View.VISIBLE
                 positionEdgeTab()
-                tab.animate().alpha(0.72f).setDuration(180L).start()
+                tab.animate().alpha(1f).setDuration(180L).start()
             }
         }
 
@@ -1224,6 +1252,8 @@ object OmarchyX11Overlay {
         }
 
         private fun hideOnboarding() {
+            permissionRefreshTask?.let { mainHandler.removeCallbacks(it) }
+            permissionRefreshTask = null
             onboardingOverlay?.let { overlayHost?.removeView(it) }
             onboardingOverlay = null
             currentOnboardingStep = null
@@ -1289,6 +1319,8 @@ object OmarchyX11Overlay {
             val w = host.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
             val h = host.height.takeIf { it > 0 } ?: activity.resources.displayMetrics.heightPixels
 
+            val landscape = isLandscapeNow()
+            val compact = landscape
             val root = FrameLayout(activity).apply {
                 setBackgroundColor(Color.parseColor("#88000000"))
                 isClickable = true
@@ -1300,14 +1332,14 @@ object OmarchyX11Overlay {
 
             val card = LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
-                background = makeRounded("#F81a1b26", "#7aa2f7", 16, 2)
-                setPadding(dp(18), dp(16), dp(18), dp(16))
+                background = makeRounded("#F81a1b26", "#7aa2f7", 16, 1)
+                setPadding(dp(18), dp(if (compact) 8 else 16), dp(18), dp(if (compact) 8 else 16))
                 elevation = dp(20).toFloat()
             }
             val header = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 0, 0, dp(12))
+                setPadding(0, 0, 0, dp(if (compact) 2 else 8))
             }
             val dots = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -1331,7 +1363,7 @@ object OmarchyX11Overlay {
                 text = s(R.string.omarchy_onboarding_skip)
                 textSize = 12f
                 gravity = Gravity.CENTER
-                minHeight = dp(48)
+                minHeight = dp(if (compact) 32 else 40)
                 setTextColor(Color.parseColor("#9aa5ce"))
                 setPadding(dp(12), 0, dp(4), 0)
                 setOnClickListener { closeOnboarding(OnboardingExit.SKIP) }
@@ -1341,19 +1373,33 @@ object OmarchyX11Overlay {
             fun addTitle(id: Int) {
                 card.addView(TextView(activity).apply {
                     text = s(id)
-                    textSize = 16.5f
+                    textSize = if (compact) 15f else 16.5f
                     setTypeface(typeface, Typeface.BOLD)
                     setTextColor(Color.parseColor("#7aa2f7"))
-                    setPadding(0, 0, 0, dp(8))
+                    setPadding(0, 0, 0, dp(if (compact) 4 else 8))
                 })
             }
             fun addBody(id: Int) {
                 card.addView(TextView(activity).apply {
                     text = s(id)
-                    textSize = 13f
+                    textSize = if (compact) 12f else 13f
                     setTextColor(Color.parseColor("#c0caf5"))
-                    setPadding(0, 0, 0, dp(14))
+                    setPadding(0, 0, 0, dp(if (compact) 6 else 12))
                 })
+            }
+
+            fun addGrid(items: List<View>) {
+                items.chunked(2).forEach { cells ->
+                    val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
+                    cells.forEachIndexed { index, cell ->
+                        row.addView(cell, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                            if (index == 0) marginEnd = dp(8)
+                        })
+                    }
+                    card.addView(row, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = dp(if (compact) 5 else 8) })
+                }
             }
 
             when (step) {
@@ -1393,55 +1439,50 @@ object OmarchyX11Overlay {
                             setPadding(dp(2), 0, dp(2), 0)
                         }
                         scaleButtons.add(value to button)
-                        scaleRow.addView(button, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                        scaleRow.addView(button, LinearLayout.LayoutParams(0, dp(if (compact) 36 else 44), 1f).apply {
                             if (index < scales.lastIndex) marginEnd = dp(6)
                         })
                     }
                     refreshScaleButtons()
                     card.addView(scaleRow, LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply { bottomMargin = dp(14) })
+                    ).apply { bottomMargin = dp(if (compact) 6 else 14) })
                     arrowView.showArrow = true
                     arrowView.targetX = w * 0.79f
                     arrowView.targetY = dp(16).toFloat()
-                    arrowView.ringRadius = dp(14).toFloat()
                 }
                 1 -> {
                     addTitle(R.string.omarchy_onboarding_handle_title)
                     addBody(R.string.omarchy_onboarding_handle_desc)
-                    listOf(
-                        R.string.omarchy_onboarding_swipe to R.string.omarchy_onboarding_voice_ime,
-                        R.string.omarchy_onboarding_double_tap to R.string.omarchy_onboarding_keyboard,
+                    addGrid(listOf(
                         R.string.omarchy_onboarding_tap to R.string.omarchy_onboarding_dock,
+                        R.string.omarchy_onboarding_double_tap to R.string.omarchy_onboarding_keyboard,
+                        R.string.omarchy_onboarding_long_press to R.string.omarchy_onboarding_voice_ime,
                         R.string.omarchy_onboarding_drag to R.string.omarchy_onboarding_snap
-                    ).forEach { (gesture, action) ->
-                        val capsule = LinearLayout(activity).apply {
+                    ).map { (gesture, action) ->
+                        LinearLayout(activity).apply {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
-                            background = makeRounded("#CC24283b", "#414868", 22, 1)
-                            setPadding(dp(14), dp(10), dp(14), dp(10))
-                            minimumHeight = dp(44)
+                            background = makeRounded("#CC24283b", "#414868", 12, 1)
+                            setPadding(dp(10), dp(if (compact) 7 else 10), dp(10), dp(if (compact) 7 else 10))
+                            minimumHeight = dp(if (compact) 38 else 48)
+                            addView(TextView(activity).apply {
+                                text = s(gesture)
+                                textSize = 12f
+                                setTypeface(typeface, Typeface.BOLD)
+                                setTextColor(Color.parseColor("#7aa2f7"))
+                            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                            addView(TextView(activity).apply {
+                                text = s(action)
+                                textSize = 11.5f
+                                setTextColor(Color.parseColor("#c0caf5"))
+                            })
                         }
-                        capsule.addView(TextView(activity).apply {
-                            text = s(gesture)
-                            textSize = 12.5f
-                            setTypeface(typeface, Typeface.BOLD)
-                            setTextColor(Color.parseColor("#7aa2f7"))
-                        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                        capsule.addView(TextView(activity).apply {
-                            text = s(action)
-                            textSize = 12f
-                            setTextColor(Color.parseColor("#c0caf5"))
-                        })
-                        card.addView(capsule, LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply { bottomMargin = dp(7) })
-                    }
+                    })
                     arrowView.showArrow = true
                     arrowView.targetX = if (dockedRight) (w - dp(12)).toFloat() else dp(12).toFloat()
                     arrowView.targetY = edgeTabView?.let { it.y + it.height / 2f }
-                        ?: (h * dockYFraction).coerceIn(dp(60).toFloat(), (h - dp(60)).toFloat())
-                    arrowView.ringRadius = dp(28).toFloat()
+                        ?: OverlayBounds.vertical(h * dockYFraction, h, 0, dp(60), dp(60))
                 }
                 2 -> {
                     addTitle(R.string.omarchy_onboarding_shortcuts_title)
@@ -1453,39 +1494,40 @@ object OmarchyX11Overlay {
                         setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
                         setTextColor(Color.parseColor("#c0caf5"))
                         background = makeRounded("#CC283457", "#7aa2f7", 6, 1)
-                        setPadding(dp(6), dp(5), dp(6), dp(5))
+                        setPadding(dp(4), dp(if (compact) 3 else 5), dp(4), dp(if (compact) 3 else 5))
                     }
-                    listOf(
+                    addGrid(listOf(
                         R.string.omarchy_key_k to R.string.omarchy_onboarding_shortcut_help,
                         R.string.omarchy_key_space to R.string.omarchy_onboarding_shortcut_apps,
                         R.string.omarchy_key_enter to R.string.omarchy_onboarding_shortcut_terminal,
                         R.string.omarchy_key_w to R.string.omarchy_onboarding_shortcut_close
-                    ).forEach { (key, action) ->
-                        val row = LinearLayout(activity).apply {
-                            orientation = LinearLayout.HORIZONTAL
-                            gravity = Gravity.CENTER_VERTICAL
+                    ).map { (key, action) ->
+                        LinearLayout(activity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(4), dp(2), dp(4), dp(2))
+                            addView(LinearLayout(activity).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = Gravity.CENTER_VERTICAL
+                                addView(keycap(R.string.omarchy_key_super))
+                                addView(TextView(activity).apply {
+                                    text = s(R.string.omarchy_onboarding_key_or)
+                                    setTextColor(Color.parseColor("#9aa5ce"))
+                                })
+                                addView(keycap(R.string.omarchy_key_alt))
+                                addView(TextView(activity).apply {
+                                    text = s(R.string.omarchy_onboarding_key_plus)
+                                    setTextColor(Color.parseColor("#9aa5ce"))
+                                })
+                                addView(keycap(key))
+                            })
+                            addView(TextView(activity).apply {
+                                text = s(action)
+                                textSize = 11.5f
+                                setTextColor(Color.parseColor("#c0caf5"))
+                                setPadding(0, dp(2), 0, 0)
+                            })
                         }
-                        row.addView(keycap(R.string.omarchy_key_super))
-                        row.addView(TextView(activity).apply {
-                            text = s(R.string.omarchy_onboarding_key_or)
-                            setTextColor(Color.parseColor("#9aa5ce"))
-                        })
-                        row.addView(keycap(R.string.omarchy_key_alt))
-                        row.addView(TextView(activity).apply {
-                            text = s(R.string.omarchy_onboarding_key_plus)
-                            setTextColor(Color.parseColor("#9aa5ce"))
-                        })
-                        row.addView(keycap(key))
-                        row.addView(TextView(activity).apply {
-                            text = s(action)
-                            textSize = 11.5f
-                            setTextColor(Color.parseColor("#c0caf5"))
-                            setPadding(dp(10), 0, 0, 0)
-                        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                        card.addView(row, LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply { bottomMargin = dp(9) })
-                    }
+                    })
                     card.addView(Button(activity).apply {
                         text = s(R.string.omarchy_onboarding_preview_shortcuts)
                         isAllCaps = false
@@ -1497,8 +1539,8 @@ object OmarchyX11Overlay {
                             closeOnboarding(OnboardingExit.PREVIEW)
                         }
                     }, LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, dp(44)
-                    ).apply { bottomMargin = dp(10) })
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(if (compact) 36 else 44)
+                    ).apply { bottomMargin = dp(if (compact) 5 else 10) })
                 }
                 else -> {
                     addTitle(R.string.omarchy_onboarding_permissions_title)
@@ -1509,19 +1551,26 @@ object OmarchyX11Overlay {
                         setPadding(dp(12), dp(10), dp(12), dp(10))
                         layoutParams = LinearLayout.LayoutParams(
                             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply { bottomMargin = dp(10) }
+                        ).apply { bottomMargin = dp(if (compact) 5 else 10) }
                     }
-                    imeBox.addView(TextView(activity).apply {
+                    val imeCopy = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+                    imeBox.orientation = if (compact) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+                    imeBox.gravity = Gravity.CENTER_VERTICAL
+                    imeCopy.addView(TextView(activity).apply {
                         text = s(if (doubaoReady) R.string.omarchy_onboarding_ime_installed else R.string.omarchy_onboarding_ime_install)
-                        textSize = 13f
+                        textSize = if (compact) 12f else 13f
                         setTextColor(Color.parseColor(if (doubaoReady) "#9ece6a" else "#7aa2f7"))
                     })
-                    imeBox.addView(TextView(activity).apply {
+                    imeCopy.addView(TextView(activity).apply {
                         text = s(if (doubaoReady) R.string.omarchy_onboarding_ime_installed_desc else R.string.omarchy_onboarding_ime_install_desc)
                         textSize = 11.5f
                         setTextColor(Color.parseColor("#c0caf5"))
                         setPadding(0, dp(2), 0, dp(6))
                     })
+                    imeBox.addView(imeCopy, LinearLayout.LayoutParams(
+                        if (compact) 0 else LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT, if (compact) 1f else 0f
+                    ))
                     imeBox.addView(Button(activity).apply {
                         text = s(if (doubaoReady) R.string.omarchy_onboarding_ime_choose else R.string.omarchy_onboarding_ime_download)
                         isAllCaps = false
@@ -1532,44 +1581,54 @@ object OmarchyX11Overlay {
                             if (doubaoReady) openInputMethodPicker()
                             else activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DOUBAO_URL)))
                         }
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
+                    }, LinearLayout.LayoutParams(if (compact) dp(160) else LinearLayout.LayoutParams.MATCH_PARENT, dp(if (compact) 36 else 44)))
                     card.addView(imeBox)
 
-                    val permRow = LinearLayout(activity).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        layoutParams = LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
-                        ).apply { bottomMargin = dp(12) }
+                    val permRow = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
+                    fun permissionButton(granted: Boolean, grantedLabel: Int, grantLabel: Int, action: () -> Unit) {
+                        permRow.addView(Button(activity).apply {
+                            text = s(if (granted) grantedLabel else grantLabel)
+                            isAllCaps = false
+                            textSize = 11f
+                            setPadding(dp(4), 0, dp(4), 0)
+                            minWidth = 0; minimumWidth = 0
+                            setTextColor(Color.parseColor(if (granted) "#9ece6a" else "#c0caf5"))
+                            background = makeRounded("#CC24283b", if (granted) "#9ece6a" else "#414868", 8, 1)
+                            setOnClickListener { action() }
+                        }, LinearLayout.LayoutParams(0, dp(if (compact) 40 else 52), 1f).apply {
+                            if (permRow.childCount < 2) marginEnd = dp(6)
+                        })
                     }
                     val filesOk = hasAllFilesPermission()
-                    permRow.addView(Button(activity).apply {
-                        text = s(if (filesOk) R.string.omarchy_onboarding_storage_granted else R.string.omarchy_onboarding_storage_grant)
-                        isAllCaps = false
-                        textSize = 11.5f
-                        setTextColor(Color.parseColor(if (filesOk) "#9ece6a" else "#c0caf5"))
-                        background = makeRounded("#CC24283b", if (filesOk) "#9ece6a" else "#414868", 8, 1)
-                        setOnClickListener {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                activity.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                                    data = Uri.parse("package:${activity.packageName}")
-                                })
-                            }
-                        }
-                    }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(6) })
                     val batOk = isBatteryUnrestricted()
-                    permRow.addView(Button(activity).apply {
-                        text = s(if (batOk) R.string.omarchy_onboarding_battery_granted else R.string.omarchy_onboarding_battery_grant)
-                        isAllCaps = false
-                        textSize = 11.5f
-                        setTextColor(Color.parseColor(if (batOk) "#9ece6a" else "#c0caf5"))
-                        background = makeRounded("#CC24283b", if (batOk) "#9ece6a" else "#414868", 8, 1)
-                        setOnClickListener {
-                            activity.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    val micOk = ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                    permissionButton(filesOk, R.string.omarchy_onboarding_storage_granted, R.string.omarchy_onboarding_storage_grant) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            activity.startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                                 data = Uri.parse("package:${activity.packageName}")
                             })
                         }
-                    }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                    }
+                    permissionButton(batOk, R.string.omarchy_onboarding_battery_granted, R.string.omarchy_onboarding_battery_grant) {
+                        activity.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                            data = Uri.parse("package:${activity.packageName}")
+                        })
+                    }
+                    permissionButton(micOk, R.string.omarchy_onboarding_microphone_granted, R.string.omarchy_onboarding_microphone_grant) {
+                        if (!micOk) ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.RECORD_AUDIO), 8194)
+                    }
                     card.addView(permRow)
+                    // The embedded Termux activity owns the permission callback. Observe the grant
+                    // while this step is visible so the checkmark updates immediately after it.
+                    permissionRefreshTask = object : Runnable {
+                        override fun run() {
+                            if (!attached || currentOnboardingStep != 3) return
+                            val granted = ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                            if (granted != micOk) showOnboardingStep(3)
+                            else mainHandler.postDelayed(this, 400L)
+                        }
+                    }.also { mainHandler.postDelayed(it, 400L) }
+
                 }
             }
 
@@ -1582,11 +1641,11 @@ object OmarchyX11Overlay {
                 navRow.addView(Button(activity).apply {
                     text = s(R.string.omarchy_onboarding_previous)
                     isAllCaps = false
-                    textSize = 13f
+                    textSize = if (compact) 12f else 13f
                     setTextColor(Color.parseColor("#c0caf5"))
                     background = makeRounded("#CC24283b", "#414868", 8, 1)
                     setOnClickListener { showOnboardingStep(step - 1) }
-                }, LinearLayout.LayoutParams(dp(86), dp(44)).apply { marginEnd = dp(8) })
+                }, LinearLayout.LayoutParams(dp(86), dp(if (compact) 36 else 44)).apply { marginEnd = dp(8) })
             }
             navRow.addView(Button(activity).apply {
                 text = s(if (step < 3) R.string.omarchy_onboarding_next else R.string.omarchy_onboarding_finish)
@@ -1597,24 +1656,38 @@ object OmarchyX11Overlay {
                 setOnClickListener {
                     if (step < 3) showOnboardingStep(step + 1) else closeOnboarding(OnboardingExit.COMPLETE)
                 }
-            }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            }, LinearLayout.LayoutParams(0, dp(if (compact) 36 else 44), 1f))
             card.addView(navRow)
 
-            val scroll = ScrollView(activity).apply { addView(card) }
-            val cardW = min(w - dp(32), dp(390))
-            root.addView(scroll, FrameLayout.LayoutParams(
-                cardW, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER
-            ).apply { setMargins(0, dp(52), 0, dp(16)) })
+            val cardW = min(max(1, w - dp(if (compact) 64 else 32)), dp(if (compact) 600 else 390))
+            // Measure the complete content without a height cap. If font size or device
+            // density leaves less space, fit the whole card, including navigation, into
+            // the viewport. No child or Finish button is clipped behind a scroll area.
+            card.measure(
+                View.MeasureSpec.makeMeasureSpec(cardW, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            val cardH = max(1, card.measuredHeight)
+            val topSpace = dp(if (compact) 36 else 52)
+            val bottomSpace = dp(12)
+            val availableH = max(1, h - topSpace - bottomSpace)
+            val fit = min(1f, availableH.toFloat() / cardH)
+            card.scaleX = fit
+            card.scaleY = fit
+            card.translationY = (topSpace - bottomSpace) / 2f
+            root.addView(card, FrameLayout.LayoutParams(cardW, cardH, Gravity.CENTER))
             host.addView(root, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
             ))
             onboardingOverlay = root
             // Begin the quadratic arrow just outside the measured card so it never crosses its copy.
-            scroll.post {
+            card.post {
                 if (onboardingOverlay === root && arrowView.showArrow) {
-                    arrowView.fromX = if (step == 0) scroll.x + scroll.width * 0.72f
-                        else if (dockedRight) scroll.x + scroll.width else scroll.x
-                    arrowView.fromY = if (step == 0) scroll.y - dp(6) else scroll.y + scroll.height * 0.5f
+                    val left = card.x + card.width * (1f - fit) / 2f
+                    val top = card.y + card.height * (1f - fit) / 2f
+                    arrowView.fromX = if (step == 0) left + card.width * fit * 0.72f
+                        else if (dockedRight) left + card.width * fit else left
+                    arrowView.fromY = if (step == 0) top - dp(6) else top + card.height * fit * 0.5f
                     arrowView.invalidate()
                 }
             }
@@ -1622,16 +1695,84 @@ object OmarchyX11Overlay {
 
         // ==================== Invisible Doubao IME Bridge ====================
 
-        private fun hideIme() {
-            imeAnchor?.let { ed ->
-                try {
-                    val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                    imm?.hideSoftInputFromWindow(ed.windowToken, 0)
-                    overlayHost?.removeView(ed)
-                } catch (_: Exception) {}
+        private fun hideImeAccessory() {
+            imeAccessoryView?.let { overlayHost?.removeView(it) }
+            imeAccessoryView = null
+            accessoryModBtns.clear()
+        }
+
+        private fun updateImeAccessory() {
+            if (!attached || isLandscapeNow() || lastImeH == 0 || oskVisible) {
+                hideImeAccessory()
+                return
             }
+            val host = overlayHost ?: return
+            val existing = imeAccessoryView
+            if (existing != null) {
+                val lp = existing.layoutParams as FrameLayout.LayoutParams
+                if (lp.bottomMargin != lastImeH) {
+                    lp.bottomMargin = lastImeH
+                    existing.layoutParams = lp
+                }
+                return
+            }
+            val bar = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(2), dp(2), dp(2), dp(2))
+                background = makeRounded("#F21a1b26", "#414868", 8, 1)
+                elevation = dp(10).toFloat()
+            }
+            val keys = listOf(
+                s(R.string.omarchy_key_esc) to "Escape", s(R.string.omarchy_key_tab) to "Tab",
+                s(R.string.omarchy_key_super) to "MOD:super", s(R.string.omarchy_key_ctrl) to "MOD:ctrl",
+                s(R.string.omarchy_key_alt) to "MOD:alt", "↑" to "Up", "↓" to "Down",
+                "←" to "Left", "→" to "Right", "⌨" to "OSK", "✕" to "HIDE"
+            )
+            keys.forEach { (label, code) ->
+                val button = Button(activity).apply {
+                    text = label
+                    isAllCaps = false
+                    textSize = if (label.length > 3) 9.5f else 11f
+                    setPadding(0, 0, 0, 0)
+                    minWidth = 0; minimumWidth = 0
+                    minHeight = 0; minimumHeight = 0
+                    setTextColor(Color.parseColor("#c0caf5"))
+                    background = makeRounded("#CC24283b", "#414868", 5, 0)
+                    if (code == "OSK") contentDescription = s(R.string.omarchy_overlay_keyboard_toggle)
+                    if (code == "HIDE") contentDescription = s(R.string.omarchy_overlay_ime_hide)
+                    setOnClickListener {
+                        it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                        when (code) {
+                            "MOD:super" -> { modSuper = !modSuper; refreshModButtons() }
+                            "MOD:ctrl" -> { modCtrl = !modCtrl; refreshModButtons() }
+                            "MOD:alt" -> { modAlt = !modAlt; refreshModButtons() }
+                            "OSK" -> showOsk()
+                            "HIDE" -> hideIme()
+                            else -> sendKey(code)
+                        }
+                    }
+                }
+                if (code.startsWith("MOD:")) accessoryModBtns[code.substring(4)] = button
+                bar.addView(button, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f))
+            }
+            host.addView(bar, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, dp(36), Gravity.BOTTOM
+            ).apply { bottomMargin = lastImeH })
+            imeAccessoryView = bar
+            refreshModButtons()
+            edgeTabView?.bringToFront()
+        }
+
+        private fun hideIme() {
+            try {
+                val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.hideSoftInputFromWindow(imeAnchor?.windowToken ?: overlayHost?.windowToken, 0)
+                imeAnchor?.let { overlayHost?.removeView(it) }
+            } catch (_: Exception) {}
             imeAnchor = null
             imeActive = false
+            hideImeAccessory()
         }
 
         private fun triggerAndroidIme() {
@@ -1668,6 +1809,7 @@ object OmarchyX11Overlay {
 
             edit.requestFocus()
             edit.postDelayed({
+                if (!attached || imeAnchor !== edit || !imeActive) return@postDelayed
                 val imm = activity.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
                 imm?.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT)
             }, 90L)
@@ -1680,6 +1822,8 @@ object OmarchyX11Overlay {
             oskView = null
             fullscreenBtn = null
             oskVisible = false
+            modBtns.clear()
+            updateImeAccessory()
         }
 
         private fun refreshFullscreenButton() {
@@ -1726,6 +1870,7 @@ object OmarchyX11Overlay {
         private fun showOsk() {
             if (oskVisible) return
             val host = overlayHost ?: return
+            oskVisible = true
             hideIme()
             // Keep the compact edge tab collapsed at edge instead of hiding it!
             collapseDock()
@@ -1919,6 +2064,7 @@ object OmarchyX11Overlay {
             edgeTabView?.bringToFront()
             oskView = root
             oskVisible = true
+            refreshModButtons()
         }
 
         private fun makeBarBtn(label: String, active: Boolean, onClick: () -> Unit): Button =
@@ -1945,9 +2091,10 @@ object OmarchyX11Overlay {
         }
 
         private fun setModStyle(name: String, on: Boolean) {
-            val b = modBtns[name] ?: return
-            b.setTextColor(Color.parseColor(if (on) "#1a1b26" else "#7aa2f7"))
-            b.background = makeRounded(if (on) "#7aa2f7" else "#CC283457", "#7aa2f7", 6, 1)
+            listOfNotNull(modBtns[name], accessoryModBtns[name]).forEach { button ->
+                button.setTextColor(Color.parseColor(if (on) "#1a1b26" else "#7aa2f7"))
+                button.background = makeRounded(if (on) "#7aa2f7" else "#CC283457", "#7aa2f7", 6, 1)
+            }
         }
 
         private fun makeRounded(bgHex: String, strokeHex: String, radiusDp: Int, strokeDp: Int): GradientDrawable =

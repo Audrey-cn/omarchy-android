@@ -331,14 +331,14 @@
     <string name="omarchy_overlay_fullscreen_desc">切换当前 Linux 窗口的全屏状态。</string>
     <string name="omarchy_overlay_ime_installed_title">切换系统输入法（已安装豆包输入法）</string>
     <string name="omarchy_overlay_ime_install_title">推荐安装豆包输入法（语音 + 中文）</string>
-    <string name="omarchy_overlay_ime_installed_desc">选择输入法后，点击手柄话筒即可在桌面应用中输入。</string>
+    <string name="omarchy_overlay_ime_installed_desc">选择输入法后，长按边缘手柄即可在桌面应用中输入。</string>
     <string name="omarchy_overlay_ime_install_desc">搭配豆包输入法，将语音与中文输入 Linux 应用。</string>
     <string name="omarchy_overlay_lock_portrait">切换并锁定为竖屏模式</string>
     <string name="omarchy_overlay_lock_landscape">切换并锁定为横屏模式</string>
     <string name="omarchy_overlay_orientation_desc">竖屏调出输入法时自动调整桌面大小，方便查看终端与输入框。</string>
     <string name="omarchy_overlay_replay_title">查看新手引导</string>
     <string name="omarchy_overlay_replay_desc">重播箭头指引教程：缩放、悬浮手柄、Super / Alt 快捷键与输入法。</string>
-    <string name="omarchy_overlay_handle">悬浮手柄：内滑打开输入法，双击打开键盘，轻点展开工具栏，拖动调整位置。</string>
+    <string name="omarchy_overlay_handle">悬浮手柄：长按打开语音或输入法，双击打开键盘，轻点展开工具栏，拖动调整位置。</string>
     <string name="omarchy_overlay_keyboard_toggle">显示或隐藏悬浮键盘</string>
     <string name="omarchy_overlay_voice_ime">语音与系统输入法</string>
     <string name="omarchy_overlay_dock_collapse">收起悬浮工具栏</string>
@@ -396,7 +396,7 @@
     <string name="omarchy_onboarding_permissions_title">语音输入与推荐权限</string>
     <string name="omarchy_onboarding_ime_installed">✓ 已检测到豆包输入法</string>
     <string name="omarchy_onboarding_ime_install">推荐安装：豆包输入法</string>
-    <string name="omarchy_onboarding_ime_installed_desc">选择为当前输入法后，点击手柄话筒即可使用语音或中文输入。</string>
+    <string name="omarchy_onboarding_ime_installed_desc">选择为当前输入法后，长按边缘手柄即可使用语音或中文输入。</string>
     <string name="omarchy_onboarding_ime_install_desc">将语音与中文输入 Linux 终端与应用。</string>
     <string name="omarchy_onboarding_ime_choose">选择系统输入法</string>
     <string name="omarchy_onboarding_ime_download">前往下载豆包输入法</string>
@@ -461,4 +461,25 @@
     <string name="omarchy_setup_progress_saved">下载进度已保存，可返回应用查看。</string>
     <string name="omarchy_setup_interrupted">此前任务已中断，进度已保留，可继续。</string>
     <string name="omarchy_setup_state_unavailable">此前任务信息不可用，请重新选择镜像。</string>
+
+    <!-- Omarchy session, permissions, and project support -->
+    <string name="tc4_settings_microphone_title">麦克风</string>
+    <string name="tc4_settings_microphone_desc">允许语音输入和桌面音频应用录音。所选输入法的麦克风权限由该输入法自行管理。</string>
+    <string name="tc4_permission_granted_title">✓ %1$s</string>
+    <string name="tc4_permission_microphone_granted">已获得麦克风权限</string>
+    <string name="tc4_permission_microphone_denied">麦克风权限未开启，可在应用设置中启用。</string>
+    <string name="tc4_permission_open_settings">应用设置</string>
+    <string name="tc4_help_about_title">关于 Omarchy Android</string>
+    <string name="tc4_help_about_desc">由 Audrey 维护 · 源代码、文档与社区。</string>
+    <string name="tc4_help_support_title">支持 / 赞助</string>
+    <string name="tc4_help_support_desc">在 GitHub 支持项目的持续维护与改进。</string>
+    <string name="omarchy_keep_alive_channel">桌面后台会话</string>
+    <string name="omarchy_keep_alive_title">Omarchy 桌面</string>
+    <string name="omarchy_keep_alive_text">Omarchy 桌面正在后台运行 · 点按返回</string>
+    <string name="omarchy_onboarding_long_press">长按</string>
+    <string name="omarchy_onboarding_microphone_granted">✓ 已允许麦克风</string>
+    <string name="omarchy_onboarding_microphone_grant">允许麦克风</string>
+    <string name="omarchy_overlay_ime_hide">隐藏系统键盘</string>
+    <string name="omarchy_xserver_restart_failed">无法清理上一次显示会话。请退出容器后重试。</string>
+    <string name="omarchy_container_start_failed">桌面未能启动。请退出容器后重试。</string>
 </resources>
