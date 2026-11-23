@@ -67,7 +67,7 @@ Android Studio 打开本目录。普通编译输出 `app/build/outputs/apk/debug
 - 外部 Termux 部署与 Root 路线：[`../../runtime/`](../../runtime/)
 - Deck 辅助 APK：[`../deck/`](../deck/)
 
-本次本地迁移保留原 `omarchy-android-app` 目录；迁移和 Actions 构建不会自动发布 Release，下载附件以主仓 Releases 实际内容为准。
+原 `omarchy-android-app` 的源码和主分支历史已导入统一仓库；后续开发不依赖旧目录。迁移和 Actions 构建不会自动发布 Release，下载附件以主仓 Releases 实际内容为准。
 
 ---
 

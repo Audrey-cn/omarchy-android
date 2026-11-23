@@ -6,7 +6,13 @@
 
 Android 项目通过 Git subtree 导入，保留原仓提交历史；这不是需要另行初始化的 Git submodule。`git log --all` 可查看合并后的历史。
 
-原本的本地 `omarchy-android-app` 目录保留作为迁移前副本，不再与本仓自动同步。迁移也不会自动归档旧远端或发布新 APK；本仓文档与应用入口统一指向主仓库的 Releases。
+原 App 历史已导入本仓，后续不依赖独立的 `omarchy-android-app` 目录，也不与旧仓自动同步。迁移不会自动归档旧远端或发布新 APK；本仓文档与应用入口统一指向主仓库的 Releases。已有工作进度与云端运行见[交接记录](HANDOFF.md)。
+
+## 默认使用云端构建
+
+本项目已有的开发流程是提交到 GitHub，由 Actions 构建 rootfs 和 APK，再下载产物到 Android 设备验证。本地 JDK/Android SDK 并非采用该流程的前置条件；下文的 Gradle 命令适用于需要本地编译时。
+
+合并后的构建工作流支持 main 的 push、面向 main 的 PR 和手动 dispatch。feature 分支单独 push 不会触发 main 的 push 过滤，可用 PR 验证合并版；手动 dispatch 需要工作流先在默认分支注册，再选择目标分支。
 
 ## 编译 Android 容器壳
 
@@ -74,7 +80,7 @@ git diff --check
 python3 -m unittest discover -s tests -v
 ```
 
-目录、脚本与 YAML 校验只能证明迁移配置一致；完整镜像打包还需 ARM64 Linux 构建，一体包启动与输入行为还需 Android 设备验证。
+目录、脚本与 YAML 校验只能证明迁移配置一致；完整镜像打包使用云端 ARM64 Linux runner，一体包启动与输入行为还需 Android 设备验证。旧 App 仓最新 `2792678` 已有成功的云端一体包构建，合并版仍需单独验证。
 
 GitHub Actions artifacts 与 Releases 附件是两个发布入口。现有工作流上传 artifacts，不会自动创建 Release；对外发布时应确认上传的是包含镜像的一体包，并保留对应版本的源码与许可证声明。
 

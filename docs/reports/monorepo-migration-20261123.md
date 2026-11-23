@@ -31,3 +31,7 @@ Android `gradlew` 补上执行权限，使开发指南中的 `./gradlew` 命令�
 未运行远端 GitHub Actions、ARM64 rootfs 构建或 Android 设备测试。因此，这份记录证明本地历史/目录迁移、文件输入与配置校验，不证明完整打包或实机运行通过。
 
 远端仓库、Releases、旧仓库归档均未变更。
+
+## 后续交接补充
+
+读取 Antigravity 历史并核对 GitHub 后，已确认项目原有流程使用云端构建：旧 App `2792678` 的 rootfs 和一体 APK 已在 [45109234902](https://github.com/Audrey-cn/omarchy-android-app/actions/runs/45109234902) 成功。本机缺工具链只解释本地编译未执行，不构成云端构建阻塞。上述迁移验证边界仍适用于尚未送入云端的合并版，详见[交接记录](../HANDOFF.md)。
