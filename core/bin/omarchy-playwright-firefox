@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Keep Firefox's tested Playwright launch defaults, using a separate desktop profile.
+set -euo pipefail
+[[ $# -le 1 ]] || { echo "Usage: omarchy-playwright-firefox [URL]" >&2; exit 2; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+exec "$SCRIPT_DIR/omarchy-playwright" run "$SCRIPT_DIR/omarchy-playwright-tool.cjs" desktop firefox "${1:-about:blank}"

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Install Mozilla's signed ARM64 DEB instead of Ubuntu's Snap transition package.
+set -euo pipefail
+[[ "$(dpkg --print-architecture)" == arm64 ]] || { echo "Requires Ubuntu/Debian ARM64." >&2; exit 1; }
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y ca-certificates curl gnupg
+TMP_KEY="$(mktemp)"
+trap 'rm -f "$TMP_KEY"' EXIT
+curl --fail --location --silent --show-error https://packages.mozilla.org/apt/repo-signing-key.gpg -o "$TMP_KEY"
+FINGERPRINT="$(gpg --show-keys --with-colons "$TMP_KEY" 2>/dev/null | awk -F: '$1 == "fpr" { print $10; exit }')"
+[[ "$FINGERPRINT" == 35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3 ]] || { echo "Mozilla repository signing-key fingerprint mismatch." >&2; exit 1; }
+install -d -m 0755 /etc/apt/keyrings
+install -m 0644 "$TMP_KEY" /etc/apt/keyrings/packages.mozilla.org.asc
+printf '%s\n' 'deb [arch=arm64 signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main' > /etc/apt/sources.list.d/omarchy-mozilla.list
+cat > /etc/apt/preferences.d/omarchy-mozilla <<'PREFS'
+Package: firefox firefox-l10n-*
+Pin: origin packages.mozilla.org
+Pin-Priority: 1000
+
+Package: firefox
+Pin: release o=Ubuntu
+Pin-Priority: -1
+PREFS
+apt-get update -qq
+apt-get install -y firefox

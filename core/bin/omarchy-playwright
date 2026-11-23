@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# A separate, pinned Playwright installation; never launch the GTK compatibility wrapper.
+set -euo pipefail
+PW_VERSION=1.65.1
+PW_HOME="${OMARCHY_PLAYWRIGHT_HOME:-/opt/omarchy-playwright}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+usage() {
+  echo "Usage: omarchy-playwright install chromium|headless|firefox|webkit"
+  echo "       omarchy-playwright probe chromium|firefox|webkit [headless|wayland]"
+  echo "       omarchy-playwright browser-path chromium|firefox|webkit"
+  echo "       omarchy-playwright run SCRIPT [ARGS...] | cli [PLAYWRIGHT_ARGS...]"
+}
+fail() { echo "omarchy-playwright: $*" >&2; exit 1; }
+COMMAND="${1:-help}"
+[[ $# -eq 0 ]] || shift
+case "$COMMAND" in help|-h|--help) usage; exit 0 ;; esac
+[[ "$PW_HOME" == /* ]] || fail "OMARCHY_PLAYWRIGHT_HOME must be absolute."
+export OMARCHY_PLAYWRIGHT_HOME="$PW_HOME"
+export PLAYWRIGHT_BROWSERS_PATH="$PW_HOME/browsers"
+
+case "$COMMAND" in
+  install)
+    [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+    case "$1" in chromium|headless|firefox|webkit) ;; *) fail "Unsupported install target: $1" ;; esac
+    ;;
+  probe)
+    [[ $# -ge 1 && $# -le 2 ]] || { usage >&2; exit 2; }
+    case "$1" in chromium|firefox|webkit) ;; *) fail "Unsupported engine: $1" ;; esac
+    case "${2:-headless}" in headless|wayland) ;; *) fail "Use headless or wayland." ;; esac
+    ;;
+  browser-path)
+    [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+    case "$1" in chromium|firefox|webkit) ;; *) fail "Unsupported engine: $1" ;; esac
+    ;;
+  run) [[ $# -gt 0 ]] || { usage >&2; exit 2; } ;;
+  cli) ;;
+  *) usage >&2; exit 2 ;;
+esac
+
+if [[ "$COMMAND" != install && ! -f "$PW_HOME/node_modules/playwright/package.json" ]]; then
+  fail "Not installed; run omarchy-playwright install headless (or chromium/firefox/webkit)."
+fi
+NODE_BIN="$("$SCRIPT_DIR/omarchy-node-runtime")"
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+export NODE_PATH="$PW_HOME/node_modules${NODE_PATH:+:$NODE_PATH}"
+
+package_ready() {
+  "$NODE_BIN" -e '
+    const fs=require("node:fs"), path=require("node:path"), root=process.argv[1];
+    if(require(path.join(root,"package.json")).version!==process.argv[2]) process.exit(1);
+    const api=require(root);
+    for(const name of ["chromium","firefox","webkit"]) if(typeof api[name]?.launch!=="function") process.exit(1);
+    fs.accessSync(path.join(root,"cli.js"), fs.constants.R_OK);
+  ' "$PW_HOME/node_modules/playwright" "$PW_VERSION"
+}
+
+if [[ "$COMMAND" == install ]]; then
+  mkdir -p "$PW_HOME"
+  exec 8>"$PW_HOME/.install.lock"
+  flock -x 8
+  if ! package_ready >/dev/null 2>&1; then
+    if [[ ! -f "$PW_HOME/package.json" ]]; then
+      printf '{"name":"omarchy-browser-tools","version":"1.0.0","private":true}\n' > "$PW_HOME/package.json"
+    fi
+    echo "Installing isolated Playwright $PW_VERSION in $PW_HOME..." >&2
+    # An Android process kill may leave package.json but incomplete module files.
+    # Re-fetch only this tool's two managed packages instead of trusting their version strings.
+    rm -rf "$PW_HOME/node_modules/playwright" "$PW_HOME/node_modules/playwright-core"
+    "$(dirname "$NODE_BIN")/npm" install --prefix "$PW_HOME" --save-exact --no-audit --no-fund "playwright@$PW_VERSION" >&2
+    package_ready || fail "Playwright installation is incomplete; retry install."
+  fi
+  if [[ "$1" == headless ]]; then
+    "$NODE_BIN" "$PW_HOME/node_modules/playwright/cli.js" install --with-deps --only-shell chromium
+  else
+    "$NODE_BIN" "$PW_HOME/node_modules/playwright/cli.js" install --with-deps "$1"
+  fi
+  echo "Browser files installed. Android PRoot compatibility still requires an omarchy-playwright probe." >&2
+else
+  package_ready || fail "Managed Playwright files are incomplete or have the wrong version; rerun install."
+  case "$COMMAND" in
+    probe) exec "$NODE_BIN" "$SCRIPT_DIR/omarchy-playwright-tool.cjs" probe "$@" ;;
+    browser-path) exec "$NODE_BIN" "$SCRIPT_DIR/omarchy-playwright-tool.cjs" browser-path "$@" ;;
+    run) exec "$NODE_BIN" "$@" ;;
+    cli) exec "$NODE_BIN" "$PW_HOME/node_modules/playwright/cli.js" "$@" ;;
+  esac
+fi

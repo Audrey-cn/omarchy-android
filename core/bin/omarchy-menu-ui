@@ -52,6 +52,18 @@ def load_menu_data():
 def kill_wofi():
     subprocess.run("for p in $(pidof wofi 2>/dev/null); do kill -9 $p 2>/dev/null; done", shell=True)
 
+def browser_menu_entries(upstream_children):
+    """Expose actual local adapters, retaining other brands as explicit unavailable entries."""
+    supported = [
+        ("install.browser.omarchy", {"label": "Omarchy Browser (WebKitGTK)", "icon": "󰖟"}),
+        ("install.browser.playwright", {"label": "Agent 浏览器：Firefox (Playwright，安装并自检)", "icon": "󰈹"}),
+        ("install.browser.chromium", {"label": "Chromium (Playwright，实验性)", "icon": "󰊯"}),
+        ("install.browser.firefox", {"label": "Firefox (Mozilla DEB)", "icon": "󰈹"}),
+    ]
+    keys = {key for key, _ in supported}
+    return supported + [(key, {**item, "label": item.get("label", key) + "（未适配）"})
+                        for key, item in upstream_children if key not in keys]
+
 def wofi_pick(prompt, rows, width=330, height=380, columns=1):
     kill_wofi()
     inp = "\n".join(rows)
@@ -317,6 +329,11 @@ def navigate_menu(route="root"):
                 rem = k[len(prefix):]
                 if "." not in rem:
                     children.append((k, v))
+        if route == "install.browser":
+            children = browser_menu_entries(children)
+            # Upstream translations must not hide the actual engine/package identity.
+            for key, item in children:
+                zh[key] = {"label": item["label"]}
         if route == "install.ai" and not any(k == "install.ai.cc-switch" for k, _ in children):
             children.insert(0, ("install.ai.cc-switch", {"label": "CC Switch", "icon": "󰣆"}))
             children.insert(1, ("install.ai.doubao-say", {"label": "Doubao Say (豆包说语音输入)", "icon": "󰍬"}))

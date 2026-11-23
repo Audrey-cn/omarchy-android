@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Omarchy Universal ARM64 Installer Engine (Ubuntu 24.04 + mise + Chromium WebApps)
+# Omarchy ARM64 Installer Engine (Ubuntu 24.04 + tools + WebKitGTK WebApps)
 # Handles ALL 74+ official `install.*` entries from basecamp/omarchy cleanly!
 # ============================================================================
 set -e
@@ -133,7 +133,7 @@ DESKTOP
     install.ai.chatgpt)
         echo "正在安装 OpenAI 官方原生 ARM64 ChatGPT / Codex Desktop (.deb)..."
         curl -fSL -o /tmp/chatgpt_arm64.deb "https://persistent.oaistatic.com/codex-app-prod/linux/deb/latest/chatgpt_arm64.deb"
-        DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/chatgpt_arm64.deb
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/chatgpt_arm64.deb
         rm -f /tmp/chatgpt_arm64.deb "$APP_DIR/ChatGPT.desktop"
         for f in /usr/share/applications/*chatgpt*.desktop /usr/share/applications/*codex*.desktop; do
             [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/chatgpt-launch %u|" "$f"
@@ -165,9 +165,7 @@ DESKTOP
         curl -fSL -o "/tmp/$HFILE" "https://pkgs.omarchy.org/stable/aarch64/$HFILE"
         tar --zstd -xf "/tmp/$HFILE" -C / --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.BUILDINFO' --exclude='.INSTALL'
         rm -f "/tmp/$HFILE" /tmp/omarchy.db "$APP_DIR/Hermes.desktop"
-        if [[ -f /usr/lib/claude-desktop/resources/app.asar.unpacked/node_modules/node-pty/prebuilds/linux-arm64/pty.node ]]; then
-            cp -f /usr/lib/claude-desktop/resources/app.asar.unpacked/node_modules/node-pty/prebuilds/linux-arm64/pty.node /opt/hermes-desktop/resources/app.asar.unpacked/dist/node_modules/node-pty/build/Release/pty.node
-        fi
+        /usr/local/bin/omarchy-repair-hermes-pty
         for f in /usr/share/applications/*hermes*.desktop; do
             [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/hermes-desktop-launch %u|" "$f"
         done
@@ -260,25 +258,46 @@ DESKTOP
         ;;
 
     # --- 4. Browsers ---
-    install.browser.chromium|install.browser.chrome|install.browser.brave|install.browser.brave-origin|install.browser.edge|install.browser.zen)
-        echo "✓ 原生 ARM64 Chromium 158 浏览器已预装就绪，正在创建桌面快捷方式..."
-        cat << 'EOF' > "$APP_DIR/Chromium.desktop"
+    install.browser.omarchy)
+        DEBIAN_FRONTEND=noninteractive apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-webkit2-4.1
+        cat << 'EOF' > "$APP_DIR/omarchy-browser.desktop"
 [Desktop Entry]
-Version=1.0
-Name=Chromium Browser
-Comment=Native ARM64 Wayland Chromium 158
-Exec=/usr/local/bin/omarchy-chromium
+Name=Omarchy Browser
+Comment=WebKitGTK browser (not a Playwright automation engine)
+Exec=/usr/local/bin/omarchy-browser %U
 Icon=web-browser
 Terminal=false
 Type=Application
 Categories=Network;WebBrowser;
 EOF
-        chmod +x "$APP_DIR/Chromium.desktop"
-        /usr/local/bin/omarchy-chromium "https://github.com/basecamp/omarchy" &
+        echo "✓ Omarchy Browser (WebKitGTK) 已安装。"
+        ;;
+    install.browser.chromium)
+        echo "实验性 Chromium：当前 K20 的 headless / CDP 验收未通过；安装后必须先通过运行自检。"
+        /usr/local/bin/omarchy-install-playwright-browser chromium
         ;;
     install.browser.firefox)
-        DEBIAN_FRONTEND=noninteractive apt-get install -y epiphany-browser
-        echo "✓ 已安装原生 ARM64 GNOME Web (Epiphany) 浏览器，同时可使用原生 Chromium 158！"
+        /usr/local/bin/omarchy-install-firefox
+        cat << 'EOF' > "$APP_DIR/Firefox.desktop"
+[Desktop Entry]
+Name=Firefox (Mozilla)
+Comment=Mozilla Firefox DEB, separate from Playwright's patched Firefox
+Exec=/usr/local/bin/omarchy-firefox %U
+Icon=firefox
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+EOF
+        chmod +x "$APP_DIR/Firefox.desktop"
+        echo "✓ Mozilla Firefox DEB 已安装；这不是 Playwright 的 Firefox 引擎。首次启动仍需验证本机兼容性。"
+        ;;
+    install.browser.playwright|install.browser.firefox-playwright)
+        /usr/local/bin/omarchy-install-playwright-browser firefox
+        ;;
+    install.browser.*)
+        echo "尚未为 $LABEL 实现并验证 ARM64 / Android PRoot 安装方案。没有替换安装其他品牌浏览器。" >&2
+        echo "可选择 Omarchy Browser、Agent 浏览器 Firefox (Playwright) 或 Firefox (Mozilla DEB)。" >&2
+        exit 1
         ;;
 
     # --- 5. Editors ---

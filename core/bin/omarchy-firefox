@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Mozilla's real DEB browser, separate from Playwright's patched Firefox.
+set -euo pipefail
+[[ -x /usr/bin/firefox ]] || { echo "Firefox is not installed; use the Firefox (Mozilla DEB) menu entry." >&2; exit 1; }
+export MOZ_ENABLE_WAYLAND=1 GDK_BACKEND=wayland
+PROFILE="${HOME:-/root}/.local/share/omarchy-firefox/profile"
+mkdir -p "$PROFILE"
+exec /usr/bin/firefox --no-remote --profile "$PROFILE" "$@"

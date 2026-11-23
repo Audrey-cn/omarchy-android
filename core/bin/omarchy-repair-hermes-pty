@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""Rebuild Hermes' own node-pty for the guest libc, without another app's binary."""
+import argparse
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+REBUILD_VERSION = "4.2.0"
+
+
+def log(message):
+    print(message, file=sys.stderr, flush=True)
+
+
+@contextmanager
+def temporary_workdir(*, prefix, directory):
+    # PRoot's virtual hardlinks can leave obj.target non-empty after a successful build.
+    # Cleanup is best-effort and must never replace the compiler/smoke result.
+    path = Path(tempfile.mkdtemp(prefix=prefix, dir=directory))
+    try:
+        yield path
+    finally:
+        try:
+            shutil.rmtree(path)
+        except OSError as error:
+            log("Warning: temporary directory cleanup failed; remaining files kept at " + str(path) + ": " + str(error))
+
+
+def digest(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def cache_key(identity):
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:32]
+
+
+def cached_candidate(directory, identity):
+    directory = Path(directory)
+    try:
+        receipt = json.loads((directory / "manifest.json").read_text())
+        binary = directory / "pty.node"
+        if receipt["identity"] == identity and receipt["sha256"] == digest(binary):
+            return binary
+    except (OSError, ValueError, KeyError):
+        pass
+    return None
+
+
+def atomic_copy(source, destination):
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".omarchy-pty-", suffix=".node", dir=destination.parent)
+    os.close(fd)
+    staged = Path(name)
+    try:
+        shutil.copy2(source, staged)
+        os.replace(staged, destination)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
+def store_cache(directory, candidate, identity):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    atomic_copy(candidate, directory / "pty.node")
+    receipt = {"schema": 1, "identity": identity, "sha256": digest(directory / "pty.node")}
+    fd, name = tempfile.mkstemp(prefix=".manifest-", dir=directory)
+    with os.fdopen(fd, "w") as output:
+        json.dump(receipt, output, indent=2)
+        output.write("\n")
+    os.replace(name, directory / "manifest.json")
+
+
+def atomic_install(candidate, target, backup, validate_candidate, validate_installed):
+    """Never expose an untested candidate; restore exact old bytes if final smoke fails."""
+    target, backup = Path(target), Path(backup)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".omarchy-pty-", suffix=".node", dir=target.parent)
+    os.close(fd)
+    staged = Path(name)
+    old = None
+    replaced = False
+    try:
+        shutil.copy2(candidate, staged)
+        staged.chmod(0o755)
+        validate_candidate(staged)
+        if target.exists():
+            fd, name = tempfile.mkstemp(prefix=".omarchy-pty-old-", suffix=".node", dir=target.parent)
+            os.close(fd)
+            old = Path(name)
+            shutil.copy2(target, old)
+            if not backup.exists():
+                atomic_copy(old, backup)
+        os.replace(staged, target)
+        replaced = True
+        validate_installed()
+    except BaseException:
+        if replaced:
+            if old is not None:
+                os.replace(old, target)
+            else:
+                target.unlink(missing_ok=True)
+        raise
+    finally:
+        staged.unlink(missing_ok=True)
+        if old is not None:
+            old.unlink(missing_ok=True)
+
+
+def install_and_cache(candidate, target, backup, precheck, postcheck, directory, identity):
+    atomic_install(candidate, target, backup, precheck, postcheck)
+    try:
+        store_cache(directory, candidate, identity)
+    except OSError as error:
+        # The installed binding has already passed both real smoke checks.
+        log("Warning: verified binding is installed, but its optional cache could not be saved: " + str(error))
+
+
+def electron_env():
+    env = os.environ.copy()
+    env["ELECTRON_RUN_AS_NODE"] = "1"
+    env.pop("NODE_OPTIONS", None)
+    env.pop("NODE_PATH", None)
+    return env
+
+
+def inspect_runtime(hermes_dir):
+    executable = hermes_dir / "Hermes"
+    result = subprocess.run(
+        [str(executable), "-p", "JSON.stringify({platform:process.platform,arch:process.arch,...process.versions})"],
+        env=electron_env(), capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError("Hermes runtime probe failed:\n" + result.stderr)
+    versions = json.loads(result.stdout)
+    if versions.get("platform") != "linux" or versions.get("arch") != "arm64":
+        raise RuntimeError("Repair requires the Linux ARM64 Hermes runtime, not a host/cross build")
+    if not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", versions.get("electron", "")):
+        raise RuntimeError("Cannot determine the installed Electron version")
+    module_dir = None
+    for relative in ["dist/node_modules/node-pty", "node_modules/node-pty"]:
+        possible = hermes_dir / "resources/app.asar.unpacked" / relative
+        if (possible / "package.json").is_file():
+            module_dir = possible
+            break
+    if module_dir is None:
+        raise RuntimeError("Cannot find the installed unpacked node-pty package metadata")
+    package = json.loads((module_dir / "package.json").read_text())
+    version = package.get("version", "")
+    if package.get("name") != "node-pty" or not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
+        raise RuntimeError("Invalid installed node-pty package metadata")
+    libc = os.confstr("CS_GNU_LIBC_VERSION")
+    if not libc or not libc.startswith("glibc "):
+        raise RuntimeError("Repair requires a glibc Linux guest")
+    js_hash = hashlib.sha256()
+    for path in [module_dir / "package.json", *sorted((module_dir / "lib").rglob("*.js"))]:
+        js_hash.update(str(path.relative_to(module_dir)).encode())
+        js_hash.update(path.read_bytes())
+    identity = {"platform": "linux", "arch": "arm64", "electron": versions["electron"],
+                "node": versions["node"], "modules": versions["modules"],
+                "napi": versions.get("napi"), "node_pty": version, "libc": libc,
+                "package_js_sha256": js_hash.hexdigest()}
+    return executable, module_dir, identity
+
+
+def smoke(executable, module_dir, binding_only=False, binding=None):
+    script = Path(__file__).resolve().with_name("omarchy-hermes-pty-smoke")
+    command = [str(executable), str(script), "--module-dir", str(module_dir)]
+    if binding_only:
+        command.append("--binding-only")
+    if binding is not None:
+        command += ["--binding", str(binding)]
+    result = subprocess.run(command, env=electron_env(), capture_output=True, text=True, timeout=25)
+    if result.stdout:
+        log(result.stdout.rstrip())
+    if result.stderr:
+        log(result.stderr.rstrip())
+    if result.returncode:
+        raise RuntimeError("Hermes native/PTY smoke failed (exit %s)" % result.returncode)
+
+
+def validate_candidate(executable, module_dir, candidate, cache_root):
+    # Exercise the installed JS API with the candidate, leaving the live package untouched.
+    with temporary_workdir(prefix="validate-", directory=cache_root) as directory:
+        staged_module = Path(directory) / "node-pty"
+        shutil.copytree(module_dir, staged_module)
+        binding = staged_module / "build/Release/pty.node"
+        binding.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(candidate, binding)
+        smoke(executable, staged_module)
+
+
+def build_candidate(identity, directory):
+    node_helper = Path(__file__).resolve().with_name("omarchy-node-runtime")
+    if not node_helper.is_file():
+        raise RuntimeError("Missing omarchy-node-runtime; deploy the shared core helpers first")
+    result = subprocess.run([str(node_helper)], capture_output=True, text=True, check=True)
+    if result.stderr:
+        log(result.stderr.rstrip())
+    node_bin = Path(result.stdout.strip())
+    if not node_bin.is_absolute() or not node_bin.is_file():
+        raise RuntimeError("omarchy-node-runtime did not return an absolute Node executable path")
+    env = os.environ.copy()
+    env["PATH"] = str(node_bin.parent) + os.pathsep + env.get("PATH", "")
+    env["DEBIAN_FRONTEND"] = "noninteractive"
+    if any(shutil.which(tool, path=env["PATH"]) is None for tool in ["g++", "make", "pkg-config"]):
+        subprocess.run(["apt-get", "update", "-qq"], env=env, check=True)
+        subprocess.run(["apt-get", "install", "-y", "--no-install-recommends", "build-essential", "python3", "pkg-config"], env=env, check=True)
+    npm = node_bin.parent / "npm"
+    subprocess.run([str(npm), "init", "-y"], cwd=directory, env=env, check=True)
+    subprocess.run([str(npm), "install", "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact",
+                    "node-pty@" + identity["node_pty"], "@electron/rebuild@" + REBUILD_VERSION],
+                   cwd=directory, env=env, check=True)
+    subprocess.run([str(Path(directory) / "node_modules/.bin/electron-rebuild"), "--force", "--only", "node-pty",
+                    "--version", identity["electron"], "--arch", "arm64", "--module-dir", str(directory), "--build-from-source"],
+                   cwd=directory, env=env, check=True)
+    candidate = Path(directory) / "node_modules/node-pty/build/Release/pty.node"
+    if not candidate.is_file():
+        raise RuntimeError("Native rebuild completed without producing pty.node")
+    return candidate
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="validate native load and real PTY, without repairing")
+    mode.add_argument("--diagnose", action="store_true", help="direct require; preserve the original loader error")
+    mode.add_argument("--rebuild", action="store_true", help="rebuild even if the current binding/cache passes")
+    mode.add_argument("--rollback", action="store_true", help="restore the one saved previous binding for this runtime")
+    parser.add_argument("--hermes-dir", type=Path, default=Path("/opt/hermes-desktop"))
+    parser.add_argument("--cache-dir", type=Path, default=Path("/var/cache/omarchy/hermes-pty"))
+    args = parser.parse_args()
+    args.cache_dir = args.cache_dir.resolve()
+    if sys.platform != "linux":
+        raise RuntimeError("Run this helper inside the Ubuntu Linux ARM64 guest")
+    executable, module_dir, identity = inspect_runtime(args.hermes_dir.resolve())
+    log("Hermes native runtime: " + json.dumps(identity, sort_keys=True))
+    target = module_dir / "build/Release/pty.node"
+    if args.diagnose or args.check:
+        smoke(executable, module_dir, binding_only=args.diagnose)
+        return
+    args.cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    directory = args.cache_dir / cache_key(identity)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with (args.cache_dir / ".repair.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        backup = directory / "previous.node"
+        if args.rollback:
+            if not backup.is_file():
+                raise RuntimeError("No previous binding saved for this Electron/ABI/libc/package combination")
+            atomic_copy(backup, target)
+            log("Restored previous binding; use --diagnose to inspect its original loader result")
+            return
+        if not args.rebuild:
+            try:
+                smoke(executable, module_dir)
+                log("Installed Hermes native module and PTY are already usable")
+                return
+            except RuntimeError:
+                log("Rebuilding Hermes' own native binding for this guest")
+        candidate = None if args.rebuild else cached_candidate(directory, identity)
+        precheck = lambda path: validate_candidate(executable, module_dir, path, args.cache_dir)
+        postcheck = lambda: smoke(executable, module_dir)
+        if candidate is not None:
+            log("Validating version/ABI/libc-matched cached binding")
+            try:
+                atomic_install(candidate, target, backup, precheck, postcheck)
+                return
+            except RuntimeError:
+                log("Cached binding failed runtime validation; compiling from source")
+        with temporary_workdir(prefix="build-", directory=args.cache_dir) as build_dir:
+            candidate = build_candidate(identity, build_dir)
+            install_and_cache(candidate, target, backup, precheck, postcheck, directory, identity)
+        log("Hermes native load, PTY input, resize and exit passed; compatible binding installed")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        log("Hermes native repair failed: " + str(error))
+        sys.exit(1)
