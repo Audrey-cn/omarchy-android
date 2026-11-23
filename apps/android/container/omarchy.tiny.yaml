@@ -60,7 +60,6 @@ options:
         enabled: true
 boot_command: >
   $BIN_DIR/proot $EXTRA_ARGS -0 --kill-on-exit --link2symlink --sysvipc
-  --kernel-release="Linux localhost 6.17.0-PRoot-Distro #1 SMP PREEMPT_DYNAMIC aarch64"
   -L --rootfs=$CONTAINER_DIR --cwd=/root
   --bind=/dev --bind=/proc --bind=/sys --bind=/dev/urandom:/dev/random
   --bind=/proc/self/fd:/dev/fd --bind=/proc/self/fd/0:/dev/stdin --bind=/proc/self/fd/1:/dev/stdout --bind=/proc/self/fd/2:/dev/stderr

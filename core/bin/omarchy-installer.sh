@@ -118,7 +118,20 @@ DESKTOP
         ;;
     install.ai.cc-switch)
         echo "正在从 GitHub Releases 下载最新版 CC Switch (ARM64 .deb)..."
-        CC_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/farion1231/cc-switch/releases/latest" | sed 's|.*/tag/v||')
+        if ! CC_RELEASE_URL=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/farion1231/cc-switch/releases/latest"); then
+            echo "无法解析 CC Switch 最新版本；停止安装，请检查本次请求的网络或代理。" >&2
+            exit 1
+        fi
+        case "$CC_RELEASE_URL" in
+            https://github.com/farion1231/cc-switch/releases/tag/v*) ;;
+            *) echo "CC Switch 版本跳转地址异常；停止安装。" >&2; exit 1 ;;
+        esac
+        CC_TAG="${CC_RELEASE_URL##*/}"
+        if [[ ! "$CC_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "CC Switch 版本号格式异常；停止安装。" >&2
+            exit 1
+        fi
+        CC_VER="${CC_TAG#v}"
         echo "检测到最新版本: v${CC_VER}"
         curl -fSL -o /tmp/cc-switch_arm64.deb "https://github.com/farion1231/cc-switch/releases/download/v${CC_VER}/CC-Switch-v${CC_VER}-Linux-arm64.deb"
         ensure_apt_updated
