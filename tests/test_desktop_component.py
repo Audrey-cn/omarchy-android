@@ -174,6 +174,38 @@ class DesktopComponent(unittest.TestCase):
         self.assertIn("LICENSE", files)
         self.assertEqual(self.cat["compatibility"]["min_apk_version_code"], 64)
 
+    def test_audio_bridge_package_and_launcher_activation(self):
+        files = package_files(self.archive)
+        command = "bin/omarchy-audio-bridge.py"
+        self.assertIn(command, files.keys())
+        self.assertEqual(
+            files[command], (REPO / "core" / command).read_bytes()
+        )
+        manifest = json.loads(files["manifest.json"])
+        self.assertEqual(manifest["files"][command], updater.digest(files[command]))
+        for dependency in ("pulseaudio", "pulseaudio-utils"):
+            self.assertIn(dependency, manifest["depends"].split(", "))
+        data = subprocess.check_output(["ar", "p", self.archive, "data.tar.gz"])
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            self.assertEqual(archive.getmember("./" + builder.PREFIX + command).mode, 0o755)
+        control = subprocess.check_output(["ar", "p", self.archive, "control.tar.gz"])
+        with tarfile.open(fileobj=io.BytesIO(control), mode="r:gz") as archive:
+            metadata = archive.extractfile("./control").read().decode()
+        self.assertIn("Depends: " + manifest["depends"] + "\n", metadata)
+        self.install()
+        launcher = updater.LAUNCH / "omarchy-audio-bridge.py"
+        self.assertTrue(launcher.is_symlink())
+        self.assertEqual(launcher.readlink(), updater.PRIVATE / command)
+        self.assertEqual(launcher.read_bytes(), files[command])
+
+    def test_deck_launched_apps_use_local_pulse_server_or_explicit_override(self):
+        deck = load("audio_deck_bridge", "core/bin/omarchy-deck-bridge.py")
+        with patch.object(deck, "get_swaysock", return_value="fixture-sway"):
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(deck.wl_env()["PULSE_SERVER"], "unix:/tmp/pulse/native")
+            with patch.dict(os.environ, {"PULSE_SERVER": "unix:/custom/pulse"}):
+                self.assertEqual(deck.wl_env()["PULSE_SERVER"], "unix:/custom/pulse")
+
     def test_pinned_ci_candidate_uses_same_transaction_offline(self):
         directory = self.archive.parent
         sha = updater.digest((directory / "desktop-component.json").read_bytes())

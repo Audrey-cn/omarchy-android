@@ -247,7 +247,7 @@ white   = "{c[15]}"
             "format": "󰕾",
             "tooltip": False,
             "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel audio",
-            "on-click-right": "PULSE_SERVER=127.0.0.1 pactl set-sink-mute @DEFAULT_SINK@ toggle"
+            "on-click-right": "pactl set-sink-mute @DEFAULT_SINK@ toggle"
         },
         "custom/monitor": {
             "format": "󰃠",

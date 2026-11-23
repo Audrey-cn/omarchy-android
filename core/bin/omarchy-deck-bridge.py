@@ -41,7 +41,7 @@ def wl_env():
         "WAYLAND_DISPLAY": "wayland-1",
         "SWAYSOCK": get_swaysock(),
         "DISPLAY": ":0",
-        "PULSE_SERVER": "127.0.0.1",
+        "PULSE_SERVER": os.environ.get("PULSE_SERVER", "unix:/tmp/pulse/native"),
         "DBUS_SESSION_BUS_ADDRESS": "unix:path=/tmp/omarchy-dbus.sock",
     }
 

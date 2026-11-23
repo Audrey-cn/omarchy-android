@@ -23,6 +23,8 @@ feature:
     command: |
       export DISPLAY=:0
       export XDG_RUNTIME_DIR=/tmp
+      export PULSE_RUNTIME_PATH=/tmp/pulse
+      export PULSE_SERVER=unix:/tmp/pulse/native
       export HOME=/root
       export SHELL=/bin/bash
       export LANG=zh_CN.UTF-8
@@ -35,6 +37,7 @@ feature:
       export QT_IM_MODULE=fcitx
       export XMODIFIERS=@im=fcitx
       mkdir -p /tmp
+      setsid python3 /usr/local/bin/omarchy-audio-bridge.py >/tmp/audio-bridge.log 2>&1 &
       dbus-daemon --session --address="unix:path=/tmp/omarchy-dbus.sock" --nofork --nopidfile >/dev/null 2>&1 &
       sleep 0.3
       /usr/local/bin/sway -c /root/.config/sway/config >/tmp/sway.log 2>&1 &
@@ -71,6 +74,7 @@ boot_command: >
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$EXTRA_PATH
   LD_LIBRARY_PATH=$EXTRA_LD_LIBRARY_PATH
   DISPLAY=:0 XDG_RUNTIME_DIR=/tmp LANG=zh_CN.UTF-8 LC_ALL=zh_CN.UTF-8 TZ=Asia/Shanghai
+  PULSE_RUNTIME_PATH=/tmp/pulse PULSE_SERVER=unix:/tmp/pulse/native
   DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/omarchy-dbus.sock
   QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx
   MOZ_FAKE_NO_SANDBOX=1 QTWEBENGINE_DISABLE_SANDBOX=1 ELECTRON_DISABLE_SANDBOX=1

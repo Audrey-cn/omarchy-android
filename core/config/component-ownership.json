@@ -199,6 +199,7 @@
     "core/ai-suite/hermes-desktop-launch",
     "core/bin/launch-waybar",
     "core/bin/omarchy-app-grid",
+    "core/bin/omarchy-audio-bridge.py",
     "core/bin/omarchy-browser",
     "core/bin/omarchy-chromium",
     "core/bin/omarchy-component-update",

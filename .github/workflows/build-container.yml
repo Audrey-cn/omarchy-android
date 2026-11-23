@@ -114,7 +114,7 @@ jobs:
             libnss3 libnspr4 \
             waybar wofi swaybg mako-notifier libnotify-bin wl-clipboard wtype \
             alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
-            imv zathura zathura-pdf-poppler mpv \
+            imv zathura zathura-pdf-poppler mpv pulseaudio pulseaudio-utils \
             git gh curl wget unzip zip p7zip-full zstd xz-utils webp imagemagick \
             openssh-client rsync tree file lsof iproute2 python3-venv \
             fonts-noto-cjk fonts-noto-color-emoji fonts-dejavu-core papirus-icon-theme \
@@ -224,6 +224,7 @@ jobs:
           CHROOT
 
           sudo chroot "$ROOTFS" /usr/local/bin/omarchy-playwright128 check
+          sudo chroot "$ROOTFS" /usr/local/bin/omarchy-audio-bridge.py --check
           sudo chroot "$ROOTFS" /usr/bin/env HOME=/tmp /opt/omarchy-chromium128/browsers/chromium-1129/chrome-linux/chrome --version
           sudo umount "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
           # Chroot keeps absolute symlinks inside the guest during final cleanup.

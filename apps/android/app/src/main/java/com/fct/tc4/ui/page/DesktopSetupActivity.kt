@@ -23,6 +23,8 @@ import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -243,11 +245,22 @@ class DesktopSetupActivity : AppCompatActivity() {
             setPadding(dp(8), dp(4), dp(8), dp(12))
         })
 
-        setContentView(ScrollView(this).apply {
+        val scrollRoot = ScrollView(this).apply {
             setBackgroundColor(bgDark)
             isFillViewport = true
             addView(layout)
-        })
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(scrollRoot) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            layout.setPadding(
+                dp(20) + bars.left,
+                dp(24) + bars.top,
+                dp(20) + bars.right,
+                dp(24) + bars.bottom
+            )
+            insets
+        }
+        setContentView(scrollRoot)
         versions.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { render(InitialDesktopState.state.value) }

@@ -296,7 +296,7 @@ class OmarchyPanel(Gtk.Window):
         self.set_size_request(310, -1)
         self.add_title("󰕾  音频控制 (Audio)")
         cur_vol = 60
-        out = sh("PULSE_SERVER=127.0.0.1 pactl get-sink-volume @DEFAULT_SINK@")
+        out = sh("pactl get-sink-volume @DEFAULT_SINK@")
         m = re.search(r"(\d+)%", out)
         if m:
             cur_vol = min(150, int(m.group(1)))
@@ -308,13 +308,13 @@ class OmarchyPanel(Gtk.Window):
         def on_vol(s):
             v = int(s.get_value())
             lbl.set_text(f"主音量: {v}%")
-            launch_bg(f"PULSE_SERVER=127.0.0.1 pactl set-sink-volume @DEFAULT_SINK@ {v}%; /usr/local/bin/omarchy_session.py signal waybar 8")
+            launch_bg(f"pactl set-sink-volume @DEFAULT_SINK@ {v}%; /usr/local/bin/omarchy_session.py signal waybar 8")
 
         scale.connect("value-changed", on_vol)
         self.box.pack_start(scale, False, False, 4)
 
         def on_mute(_):
-            launch_bg("PULSE_SERVER=127.0.0.1 pactl set-sink-mute @DEFAULT_SINK@ toggle; /usr/local/bin/omarchy_session.py signal waybar 8")
+            launch_bg("pactl set-sink-mute @DEFAULT_SINK@ toggle; /usr/local/bin/omarchy_session.py signal waybar 8")
             Gtk.main_quit()
 
         self.add_btn("󰝟  静音 / 取消静音", on_mute)
