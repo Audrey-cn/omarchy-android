@@ -1,0 +1,56 @@
+From a179d3e8a4e045aaa1fb8cc3284f23509d96d353 Mon Sep 17 00:00:00 2001
+From: Sylirre <sylirre@termux.dev>
+Date: Thu, 1 Oct 2026 13:22:33 +0000
+Subject: [PATCH] fake_id0: let the kernel do the real open for files & memfds
+ when the requested read/write mode differs
+
+Workaround for https://github.com/termux/proot/issues/404
+---
+ src/extension/fake_id0/fake_id0.c | 21 ++++++++++++++++++++-
+ 1 file changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/src/extension/fake_id0/fake_id0.c b/src/extension/fake_id0/fake_id0.c
+index 9bd8dadc..237d53ee 100644
+--- a/src/extension/fake_id0/fake_id0.c
++++ b/src/extension/fake_id0/fake_id0.c
+@@ -794,6 +794,9 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
+ 			char fdinfo_path[64];
+ 			char line[64];
+ 			unsigned int existing_flags = 0;
++			int have_flags = 0;
++			int requested_flags = (int) peek_reg(tracee, CURRENT, SYSARG_3);
++			struct stat target;
+ 			FILE *fdinfo;
+ 
+ 			snprintf(fdinfo_path, sizeof(fdinfo_path),
+@@ -801,13 +804,29 @@ static int handle_sysenter_end(Tracee *tracee, Config *config)
+ 			fdinfo = fopen(fdinfo_path, "r");
+ 			if (fdinfo != NULL) {
+ 				while (fgets(line, sizeof(line), fdinfo) != NULL) {
+-					if (sscanf(line, "flags: %o", &existing_flags) == 1)
++					if (sscanf(line, "flags: %o", &existing_flags) == 1) {
++						have_flags = 1;
+ 						break;
++					}
+ 				}
+ 				fclose(fdinfo);
+ 			}
+ 			if (existing_flags & O_PATH)
+ 				return 0;
++
++			/* dup() shares the open file description, so it keeps the
++			 * existing access mode instead of the requested one.
++			 * Reopening a regular file or memfd with a different mode
++			 * is how programs derive a reduced-access handle (e.g. a
++			 * read-only memfd to hand to another process); a writable
++			 * dup there silently breaks that guarantee.  Let the
++			 * kernel do the real reopen for those; keep the dup for
++			 * ttys/pipes/sockets, which is what this was added for. */
++			if (have_flags
++			    && (existing_flags & O_ACCMODE) != (unsigned int) (requested_flags & O_ACCMODE)
++			    && stat(path, &target) == 0
++			    && S_ISREG(target.st_mode))
++				return 0;
+ 		}
+ 
+ 		set_sysnum(tracee, PR_dup);

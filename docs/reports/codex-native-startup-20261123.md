@@ -85,6 +85,8 @@
 3. 返回句柄的实际访问模式仍是 `2`（`O_RDWR`），并没有得到请求的 `O_RDONLY`。
 4. 对拥有的普通临时文件按真实文件路径只读打开，访问模式为正常的 `0`；通过 `/dev/fd/<fd>` 打开则返回 `EACCES`。
 
+随后只切换执行文件为应用捆绑的 `proot-latest`、保留同一 loader 和探针条件，结果同样为 `O_RDWR`（`2`）。这是诊断 runner 的对照，没有切换产品默认运行时。
+
 这证明 Chromium 检查发现的访问模式异常真实存在。不能通过伪造 `F_GETFL`、删除只读检查或宣称修改 GPU 驱动已经解决来处理。
 
 提供捆绑 PRoot 基础的 fork 中，已经找到与现象吻合的实现：[fake_id0.c](https://github.com/tiny-computer/proot-termux/blob/master/src/extension/fake_id0/fake_id0.c#L748)。该实现对 fake euid 为 `0` 的进程，将 `/proc/<pid>/fd/N` 的 `openat` 改成 `dup(N)`，只对 `O_PATH` 来源句柄跳过替换，没有检查请求与来源句柄的访问模式是否相同。`dup` 继承已有打开文件描述的访问模式，无法将可读写句柄降为只读。
@@ -103,7 +105,19 @@ K20 随后的非 fake-root 对照仍失败：对同一 memfd 真实只读打开 
 
 上游问题 #404 的 [原始诊断日志](https://github.com/termux/proot/issues/404#issuecomment-5931350454) 包含 `untrusted_app_27` 标签；本次实际应用探针报告的是 `untrusted_app`。该讨论的全部 12 条评论没有给出真实 reopen 返回 `EACCES` 的对应处理，也没有建立对所有 Android 版本、SELinux 域和设备都可用的保证。[非 root 可用的评论](https://github.com/termux/proot/issues/404#issuecomment-5932206031) 与 [新版恢复运行的反馈](https://github.com/termux/proot/issues/404#issuecomment-5945725000) 仅是各自环境的结果。
 
-若后续验证 patched PRoot，应先在私有诊断 runner 中回补确切上游修复并保留本应用扩展，验证 flags/stat 分支和真实 reopen 的结果。只有访问模式确为 `O_RDONLY`，且 `write` 与可写共享映射确实被内核拒绝，才可继续验收 Codex 的各子进程和 GUI；若仍为 `EACCES`，应记录当前免 Root 环境不支持此启动路径。本次产品修改没有绕过共享内存权限检查，也没有加入临时文件替代实现，尚未替换产品中的 PRoot 二进制。
+若后续验证 patched PRoot，应先在私有诊断 runner 中回补确切上游修复并保留本应用扩展，验证 flags/stat 分支和真实 reopen 的结果。只读句柄必须通过实际访问模式、`write` 和可写共享映射检查，不能只看程序没有崩溃。本次产品修改没有绕过共享内存权限检查，也没有加入临时文件替代实现，尚未替换产品中的 PRoot 二进制。
+
+### 可验证的后续路线：让 Chromium 处理真实失败
+
+进一步检查匹配版本的完整创建流程后，需要细化上述 `EACCES` 边界：它证明 memfd 的 procfd 只读重开未成功，尚不能单独证明上游补丁后整个 Chromium 共享内存流程不可用。
+
+Chromium 158 的 [CreateAnonymousRegion，第 130–143 行](https://github.com/chromium/chromium/blob/158.0.8127.37/base/memory/platform_shared_memory_region_posix.cc#L130) 在只读 `open()` 失败时返回空句柄；上层 [Create，第 300–307 行](https://github.com/chromium/chromium/blob/158.0.8127.37/base/memory/platform_shared_memory_region_posix.cc#L300) 随即进入自身既有的文件后端。该后端按真实文件路径打开可写与只读句柄，校验同一 device/inode，并在创建流程结束前 unlink 文件（[第 329–386 行](https://github.com/chromium/chromium/blob/158.0.8127.37/base/memory/platform_shared_memory_region_posix.cc#L329)）。
+
+因此可以先回补确切的 `a179d3e8`，观察错误的 `dup` 成功是否变为真实 `EACCES`，再检查 Chromium 是否安全使用自身文件后端并越过原子进程陷阱。这不需要伪造 `F_GETFL`、删除 `CHECK`、自制临时文件 shim 或放宽 Android 安全策略。此路线尚未实测通过；也不保证其他必须直接使用 memfd 的调用点可用。
+
+配套实验探针位于 `experiments/proot-readonly/procfd-probe.c`，仅操作自身的 4 KiB memfd 和私有临时文件。它记录进程身份、`TracerPid`、dumpable、SELinux 文件标签、`stat()` 结果，并分别测试 self/numeric/thread-self/dev-fd/openat 路径。成功只读句柄还必须满足同 inode、`O_RDONLY`、`FD_CLOEXEC`、实际 `pwrite()` 返回 `EBADF`、可写 `MAP_SHARED` 返回 `EACCES`。
+
+AOSP Android 14 的 [app_domain 宏](https://android.googlesource.com/platform/system/sepolicy/+/refs/tags/android-14.0.0_r1/public/te_macros#209) 对 app 创建的 tmpfs 对象使用 `appdomain_tmpfs` 标签，并列出 `execute/getattr/map/read/write` 权限，未在该宏中授予 `open`。这提供了区分“已有句柄可读写”和“重开被拒”的官方线索，但单个宏不能证明 K20 ROM 的完整有效策略。仍需同时间 AVC 拒绝记录及探针实际文件标签来确认内核权限原因；不修改 SELinux 或 target SDK。
 
 Codex GUI 仍未通过。需要在使用真实内核报告的新启动配置下继续验证，并分别验收首次启动、窗口稳定性、输入、登录和实际 Agent 操作。
 
