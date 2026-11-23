@@ -42,15 +42,18 @@ for tool in tar chroot unshare mount; do "$bb" --list | grep -qx "$tool" || fail
 "$bb" unshare -m "$bb" mount --make-rprivate / || fail 'A private mount namespace is required.'
 zstd=$(command -v zstd || true)
 [ -n "$zstd" ] || fail 'Install zstd and add its bin directory to PATH.'
-need=$((unpacked + 536870912))
+download_bytes=0
 if [ -n "$image" ]; then
     [ -f "$image" ] || fail 'Offline image is missing.'
 else
     command -v curl >/dev/null || fail 'Install curl or pass --image.'
-    need=$((need + size))
+    download_bytes=$size
 fi
+# Android mksh arithmetic can wrap at 2 GiB. Keep byte counts in awk,
+# where these integer values are exactly representable as doubles.
+need=$("$bb" awk -v unpacked="$unpacked" -v download="$download_bytes" 'BEGIN {printf "%.0f", unpacked + 536870912 + download}')
 free=$("$bb" df -Pk /data | "$bb" awk 'END {printf "%.0f", $4 * 1024}')
-[ "$free" -ge "$need" ] || fail "Need $need bytes on /data, have $free."
+"$bb" awk -v free="$free" -v need="$need" 'BEGIN {exit !(free + 0 >= need + 0)}' || fail "Need $need bytes on /data, have $free."
 printf 'Image %s, free bytes %s, required %s\n' "$tag" "$free" "$need"
 [ "$action" != dry-run ] || exit 0
 mkdir -m 700 "$base" || fail 'Destination already exists.'

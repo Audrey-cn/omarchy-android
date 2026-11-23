@@ -18,6 +18,17 @@ python3 - "$out" "$kind" "${programs[@]}" <<'PY'
 import json, os, re, subprocess, sys
 from pathlib import Path
 output, kind, *programs = sys.argv[1:]
+def package_owners(listing, path):
+    owners = set()
+    for line in listing.splitlines():
+        names, separator, owned_path = line.partition(": ")
+        if separator and owned_path == path:
+            for name in names.split(", "):
+                if re.fullmatch(r"[a-z0-9][a-z0-9+.\-]+(?::[a-z0-9][a-z0-9-]*)?", name):
+                    owners.add(name)
+    return sorted(owners)
+
+
 links = {}
 packages = {}
 for program in programs:
@@ -34,9 +45,12 @@ for program in programs:
         real = os.path.realpath(file)
         for path in dict.fromkeys([file, real, real.removeprefix("/usr")]):
             proc = subprocess.run(["dpkg-query", "-S", path], capture_output=True, text=True)
-            if proc.returncode == 0:
-                owner = proc.stdout.splitlines()[0].split(": ", 1)[0]
-                packages[owner] = subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", owner], text=True)
+            if proc.returncode != 0:
+                continue
+            owners = package_owners(proc.stdout, path)
+            if owners:
+                for owner in owners:
+                    packages[owner] = subprocess.check_output(["dpkg-query", "-W", "-f=${Version}", owner], text=True)
                 break
         else:
             raise SystemExit("Shared library owner is unknown: " + file)
