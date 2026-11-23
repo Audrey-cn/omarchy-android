@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the three guest component archives and their release descriptors."""
+"""Verify guest component archives and their release descriptors."""
 
 import argparse
 from contextlib import contextmanager
@@ -13,6 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 
+COMPONENTS = ("desktop", "browser", "graphics")
 DESKTOP = "omarchy-android-desktop"
 DESKTOP_PREFIX = "usr/lib/omarchy-android/desktop"
 BROWSER_PREFIXES = ("opt/omarchy-chromium128", "opt/omarchy-node")
@@ -304,12 +305,14 @@ def verify_component(directory, kind, version, source_sha):
     }
 
 
-def verify_release(directory, version, source_sha):
+def verify_release(directory, version, source_sha, kinds=COMPONENTS):
     require(re.fullmatch(VERSION, version), "expected a release version like 1.0.0")
     require(re.fullmatch(r"[0-9a-f]{40}", source_sha), "expected the full lowercase source commit SHA")
     directory = directory.resolve()
+    selected = set(kinds)
+    require(selected and selected <= set(COMPONENTS), "select at least one known component")
     components = []
-    for kind in ("desktop", "browser", "graphics"):
+    for kind in (kind for kind in COMPONENTS if kind in selected):
         try:
             components.append(verify_component(directory, kind, version, source_sha))
         except (ValueError, OSError, subprocess.SubprocessError, tarfile.TarError) as exc:
@@ -343,15 +346,18 @@ def main():
     parser.add_argument("directory", type=Path)
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--component", action="append", choices=COMPONENTS,
+                        help="Verify a selected component (repeatable, defaults to all components)")
     parser.add_argument("--write-evidence", action="store_true")
     args = parser.parse_args()
     try:
-        evidence = verify_release(args.directory, args.version, args.source_sha)
+        evidence = verify_release(args.directory, args.version, args.source_sha, args.component or COMPONENTS)
         if args.write_evidence:
             write_evidence(args.directory, evidence)
     except (ValueError, OSError) as exc:
         parser.exit(1, f"{exc}\n")
-    print(f"Verified desktop, browser and graphics {args.version} from {args.source_sha}")
+    names = ", ".join(component["kind"] for component in evidence["components"])
+    print(f"Verified {names} {args.version} from {args.source_sha}")
 
 
 if __name__ == "__main__":

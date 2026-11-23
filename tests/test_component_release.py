@@ -117,6 +117,27 @@ class ComponentRelease(unittest.TestCase):
             checksum, name = line.split("  ", 1)
             self.assertEqual(checksum, hashlib.sha256((self.directory / name).read_bytes()).hexdigest())
 
+    def test_desktop_only_release_excludes_unselected_packages(self):
+        command = [
+            "python3", str(ROOT / "scripts/verify-component-release.py"), str(self.directory),
+            "--source-sha", self.source, "--version", VERSION, "--component", "desktop",
+            "--write-evidence",
+        ]
+        rejected = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(rejected.returncode, 1)
+        self.assertIn("unexpected Debian packages", rejected.stderr)
+        self.assertFalse((self.directory / "SHA256SUMS").exists())
+        for kind in ("browser", "graphics"):
+            (self.directory / f"omarchy-{kind}-runtime_{VERSION}_arm64.deb").unlink()
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        self.assertEqual(result.stdout.strip(), f"Verified desktop {VERSION} from {self.source}")
+        evidence = json.loads((self.directory / "release-verification.json").read_text())
+        self.assertEqual([item["kind"] for item in evidence["components"]], ["desktop"])
+        self.assertEqual(set(evidence["sha256"]), {
+            "desktop-component.json", f"omarchy-android-desktop_{VERSION}_all.deb",
+        })
+        self.assertEqual(len((self.directory / "SHA256SUMS").read_text().splitlines()), 2)
+
     @unittest.skipUnless(shutil.which("dpkg-deb"), "requires Debian archive tools")
     def test_debian_zstd_archives(self):
         for kind in ("browser", "graphics"):

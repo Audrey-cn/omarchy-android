@@ -25,6 +25,7 @@ BASE = "https://github.com/" + REPO + "/releases/download/"
 API = "https://api.github.com/repos/" + REPO + "/releases"
 ROOT = Path("/")
 STATE = Path("/var/lib/omarchy-android/runtimes")
+BROWSER_RECEIPT = "opt/omarchy-chromium128/source-manifest.json"
 
 
 def sha(path):
@@ -231,7 +232,7 @@ def verify_deb(deb, pkg, meta):
                                 if [fields[key] for key in ("Package", "Version", "Architecture")] != [pkg, meta["version"], "arm64"]:
                                     raise ValueError("Unexpected Debian package identity")
                                 deps = [item.strip() for item in fields.get("Depends", "").split(",") if item.strip()]
-                                if deps != meta.get("depends", []) or not all(re.fullmatch("[a-z0-9][a-z0-9+.\-]+", d) for d in deps):
+                                if deps != meta.get("depends", []) or not all(re.fullmatch(r"[a-z0-9][a-z0-9+.\-]+", d) for d in deps):
                                     raise ValueError("Unexpected dependencies")
                             continue
                         if member.isdir() and (name in parents or name + "/" in prefixes):
@@ -283,6 +284,31 @@ def files(root, pkg):
     return {**data["files"], manifest: sha(path)}
 
 
+def legacy_browser_receipt(source, extracted):
+    """Accept only the same locked build recipe recorded at a different commit."""
+    def unique_keys(pairs):
+        obj = dict(pairs)
+        if len(obj) != len(pairs):
+            raise ValueError("Duplicate key in browser provenance")
+        return obj
+
+    if source.is_symlink() or source.stat().st_size > 1 << 20:
+        raise ValueError("Invalid legacy browser provenance: " + str(source))
+    raw = source.read_bytes()
+    found = json.loads(raw, object_pairs_hook=unique_keys)
+    lock_path = extracted / "usr/share/doc/omarchy-browser-runtime/sources.json"
+    lock = json.loads(lock_path.read_bytes())
+    candidate = json.loads((extracted / BROWSER_RECEIPT).read_bytes())
+    if not isinstance(found, dict) or not isinstance(found.get("sourceSha"), str):
+        raise ValueError("Invalid legacy browser provenance")
+    commit = found.pop("sourceSha")
+    expected = dict(lock, sourceManifestSha256=sha(lock_path), transformations=candidate["transformations"])
+    # Canonical JSON compares types too (Python otherwise considers True == 1).
+    if not re.fullmatch("[0-9a-f]{40}", commit) or json.dumps(found, sort_keys=True) != json.dumps(expected, sort_keys=True):
+        raise ValueError("Preserved conflicting browser provenance: " + str(source))
+    return raw
+
+
 def backup(state, pkg, extracted, work, current):
     new = files(extracted, pkg)
     doc = f"usr/share/doc/{pkg}"
@@ -319,11 +345,18 @@ def backup(state, pkg, extracted, work, current):
             if name in old:
                 raise ValueError("Missing managed file: " + str(src))
             continue
+        provenance = None
         if actual not in (old.get(name), legacy.get(name), new.get(name)):
-            raise ValueError("Preserved conflicting file: " + str(src))
+            if current or pkg != "omarchy-browser-runtime" or name != BROWSER_RECEIPT:
+                raise ValueError("Preserved conflicting file: " + str(src))
+            provenance = legacy_browser_receipt(src, extracted)
+            actual = hashlib.sha256(provenance).hexdigest()
         target = snapshot / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        if src.is_symlink():
+        if provenance is not None:
+            target.write_bytes(provenance)
+            shutil.copystat(src, target)
+        elif src.is_symlink():
             target.symlink_to(os.readlink(src))
         else:
             try:

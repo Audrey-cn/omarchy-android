@@ -7,6 +7,11 @@ on:
         description: Component version (X.Y.Z)
         required: true
         default: '1.0.0'
+      scope:
+        description: Build all runtimes or only the desktop update controller
+        type: choice
+        options: [all, desktop]
+        default: all
   pull_request:
     branches: [main]
     paths:
@@ -38,6 +43,7 @@ jobs:
           python3 scripts/build-desktop-component.py --version "$COMPONENT_VERSION" --output "$RUNNER_TEMP/desktop" --changes 'Explicit desktop updates, independent update sources, configuration preservation and recovery'
           cp core/bin/omarchy-component-update "$RUNNER_TEMP/desktop/omarchy-component-update"
           cp docs/component-updates.md "$RUNNER_TEMP/desktop/README.md"
+          python3 scripts/verify-component-release.py "$RUNNER_TEMP/desktop" --source-sha "$GITHUB_SHA" --version "$COMPONENT_VERSION" --component desktop --write-evidence
           cd "$RUNNER_TEMP/desktop"
           sha256sum omarchy-component-update > bootstrap-sha256.txt
       - uses: actions/upload-artifact@v4
@@ -73,7 +79,7 @@ jobs:
           if-no-files-found: error
 
   browser:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.scope != 'desktop'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +99,7 @@ jobs:
           if-no-files-found: error
 
   graphics:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.scope != 'desktop'
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4

@@ -22,6 +22,22 @@ module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.
 loader.exec_module(module)
 
 
+def receipt_fixture(stage, legacy):
+    doc = stage / "usr/share/doc/omarchy-browser-runtime"
+    doc.mkdir(parents=True, exist_ok=True)
+    lock = doc / "sources.json"
+    shutil.copyfile(REPO / "scripts/browser-bundle-sources.json", lock)
+    record = dict(json.loads(lock.read_bytes()), sourceSha="a" * 40,
+                  sourceManifestSha256=module.sha(lock), transformations=[])
+    candidate = stage / module.BROWSER_RECEIPT
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_text(json.dumps(record))
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    record["sourceSha"] = "b" * 40
+    legacy.write_text(json.dumps(record, indent=4) + "\n")
+    return record
+
+
 class RuntimeContracts(unittest.TestCase):
     def test_root_inspection_matches_published_catalog(self):
         catalog = json.loads((REPO / "apps/android/app/src/main/assets/initial-images.json").read_text())
@@ -99,6 +115,25 @@ class RuntimeContracts(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, reason):
                     module.verify_deb(Path("candidate.deb"), pkg, meta)
 
+    def test_legacy_browser_receipt_accepts_only_matching_lock_recipe(self):
+        with tempfile.TemporaryDirectory() as temp:
+            stage = Path(temp) / "stage"
+            legacy = Path(temp) / "old.json"
+            record = receipt_fixture(stage, legacy)
+            self.assertEqual(module.legacy_browser_receipt(legacy, stage), legacy.read_bytes())
+            for mutate in (lambda d: d.update(sourceSha="short"),
+                           lambda d: d.update(schemaVersion=True),
+                           lambda d: d.update(sourceManifestSha256="0" * 64),
+                           lambda d: d["versions"].update(chromium="different"),
+                           lambda d: d["sources"][0].update(sha256="0" * 64),
+                           lambda d: d["sources"][0].update(urls=["https://example.org"]),
+                           lambda d: d.update(unexpected=True)):
+                document = json.loads(json.dumps(record))
+                mutate(document)
+                legacy.write_text(json.dumps(document))
+                with self.assertRaises(ValueError):
+                    module.legacy_browser_receipt(legacy, stage)
+
     def test_reviewed_legacy_sway_and_browser_file_identification(self):
         for kind, name in (("graphics", "usr/local/bin/sway"),
                            ("browser", "opt/omarchy-chromium128/source-manifest.json")):
@@ -166,9 +201,14 @@ class DebianTransaction(unittest.TestCase):
             candidate.write_bytes(b"new runtime")
             doc = stage / "usr/share/doc" / pkg
             doc.mkdir(parents=True)
+            old_receipt = root / module.BROWSER_RECEIPT
+            receipt_fixture(stage, old_receipt)
+            original_receipt = old_receipt.read_bytes()
             baseline = doc / "legacy.json.xz"
             baseline.write_bytes(lzma.compress(json.dumps({name: module.sha(legacy)}).encode()))
             index = {name: module.sha(candidate), baseline.relative_to(stage).as_posix(): module.sha(baseline)}
+            for extra in (stage / module.BROWSER_RECEIPT, doc / "sources.json"):
+                index[extra.relative_to(stage).as_posix()] = module.sha(extra)
             (doc / "manifest.json").write_text(json.dumps(dict(package=pkg, files=index)))
             control = stage / "DEBIAN"
             control.mkdir()
@@ -196,9 +236,14 @@ class DebianTransaction(unittest.TestCase):
                         module.install(state, pkg, "browser", meta, deb)
                 self.assertTrue((state / "pending.json").is_file())
                 self.assertEqual(legacy.read_bytes(), b"new runtime")
+                tx = state / json.loads((state / "pending.json").read_text())
+                changes = json.loads((tx / "changes.json").read_text())
+                self.assertEqual(changes["before"][module.BROWSER_RECEIPT], module.hashlib.sha256(original_receipt).hexdigest())
+                self.assertEqual(old_receipt.read_bytes(), (stage / module.BROWSER_RECEIPT).read_bytes())
                 with patch.object(module, "smoke"):
                     module.recover(state, pkg, "browser")
                 self.assertFalse((state / "pending.json").exists())
                 self.assertEqual(legacy.read_bytes(), b"known old runtime")
+                self.assertEqual(old_receipt.read_bytes(), original_receipt)
                 self.assertEqual(profile.read_text(), "personal")
                 self.assertNotIn("Status: install ok installed", (dpkg / "status").read_text())
