@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""Apply a narrowly fingerprinted fix for Hermes' first-run connection deadline."""
+import argparse
+from datetime import datetime, timezone
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+
+PROFILE = {
+    "package": "hermes-desktop-2026.9.7-7-aarch64.pkg.tar.zst",
+    "package_sha256": "3f75d5abaeb25e81bf110a76ac0414fa8516fce05d32fc4807b2c54e368a3a84",
+    "commit": "2237be355906fbe6065ce1815711eee52b2d646e",
+    "electron": "40.10.2",
+    "renderer": "index-oSoqM7KJ.js",
+    "renderer_sha256": "a06a9032b16ba6d89ffdfa5693f168cbe25eb585ae78179280481e905aeeb504",
+    "main_sha256": "6b05b0377cb80789550aea1c85d318dddb4653392ffd09e1b9a1f3440566e64c",
+    "shared": "hermes-CVux_Zfz.js",
+    "shared_sha256": "32459cafb4cb1a02b5a7b6f9c02faf680f7411d8e7f739b05a8d902ce3c4716d",
+    "bootstrap_installer_sha256": "5854b15670b51a8daae8f59ddfa917062de9f74be261eb73b4b8d719710f8968",
+}
+ORIGINAL_CALL = '$n(t.getConnection(jr()??void 0),jee,`Timed out connecting to Hermes backend`)'
+REPAIRED_CALL = '__omarchyWaitInitialConnection(t,t.getConnection(jr()??void 0),jee)'
+WAIT_JS = r'''
+function __omarchyWaitInitialConnection(bridge, connection, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let finished = false, paused = false, inFlight = false, sequence = 0;
+    let deadline, poll, snapshotDeadline;
+    const finish = (failed, value) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(deadline);
+      clearTimeout(snapshotDeadline);
+      clearInterval(poll);
+      if (failed) reject(value); else resolve(value);
+    };
+    const arm = () => {
+      deadline = setTimeout(() => finish(true, new Error('Timed out connecting to Hermes backend')), timeoutMs);
+    };
+    const setPaused = next => {
+      if (paused === next || finished) return;
+      paused = next;
+      clearTimeout(deadline);
+      if (!paused) arm();
+    };
+    const inspect = () => {
+      if (finished || inFlight) return;
+      inFlight = true;
+      const current = ++sequence;
+      snapshotDeadline = setTimeout(() => {
+        if (finished || current !== sequence) return;
+        ++sequence;
+        inFlight = false;
+        setPaused(false);
+      }, 2000);
+      Promise.resolve().then(() => bridge.getBootstrapState()).then(state => {
+        if (finished || current !== sequence) return;
+        clearTimeout(snapshotDeadline);
+        inFlight = false;
+        // Only the explicit first-run choice or installer may pause this deadline.
+        setPaused(Boolean(state && !state.error && (state.setupChoice || state.active)));
+      }, () => {
+        if (finished || current !== sequence) return;
+        clearTimeout(snapshotDeadline);
+        inFlight = false;
+        setPaused(false);
+      });
+    };
+    arm();
+    // Real backend failures always win, including while the user/installer is waiting.
+    Promise.resolve(connection).then(value => finish(false, value), error => finish(true, error));
+    if (bridge && typeof bridge.getBootstrapState === 'function') {
+      poll = setInterval(inspect, 500);
+      inspect();
+    }
+  });
+}
+'''
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def patch_bytes(original):
+    text = original.decode("utf-8")
+    if text.count(ORIGINAL_CALL) != 1:
+        raise RuntimeError("Renderer callsite fingerprint is not unique; refusing an unreviewed patch")
+    return (text.replace(ORIGINAL_CALL, REPAIRED_CALL, 1) + "\n" + WAIT_JS).encode("utf-8")
+
+
+def paths(root):
+    dist = root / "resources/app.asar.unpacked/dist"
+    return dist / "assets" / PROFILE["renderer"], root / ".omarchy-onboarding"
+
+
+def inspect(root):
+    if (root / "version").read_text().strip() != PROFILE["electron"]:
+        raise RuntimeError("Unsupported Hermes Electron version; review the vendor package before patching")
+    stamp = json.loads((root / "resources/install-stamp.json").read_text())
+    if stamp.get("commit") != PROFILE["commit"]:
+        raise RuntimeError("Unsupported Hermes source version; install-stamp commit differs")
+    dist = root / "resources/app.asar.unpacked/dist"
+    for file, expected in [(dist / "electron-main.mjs", PROFILE["main_sha256"]),
+                           (dist / "assets" / PROFILE["shared"], PROFILE["shared_sha256"])]:
+        if sha(file.read_bytes()) != expected:
+            raise RuntimeError("Vendor source fingerprint mismatch: " + file.name)
+    renderer, state = paths(root)
+    current = renderer.read_bytes()
+    if sha(current) == PROFILE["renderer_sha256"]:
+        return renderer, state, current, False
+    backup = state / "renderer.original.js"
+    if not backup.is_file() or sha(backup.read_bytes()) != PROFILE["renderer_sha256"]:
+        raise RuntimeError("Renderer fingerprint mismatch or verified original backup missing")
+    original = backup.read_bytes()
+    if current != patch_bytes(original):
+        raise RuntimeError("Renderer fingerprint differs from both reviewed vendor and managed patch")
+    return renderer, state, original, True
+
+
+def atomic_write(path, data, mode=0o644):
+    fd, name = tempfile.mkstemp(prefix=".omarchy-onboarding-", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.chmod(mode)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def receipt(state, original, patched, status):
+    data = {"schema": 1, "patch": "initial-connection-bootstrap-wait-v1", "source": PROFILE,
+            "original_sha256": sha(original), "patched_sha256": sha(patched), "status": status,
+            "recorded_at": datetime.now(timezone.utc).isoformat()}
+    atomic_write(state / "manifest.json", (json.dumps(data, indent=2) + "\n").encode())
+
+
+def apply(root):
+    renderer, state, original, already = inspect(root)
+    patched = patch_bytes(original)
+    state.mkdir(mode=0o700, exist_ok=True)
+    with (state / ".patch.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        renderer, state, original, already = inspect(root)
+        backup = state / "renderer.original.js"
+        if backup.exists() and sha(backup.read_bytes()) != PROFILE["renderer_sha256"]:
+            raise RuntimeError("Existing original backup has an unknown fingerprint")
+        if not backup.exists():
+            atomic_write(backup, original)
+        if not already:
+            receipt(state, original, patched, "prepared")
+            atomic_write(renderer, patched, renderer.stat().st_mode & 0o777)
+        if renderer.read_bytes() != patched:
+            raise RuntimeError("Renderer patch verification failed")
+        receipt(state, original, patched, "applied")
+    print("Hermes onboarding patch verified: first-run choice/bootstrap waits; real failures remain failures")
+
+
+def check(root):
+    _, state, original, applied = inspect(root)
+    if not applied:
+        raise RuntimeError("Supported vendor renderer is not patched; run omarchy-repair-hermes-onboarding")
+    record = json.loads((state / "manifest.json").read_text())
+    if record.get("patched_sha256") != sha(patch_bytes(original)) or record.get("status") != "applied":
+        raise RuntimeError("Managed onboarding patch receipt is incomplete")
+    print("Hermes onboarding patch and rollback source verified")
+
+
+def rollback(root):
+    renderer, state, original, applied = inspect(root)
+    if not applied:
+        print("Hermes renderer already matches the reviewed vendor source")
+        return
+    with (state / ".patch.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        renderer, state, original, applied = inspect(root)
+        atomic_write(renderer, original, renderer.stat().st_mode & 0o777)
+        receipt(state, original, patch_bytes(original), "rolled-back")
+    print("Restored fingerprint-verified vendor renderer; user configuration was not changed")
+
+
+def seed_bootstrap_cache(root, hermes_home, install_script):
+    # This source pin is shared with the renderer repair. Never substitute a
+    # script merely because it has the expected filename or package version.
+    inspect(root)
+    if install_script.is_symlink() or not install_script.is_file():
+        raise RuntimeError("Packaged bootstrap installer must be a regular file")
+    original = install_script.read_bytes()
+    expected = PROFILE["bootstrap_installer_sha256"]
+    if sha(original) != expected:
+        raise RuntimeError("Packaged bootstrap installer fingerprint differs from the reviewed source")
+    cache = hermes_home / "bootstrap-cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    target = cache / ("install-" + PROFILE["commit"] + ".sh")
+    with (cache / ".omarchy-seed.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if target.exists() or target.is_symlink():
+            if target.is_symlink() or not target.is_file() or sha(target.read_bytes()) != expected:
+                raise RuntimeError("Existing pinned bootstrap cache differs; preserved without replacement")
+        else:
+            fd, name = tempfile.mkstemp(prefix=".omarchy-seed-", dir=cache)
+            temporary = Path(name)
+            try:
+                with os.fdopen(fd, "wb") as output:
+                    output.write(original)
+                    output.flush()
+                    os.fsync(output.fileno())
+                temporary.chmod(0o600)
+                # link() publishes the complete file atomically and refuses
+                # replacement even if another process creates target now.
+                try:
+                    os.link(temporary, target)
+                except FileExistsError:
+                    if target.is_symlink() or not target.is_file() or sha(target.read_bytes()) != expected:
+                        raise RuntimeError("Pinned bootstrap cache appeared concurrently; preserved")
+            finally:
+                temporary.unlink(missing_ok=True)
+        if target.is_symlink() or sha(target.read_bytes()) != expected:
+            raise RuntimeError("Pinned bootstrap cache verification failed")
+    print("Verified packaged installer cached for pinned Hermes bootstrap; backend dependencies still require installation")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--rollback", action="store_true")
+    mode.add_argument("--seed-bootstrap-cache", action="store_true")
+    parser.add_argument("--hermes-dir", type=Path, default=Path("/opt/hermes-desktop"))
+    parser.add_argument("--hermes-home", type=Path, default=Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))))
+    parser.add_argument("--install-script", type=Path, default=Path("/usr/share/hermes-desktop/install.sh"))
+    args = parser.parse_args()
+    if args.seed_bootstrap_cache:
+        seed_bootstrap_cache(args.hermes_dir.resolve(), args.hermes_home.resolve(), args.install_script.absolute())
+    else:
+        (rollback if args.rollback else check if args.check else apply)(args.hermes_dir.resolve())
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError) as error:
+        print("Hermes onboarding repair failed: " + str(error), file=sys.stderr)
+        sys.exit(1)

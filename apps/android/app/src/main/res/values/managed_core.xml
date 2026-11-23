@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <string name="tc4_managed_core_update_failed">Core tools could not be updated: %1$s. Your container and personal files have been kept.</string>
+</resources>

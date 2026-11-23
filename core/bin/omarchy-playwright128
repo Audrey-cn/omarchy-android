@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Use only the bundled Chromium 128 / Playwright 1.46.1 / Node 24.15.0 set.
+set -euo pipefail
+PW_HOME="${OMARCHY_PLAYWRIGHT128_HOME:-/opt/omarchy-chromium128}"
+NODE_HOME="${OMARCHY_NODE_HOME:-/opt/omarchy-node}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+
+usage() {
+  echo "Usage: omarchy-playwright128 check"
+  echo "       omarchy-playwright128 probe chromium [headless|wayland]"
+  echo "       omarchy-playwright128 browser-path chromium"
+  echo "       omarchy-playwright128 run SCRIPT [ARGS...] | cli [PLAYWRIGHT_ARGS...]"
+}
+fail() { echo "omarchy-playwright128: $*" >&2; exit 1; }
+COMMAND="${1:-help}"
+[[ $# -eq 0 ]] || shift
+case "$COMMAND" in help|-h|--help) usage; exit 0 ;; esac
+case "$COMMAND" in
+  check) [[ $# -eq 0 ]] || { usage >&2; exit 2; } ;;
+  probe)
+    [[ $# -ge 1 && $# -le 2 && "$1" == chromium ]] || { usage >&2; exit 2; }
+    case "${2:-headless}" in headless|wayland) ;; *) usage >&2; exit 2 ;; esac
+    ;;
+  browser-path) [[ $# -eq 1 && "$1" == chromium ]] || { usage >&2; exit 2; } ;;
+  run) [[ $# -gt 0 ]] || { usage >&2; exit 2; } ;;
+  cli)
+    # These assets are deployed by Android's managed-file verifier, not npm/PW.
+    for ARG in "$@"; do
+      case "$ARG" in install|install-deps|uninstall)
+        fail "Bundled browser files cannot be downloaded or removed through this entry."
+        ;;
+      esac
+    done
+    ;;
+  *) usage >&2; exit 2 ;;
+esac
+[[ "$PW_HOME" == /* && "$NODE_HOME" == /* ]] || fail "Managed runtime paths must be absolute."
+NODE_BIN="$NODE_HOME/node-v24.15.0-linux-arm64/bin/node"
+[[ -x "$NODE_BIN" ]] || fail "缺少配套 Node 24.15.0；请更新 Omarchy Android 一体包以恢复配套运行时。"
+[[ "$("$NODE_BIN" --version)" == v24.15.0 ]] || fail "配套 Node 版本不符；请更新 Omarchy Android 一体包以恢复配套运行时。"
+export OMARCHY_PLAYWRIGHT128_HOME="$PW_HOME"
+export PLAYWRIGHT_BROWSERS_PATH="$PW_HOME/browsers"
+export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+export NODE_PATH="$PW_HOME/node_modules${NODE_PATH:+:$NODE_PATH}"
+"$NODE_BIN" "$SCRIPT_DIR/omarchy-playwright128-check.cjs"
+case "$COMMAND" in
+  check) echo 'Bundled Chromium 128 / Playwright 1.46.1 / Node 24.15.0 files verified; runtime probes are separate.' ;;
+  browser-path) printf '%s\n' "$PW_HOME/browsers/chromium-1129/chrome-linux/chrome" ;;
+  probe)
+    if [[ "${2:-headless}" == wayland ]]; then
+      KEYBOARD_RESTORE="$SCRIPT_DIR/omarchy-restore-x11-keyboard"
+      if [[ -e "$KEYBOARD_RESTORE" || -L "$KEYBOARD_RESTORE" ]]; then
+        "$KEYBOARD_RESTORE" || {
+          STATUS=$?
+          echo "Wayland 自检已停止：无法恢复 X11 键盘状态。" >&2
+          exit "$STATUS"
+        }
+      fi
+    fi
+    export OMARCHY_PLAYWRIGHT_HOME="$PW_HOME"
+    export OMARCHY_PLAYWRIGHT_RESULTS="${OMARCHY_PLAYWRIGHT128_RESULTS:-${HOME:-/root}/.local/state/omarchy/playwright128}"
+    exec "$NODE_BIN" "$SCRIPT_DIR/omarchy-playwright-tool.cjs" probe "$@"
+    ;;
+  run) exec "$NODE_BIN" "$@" ;;
+  cli) exec "$NODE_BIN" "$PW_HOME/node_modules/playwright/cli.js" "$@" ;;
+esac

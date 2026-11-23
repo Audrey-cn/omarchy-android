@@ -1,4 +1,5 @@
 #!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 export XDG_RUNTIME_DIR=/tmp
 export LANG=zh_CN.UTF-8
 export LC_ALL=zh_CN.UTF-8
@@ -11,9 +12,19 @@ export QT_IM_MODULE=fcitx
 export XMODIFIERS=@im=fcitx
 export no_proxy=127.0.0.1,localhost
 export NO_PROXY=127.0.0.1,localhost
+# PRoot cannot reliably emulate uv's cache hardlinks during Python dependency installs.
+export UV_LINK_MODE=copy
 PROXY_FLAGS=""
 if bash -c "</dev/tcp/127.0.0.1/18888" 2>/dev/null; then
   export http_proxy=http://127.0.0.1:18888 https_proxy=http://127.0.0.1:18888
   PROXY_FLAGS="--proxy-server=http://127.0.0.1:18888 --proxy-bypass-list=127.0.0.1;localhost"
+fi
+KEYBOARD_RESTORE="$SCRIPT_DIR/omarchy-restore-x11-keyboard"
+if [[ -e "$KEYBOARD_RESTORE" || -L "$KEYBOARD_RESTORE" ]]; then
+  "$KEYBOARD_RESTORE" || {
+    STATUS=$?
+    echo "Hermes 启动已停止：无法恢复 X11 键盘状态。" >&2
+    exit "$STATUS"
+  }
 fi
 exec /opt/hermes-desktop/Hermes --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-gpu-compositing --disable-gpu-sandbox --disable-software-rasterizer --ozone-platform=wayland --enable-wayland-ime --password-store=basic --lang=zh-CN $PROXY_FLAGS "$@"

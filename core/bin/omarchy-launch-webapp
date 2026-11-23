@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Default Omarchy WebApp launcher (WebKitGTK in the standalone PRoot app).
+# Default Omarchy WebApp launcher (pinned Chromium in the standalone PRoot app).
 set -euo pipefail
 url="${1:-}"
 [[ -n "$url" ]] || exit 0

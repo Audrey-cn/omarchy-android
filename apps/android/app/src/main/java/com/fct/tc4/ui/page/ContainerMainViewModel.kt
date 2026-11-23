@@ -32,11 +32,14 @@ import com.fct.tc4.TinyMicrophone
 import com.fct.tc4.R
 import com.fct.tc4.TinyIpp
 import com.fct.tc4.TinyStorage
+import com.fct.tc4.ManagedCoreAssets
+import com.fct.tc4.ProotRuntimePolicy
 import com.fct.tc4.ui.misc.ConfigManager
 import com.fct.tc4.ui.misc.Global
 import com.fct.tc4.ui.misc.UpdateChecker
 import com.fct.tc4.ui.misc.UpdateResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,7 +105,22 @@ class ContainerMainViewModel(
             }
             config = loaded
             _configState.value = config
-            setupEnvironment()
+            try {
+                withContext(Dispatchers.IO) {
+                    ManagedCoreAssets.syncBeforeStart(getApplication(), code)
+                }
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                Log.e(TAG, "Managed core update failed", error)
+                _errorMessage.value = getApplication<Application>().getString(
+                    R.string.tc4_managed_core_update_failed, error.message ?: error.javaClass.simpleName)
+                _isInitialized.value = true
+                return@launch
+            }
+            if (!setupEnvironment()) {
+                _isInitialized.value = true
+                return@launch
+            }
             withContext(Dispatchers.IO) {
                 launchContainer()
             }
@@ -177,8 +195,17 @@ class ContainerMainViewModel(
         }
     }
 
-    private fun setupEnvironment() {
+    private fun setupEnvironment(): Boolean {
         val app = getApplication<Application>()
+        val runtime = ProotRuntimePolicy.select(code, config["boot_command"] as? String, Global.useLegacyProot)
+        val nativeDirectory = File(app.applicationInfo.nativeLibraryDir)
+        val usesReadonlyRuntime = runtime.id == "omarchy-proot-readonly-v1"
+        if (usesReadonlyRuntime && listOf(runtime.executableLibrary, runtime.loaderLibrary, runtime.loader32Library)
+                .any { name -> File(nativeDirectory, name).let { !it.isFile || !it.canExecute() } }) {
+            Log.e(TAG, "Bundled Omarchy PRoot runtime is incomplete in $nativeDirectory")
+            _errorMessage.value = app.getString(R.string.tc4_bundled_runtime_incomplete)
+            return false
+        }
         Global.terminalSession?.finishIfRunning()
         Global.newSession(onFinished = { exitCode ->
             if (exitCode == -9) {
@@ -193,11 +220,18 @@ class ContainerMainViewModel(
         Global.setupEnvironment()
         val containerDir = "${app.dataDir.absolutePath}/$code"
         Global.sendCommand("export CONTAINER_DIR=$containerDir")
-        val prootVariant = if (Global.useLegacyProot) "proot-classic" else "proot-latest"
+        // setupEnvironment() installs Tiny's old loader pair first. Override both
+        // only for Omarchy's generic PRoot command, including existing installs.
+        val runtimeDirectory = if (usesReadonlyRuntime) nativeDirectory else File(app.filesDir, "applib")
+        if (usesReadonlyRuntime) {
+            Global.sendCommand("export PROOT_LOADER=${File(runtimeDirectory, runtime.loaderLibrary).absolutePath}")
+            Global.sendCommand("export PROOT_LOADER_32=${File(runtimeDirectory, runtime.loader32Library).absolutePath}")
+        }
         Global.sendCommand(
-            "ln -sf ${app.filesDir.absolutePath}/applib/lib__bin__${prootVariant}__.so" +
+            "ln -sf ${File(runtimeDirectory, runtime.executableLibrary).absolutePath}" +
             " ${app.filesDir.absolutePath}/bootstrap/bin/proot"
         )
+        return true
     }
 
     @Suppress("UNCHECKED_CAST")

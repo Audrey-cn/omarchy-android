@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Legacy browser/WebApp compatibility launcher (PRoot uses WebKitGTK).
-# Real Playwright Chromium is launched by omarchy-playwright-chromium.
+# Daily browser/WebApp launcher; keep Root/Chroot's existing host forwarding.
 set -euo pipefail
 
 # In Root Chroot mode, forward to Termux host Chromium daemon if available
@@ -15,5 +14,6 @@ PY
   exit 0
 fi
 
-# In Non-Root All-in-One APK (PRoot), launch native in-system WebKitGTK 4.1 browser!
-exec /usr/local/bin/omarchy-browser "$@"
+# The standalone PRoot app uses the verified, pinned real Chromium.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+exec "$SCRIPT_DIR/omarchy-playwright-chromium" "$@"

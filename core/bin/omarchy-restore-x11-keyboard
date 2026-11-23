@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""Restore Sway's physical X11 keyboard after a virtual keyboard disappears."""
+
+import glob
+import json
+import os
+import re
+import socket
+import stat
+import struct
+import sys
+
+MAGIC = b"i3-ipc"
+HEADER = struct.Struct("<6sII")
+GET_INPUTS = 100
+RUN_COMMAND = 0
+MAX_REPLY = 4 * 1024 * 1024
+
+
+class IPCError(Exception):
+    pass
+
+
+def _read_exact(connection, size):
+    chunks = []
+    remaining = size
+    while remaining:
+        chunk = connection.recv(remaining)
+        if not chunk:
+            raise IPCError("Sway IPC reply ended early")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def request(path, message_type, payload=""):
+    encoded = payload.encode("utf-8")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(3)
+            connection.connect(path)
+            connection.sendall(HEADER.pack(MAGIC, len(encoded), message_type) + encoded)
+            magic, length, reply_type = HEADER.unpack(_read_exact(connection, HEADER.size))
+            if magic != MAGIC or reply_type != message_type or length > MAX_REPLY:
+                raise IPCError("invalid Sway IPC reply header")
+            raw = _read_exact(connection, length)
+    except OSError as error:
+        raise IPCError("Sway IPC connection failed: " + str(error)) from error
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError) as error:
+        raise IPCError("invalid Sway IPC JSON reply") from error
+
+
+def socket_candidates(environment):
+    paths = []
+    if environment.get("SWAYSOCK"):
+        paths.append(environment["SWAYSOCK"])
+    runtime = environment.get("XDG_RUNTIME_DIR")
+    if runtime:
+        paths.extend(sorted(glob.glob(os.path.join(runtime, "sway-ipc.*.sock"))))
+    candidates = []
+    for path in dict.fromkeys(paths):
+        try:
+            mode = os.stat(path).st_mode
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            raise IPCError("cannot inspect Sway IPC socket: " + str(error)) from error
+        if stat.S_ISSOCK(mode):
+            candidates.append(path)
+    return candidates
+
+
+def keyboard_state(inputs):
+    if not isinstance(inputs, list):
+        raise IPCError("Sway get_inputs did not return a list")
+    result = {}
+    for device in inputs:
+        if not isinstance(device, dict):
+            raise IPCError("invalid input entry in Sway reply")
+        if device.get("name") != "x11-keyboard" or device.get("type") != "keyboard":
+            continue
+        identifier = device.get("identifier")
+        delay = device.get("repeat_delay")
+        index = device.get("xkb_active_layout_index")
+        if not isinstance(identifier, str) or not re.fullmatch(r"[0-9]+:[0-9]+:x11-keyboard", identifier):
+            raise IPCError("X11 keyboard has an invalid identifier")
+        if type(delay) is not int or not 0 <= delay <= 2147483647:
+            raise IPCError("X11 keyboard has no valid current repeat_delay")
+        if type(index) is not int or not 0 <= index <= 2147483647:
+            raise IPCError("X11 keyboard has no valid current layout index")
+        names = device.get("xkb_layout_names")
+        if isinstance(names, list) and not index < len(names):
+            raise IPCError("X11 keyboard current layout index is out of range")
+        if identifier in result:
+            raise IPCError("duplicate X11 keyboard identifier in Sway reply")
+        result[identifier] = (delay, index)
+    return result
+
+
+def command(path, text):
+    replies = request(path, RUN_COMMAND, text)
+    if not isinstance(replies, list) or not replies or any(
+        not isinstance(reply, dict) or reply.get("success") is not True for reply in replies
+    ):
+        raise IPCError("Sway rejected keyboard restore command")
+
+
+def restore(environment):
+    candidates = socket_candidates(environment)
+    if not candidates:
+        return
+    last_error = None
+    for path in candidates:
+        try:
+            inputs = request(path, GET_INPUTS)
+        except IPCError as error:
+            last_error = error
+            continue
+        break
+    else:
+        raise last_error
+    original = keyboard_state(inputs)
+    if not original:
+        return
+    for identifier, (delay, index) in original.items():
+        # Reconfiguration makes this keyboard active; retain its original group.
+        # Even an interrupted reply may follow a successful reconfiguration.
+        try:
+            command(path, f'input "{identifier}" repeat_delay {delay}')
+        finally:
+            command(path, f'input "{identifier}" xkb_switch_layout {index}')
+    current = keyboard_state(request(path, GET_INPUTS))
+    if any(current.get(identifier) != values for identifier, values in original.items()):
+        raise IPCError("X11 keyboard current delay or layout index was not restored")
+
+
+def main():
+    try:
+        restore(os.environ)
+    except IPCError as error:
+        print("omarchy-restore-x11-keyboard: " + str(error), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

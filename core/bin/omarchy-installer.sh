@@ -179,6 +179,8 @@ DESKTOP
         tar --zstd -xf "/tmp/$HFILE" -C / --exclude='.PKGINFO' --exclude='.MTREE' --exclude='.BUILDINFO' --exclude='.INSTALL'
         rm -f "/tmp/$HFILE" /tmp/omarchy.db "$APP_DIR/Hermes.desktop"
         /usr/local/bin/omarchy-repair-hermes-pty
+        /usr/local/bin/omarchy-repair-hermes-onboarding
+        /usr/local/bin/omarchy-repair-hermes-onboarding --seed-bootstrap-cache
         for f in /usr/share/applications/*hermes*.desktop; do
             [ -f "$f" ] && sed -i "s|^Exec=.*|Exec=/usr/local/bin/hermes-desktop-launch %u|" "$f"
         done
@@ -286,7 +288,6 @@ EOF
         echo "✓ Omarchy Browser (WebKitGTK) 已安装。"
         ;;
     install.browser.chromium)
-        echo "实验性 Chromium：当前 K20 的 headless / CDP 验收未通过；安装后必须先通过运行自检。"
         /usr/local/bin/omarchy-install-playwright-browser chromium
         ;;
     install.browser.firefox)
@@ -304,12 +305,15 @@ EOF
         chmod +x "$APP_DIR/Firefox.desktop"
         echo "✓ Mozilla Firefox DEB 已安装；这不是 Playwright 的 Firefox 引擎。首次启动仍需验证本机兼容性。"
         ;;
-    install.browser.playwright|install.browser.firefox-playwright)
+    install.browser.playwright)
+        /usr/local/bin/omarchy-install-playwright-browser chromium
+        ;;
+    install.browser.firefox-playwright)
         /usr/local/bin/omarchy-install-playwright-browser firefox
         ;;
     install.browser.*)
         echo "尚未为 $LABEL 实现并验证 ARM64 / Android PRoot 安装方案。没有替换安装其他品牌浏览器。" >&2
-        echo "可选择 Omarchy Browser、Agent 浏览器 Firefox (Playwright) 或 Firefox (Mozilla DEB)。" >&2
+        echo "可选择内置 Chromium 128、Firefox (Playwright)、Omarchy Browser 或 Firefox (Mozilla DEB)。" >&2
         exit 1
         ;;
 

@@ -1,4 +1,4 @@
-# Hermes Desktop 原生模块兼容修复
+# Hermes Desktop 原生模块与首次启动修复
 
 ## 问题与范围
 
@@ -49,9 +49,66 @@ omarchy-repair-hermes-pty --rollback
 
 回滚恢复原文件，原文件可能仍有最初的 GLIBC 问题；需要再次用 `--diagnose` 判断。更改安装位置或做隔离验证可使用 `--hermes-dir DIR`、`--cache-dir DIR`。
 
+## 首次选择页面的 45 秒误超时
+
+`hermes-desktop-2026.9.7-7` 的主进程在缺少本地后端时等待用户选择安装或远程连接；这一等待本身没有失败期限。renderer 却从 `getConnection()` 调用起计时 45 秒，用户尚未选择也会进入 `Hermes couldn't start / Timed out connecting to Hermes backend`。同一时间预算也不足以覆盖正常的依赖安装。
+
+`omarchy-repair-hermes-onboarding` 只修改初次 `getConnection()` 的一个调用点：只有 bootstrap IPC 明确报告正在等待选择或正在安装、且没有错误时暂停连接计时；结束后保留正常的 45 秒连接期限。后端 Promise 的真实拒绝仍立即向上传递；状态 IPC 缺失、失败或连续 2 秒无响应都会恢复连接计时。它不自动安装后端、不改模型配置，也不改之后 WebSocket、API 或 Agent 的期限。
+
+修补范围按实际文件校验，不按包名猜测。当前仅接受 Electron `40.10.2`、安装来源 commit `2237be355906fbe6065ce1815711eee52b2d646e` 及以下 SHA256；不同版本必须先重新核对上游实现：
+
+| 文件 | SHA256 |
+| --- | --- |
+| 官方 ARM64 包 | `3f75d5abaeb25e81bf110a76ac0414fa8516fce05d32fc4807b2c54e368a3a84` |
+| `dist/electron-main.mjs` | `6b05b0377cb80789550aea1c85d318dddb4653392ffd09e1b9a1f3440566e64c` |
+| `dist/assets/index-oSoqM7KJ.js` | `a06a9032b16ba6d89ffdfa5693f168cbe25eb585ae78179280481e905aeeb504` |
+| `dist/assets/hermes-CVux_Zfz.js` | `32459cafb4cb1a02b5a7b6f9c02faf680f7411d8e7f739b05a8d902ce3c4716d` |
+
+安装器在 native 修复后调用此 helper。已安装 guest 可在关闭 Hermes 后执行：
+
+```bash
+omarchy-repair-hermes-onboarding
+omarchy-repair-hermes-onboarding --check
+hermes-desktop-launch
+
+# 关闭 Hermes 后恢复经过指纹核对的原 renderer
+omarchy-repair-hermes-onboarding --rollback
+```
+
+原 renderer 和来源/补丁指纹保存在 `/opt/hermes-desktop/.omarchy-onboarding/`，写入和替换均为原子操作。重复修补不累加；回滚拒绝覆盖后来出现的未知修改。用户配置与历史会话不在补丁范围内。
+
+## 本地后端的正常初始化路径
+
+在首选页面点击 **Install locally**。桌面按安装 stamp 固定的上游 commit 取得 `scripts/install.sh`，缓存于 `$HERMES_HOME/bootstrap-cache/install-<commit>.sh`，然后按 manifest 分阶段安装：系统依赖、源码、Python venv、Python/Node 依赖、命令入口、配置模板及完成标记。GUI 使用非交互阶段模式，跳过需要用户输入的 API 设置和 gateway 服务配置；完成后由桌面自身启动本地 `hermes ... serve`，无需另建常驻 gateway 服务。
+
+`hermes-desktop-launch` 为 Hermes 及其子安装进程设置 `UV_LINK_MODE=copy`，避免 `uv` 在 PRoot 中创建缓存硬链接时报 `Operation not permitted`；不修改其他应用或全局环境。
+
+默认 `HERMES_HOME` 为 `$HOME/.hermes`。源码和 venv 位于其 `hermes-agent/` 下，初次安装后可做以下不显示模型密钥的检查：
+
+```bash
+test -x "$HOME/.hermes/hermes-agent/venv/bin/python"
+PYTHONPATH="$HOME/.hermes/hermes-agent" \
+  "$HOME/.hermes/hermes-agent/venv/bin/python" \
+  -c 'import hermes_cli.main; print("HERMES_CLI_IMPORT_OK")'
+```
+
+需要共享 Node 时，先运行 `NODE_BIN="$(omarchy-node-runtime)"`，再以 `PATH="$(dirname "$NODE_BIN"):$PATH" hermes-desktop-launch` 启动。已有命名 custom provider 的模型配置应保留该名称、对应 provider 定义及所需环境变量；安装前后不要将完整 `.env`、连接描述对象或 Electron 的连接 JSON 打印到日志。配置迁入和一次真实模型/工具请求属于后续验收。
+
+安装和运行日志分别位于 `$HERMES_HOME/logs/bootstrap-*.log` 与 `$HERMES_HOME/logs/desktop.log`。只有实际进入安装阶段才会生成 bootstrap 日志；停留在选择页面时没有该日志不代表安装失败。安装错误应以原阶段错误和进程退出为准，不能靠扩大 renderer 的等待时间掩盖。
+
+官方包本身还带有 `/usr/share/hermes-desktop/install.sh`，但 desktop 的初始下载逻辑不会自动使用它。安装器会调用以下命令，将经过 stamp 和 SHA256 核对的该文件原子发布到固定 commit 的 bootstrap cache：
+
+```bash
+omarchy-repair-hermes-onboarding --seed-bootstrap-cache
+```
+
+当前已知脚本 SHA256 为 `5854b15670b51a8daae8f59ddfa917062de9f74be261eb73b4b8d719710f8968`。相同缓存可重复使用；已有不同内容或符号链接时拒绝覆盖，需先检查其来源。`--hermes-home DIR` 可指定其他 profile 的数据根。缓存只免去初始 Node `https.get` 拉取 `install.sh` 的网络请求，源码、Python/Node 依赖仍需缓存或网络，不代表完整离线安装。Chromium 的 `--proxy-server` 也不能保证代理 Node 的这一请求；需要代理时限定到本次进程和安装子进程，并保持本地连接绕过代理。
+
 ## 验收边界
 
 本地文件测试验证版本键、损坏缓存拒绝、验证前不覆盖文件、替换后失败回滚和原备份保留；它们不能替代目标设备的 native smoke。
+
+首启回归使用虚拟时钟复现官方 wrapper 在等待选择时 45 秒失败，并检查修补后长时间等待/安装、安装结束后的正常期限、真实后端拒绝、IPC 丢失、定时器清理、来源校验及精确回滚。缓存官方包的实际 renderer 也已完成指纹校验、修补后 ES module 语法检查与原字节回滚。上述验证不等于目标设备后端安装或模型调用已经通过。
 
 ```bash
 python3 -m unittest discover -s tests -v

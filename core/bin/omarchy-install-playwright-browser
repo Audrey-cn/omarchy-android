@@ -2,11 +2,11 @@
 # Publish a desktop entry only after this exact browser passes both runtime probes.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-ENGINE="${1:-firefox}"
+ENGINE="${1:-chromium}"
 [[ $# -le 1 ]] || { echo "Usage: omarchy-install-playwright-browser [firefox|chromium]" >&2; exit 2; }
 case "$ENGINE" in
   firefox) NAME="Firefox (Playwright)"; ICON=firefox ;;
-  chromium) NAME="Chromium (Playwright, experimental)"; ICON=web-browser ;;
+  chromium) NAME="Chromium 128 (Playwright)"; ICON=web-browser ;;
   *) echo "Use firefox or chromium." >&2; exit 2 ;;
 esac
 APP_DIR="${HOME:-/root}/.local/share/applications"
@@ -15,6 +15,8 @@ if [[ "$ENGINE" == firefox ]]; then
   ENTRY="$APP_DIR/Firefox-Playwright.desktop"
 else
   ENTRY="$APP_DIR/Chromium-Playwright.desktop"
+  AGENT_ENTRY="$APP_DIR/Chromium-128-Agent.desktop"
+  rm -f "$AGENT_ENTRY"
   # Retire only legacy entries created by Omarchy's old Chromium adapter.
   if [[ -f "$APP_DIR/Chromium.desktop" ]] && \
      grep -Eq '^Exec=/usr/local/bin/omarchy-(playwright-)?chromium([[:space:]]|$)' "$APP_DIR/Chromium.desktop"; then
@@ -22,9 +24,30 @@ else
   fi
 fi
 rm -f "$ENTRY"
-"$SCRIPT_DIR/omarchy-playwright" install "$ENGINE"
-"$SCRIPT_DIR/omarchy-playwright" probe "$ENGINE" headless
-"$SCRIPT_DIR/omarchy-playwright" probe "$ENGINE" wayland
+if [[ "$ENGINE" == chromium ]]; then
+  NEEDS_NSS=0
+  for PACKAGE in libnss3 libnspr4; do
+    [[ "$(dpkg-query -W -f='${db:Status-Status}' "$PACKAGE" 2>/dev/null || true)" == installed ]] || NEEDS_NSS=1
+  done
+  if [[ "$NEEDS_NSS" == 1 ]]; then
+    echo "正在补齐 Chromium 128 的系统依赖 libnss3 / libnspr4..."
+    DEBIAN_FRONTEND=noninteractive apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libnss3 libnspr4
+    for PACKAGE in libnss3 libnspr4; do
+      [[ "$(dpkg-query -W -f='${db:Status-Status}' "$PACKAGE" 2>/dev/null || true)" == installed ]] || {
+        echo "Chromium 128 依赖尚未安装完成：$PACKAGE" >&2
+        exit 1
+      }
+    done
+  fi
+  "$SCRIPT_DIR/omarchy-playwright128" check
+  "$SCRIPT_DIR/omarchy-playwright128" probe chromium headless
+  "$SCRIPT_DIR/omarchy-playwright128" probe chromium wayland
+else
+  "$SCRIPT_DIR/omarchy-playwright" install "$ENGINE"
+  "$SCRIPT_DIR/omarchy-playwright" probe "$ENGINE" headless
+  "$SCRIPT_DIR/omarchy-playwright" probe "$ENGINE" wayland
+fi
 
 TMP_ENTRY="$(mktemp "$APP_DIR/.omarchy-browser.XXXXXX")"
 trap 'rm -f "$TMP_ENTRY"' EXIT
@@ -40,5 +63,21 @@ Categories=Network;WebBrowser;
 EOF
 chmod 755 "$TMP_ENTRY"
 mv -f "$TMP_ENTRY" "$ENTRY"
+if [[ "$ENGINE" == chromium ]]; then
+  TMP_ENTRY="$(mktemp "$APP_DIR/.omarchy-browser.XXXXXX")"
+  cat > "$TMP_ENTRY" <<EOF
+[Desktop Entry]
+Name=Chromium 128 (Agent CDP)
+Name[zh_CN]=Chromium 128（Agent 专用）
+Comment=Start the separate Agent browser with loopback CDP
+Exec=/usr/local/bin/omarchy-playwright-chromium --agent %u
+Icon=web-browser
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+EOF
+  chmod 755 "$TMP_ENTRY"
+  mv -f "$TMP_ENTRY" "$AGENT_ENTRY"
+fi
 echo "✓ $NAME 已通过本次 headless 和 Wayland 自检，已添加到应用网格。"
 echo "  实际 Agent 工具链仍需单独验收。"
