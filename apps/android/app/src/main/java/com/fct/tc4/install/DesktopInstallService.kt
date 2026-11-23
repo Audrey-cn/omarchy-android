@@ -36,6 +36,11 @@ class DesktopInstallService : Service() {
     private val controlLock = Any()
     private var installing = false
     private var latestStartId = 0
+    private val workQueue = InitialDesktopWorkQueue(worker, InitialDesktopState.running, controlLock) {
+        installing = false
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(latestStartId)
+    }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate()
@@ -43,65 +48,74 @@ class DesktopInstallService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL, "桌面安装", NotificationManager.IMPORTANCE_LOW))
     }
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        synchronized(controlLock) { latestStartId = startId }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = synchronized(controlLock) {
+        // Keep the new id and acceptance atomic with worker idle/stopSelf finalization.
+        latestStartId = startId
         if (intent?.action in listOf(PAUSE, CANCEL)) {
-            synchronized(controlLock) {
-                if (installing) return START_NOT_STICKY
-                pause.set(true)
-                if (intent?.action == CANCEL) cancel.set(true)
-            }
+            if (installing) return@synchronized START_NOT_STICKY
+            pause.set(true)
+            if (intent?.action == CANCEL) cancel.set(true)
             if (!InitialDesktopState.running.get()) {
-                try { if (cancel.get()) cancelCache() }
-                catch (error: Exception) { Log.e("InitialDesktop", "Cancellation state could not be saved: ${error.javaClass.simpleName}") }
-                finally { stopSelf(startId) }
+                if (intent?.action == CANCEL) {
+                    workQueue.cancelIdle({ showForeground(cancellingState()) }) { performCancellation() }
+                } else stopSelf(startId)
             }
-            return START_NOT_STICKY
+            START_NOT_STICKY
+        } else if (intent?.action != START) {
+            stopSelf(startId)
+            START_NOT_STICKY
+        } else {
+            val imageId = intent.getStringExtra(IMAGE_ID)
+            val localUri = intent.getStringExtra(IMPORT_URI)?.let(Uri::parse)
+            val requestedState = InitialDesktopState.state.value
+            workQueue.start({
+                pause.set(false)
+                cancel.set(false)
+                installing = false
+                showForeground(InitialDesktopState.state.value)
+            }) { performInstall(imageId, localUri, requestedState) }
+            START_NOT_STICKY
         }
-        if (intent?.action != START) { stopSelf(startId); return START_NOT_STICKY }
-        if (!InitialDesktopState.running.compareAndSet(false, true)) return START_NOT_STICKY
-        synchronized(controlLock) { pause.set(false); cancel.set(false); installing = false }
-        val notice = notification(InitialDesktopState.state.value)
+    }
+    private fun showForeground(state: DesktopSetupState) {
+        val notice = notification(state)
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTICE, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else startForeground(NOTICE, notice)
-        val imageId = intent.getStringExtra(IMAGE_ID)
-        val localUri = intent.getStringExtra(IMPORT_URI)?.let(Uri::parse)
-        worker.execute {
-            try { runInstall(imageId, localUri) }
-            catch (error: Exception) {
-                Log.e("InitialDesktop", "Initial installation stopped: ${error.javaClass.simpleName}")
-                val message = when {
-                    error.message?.contains("space", true) == true -> "存储空间不足。请释放空间后重试，已有数据未改动。"
-                    error.message?.contains("existing", true) == true -> "检测到已有桌面，为保护数据已停止首次安装。"
-                    else -> "下载或安装未完成。已保留可恢复的进度，请继续或重新选择离线镜像。"
-                }
-                try {
-                    if (!cancel.get()) publish(InitialDesktopState.state.value.copy(
-                        phase = if (pause.get() && !installing) SetupPhase.PAUSED else SetupPhase.FAILED,
-                        message = if (pause.get() && !installing) "已暂停，重新打开应用后可继续。" else message, bytesPerSecond = 0))
-                } catch (persistenceError: Exception) {
-                    Log.e("InitialDesktop", "Installation state could not be saved: ${persistenceError.javaClass.simpleName}")
-                }
-            } finally {
-                try {
-                    if (cancel.get() && !installing) cancelCache()
-                } catch (cleanupError: Exception) {
-                    Log.e("InitialDesktop", "Cancellation state could not be saved: ${cleanupError.javaClass.simpleName}")
-                } finally {
-                    val finishedStartId = synchronized(controlLock) {
-                        installing = false
-                        InitialDesktopState.running.set(false)
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        latestStartId
-                    }
-                    stopSelf(finishedStartId)
-                }
-            }
-        }
-        return START_NOT_STICKY
     }
-    private fun runInstall(id: String?, localUri: Uri?) {
-        val previous = InitialDesktopState.state.value
+    private fun cancellingState() = InitialDesktopState.state.value.copy(
+        phase = SetupPhase.VERIFYING, message = "正在清理已取消的安装缓存…", bytesPerSecond = 0)
+    private fun performCancellation() {
+        try { publish(cancellingState()) }
+        catch (error: Exception) { Log.e("InitialDesktop", "Cancellation progress could not be saved: ${error.javaClass.simpleName}") }
+        // In particular, a full disk must not prevent the cleanup that frees that disk.
+        try { cancelCache() }
+        catch (error: Exception) { Log.e("InitialDesktop", "Cancellation state could not be saved: ${error.javaClass.simpleName}") }
+    }
+    private fun performInstall(imageId: String?, localUri: Uri?, requestedState: DesktopSetupState) {
+        try { runInstall(imageId, localUri, requestedState) }
+        catch (error: Exception) {
+            Log.e("InitialDesktop", "Initial installation stopped: ${error.javaClass.simpleName}")
+            val message = when {
+                error.message?.contains("space", true) == true -> "存储空间不足。请释放空间后重试，已有数据未改动。"
+                error.message?.contains("existing", true) == true -> "检测到已有桌面，为保护数据已停止首次安装。"
+                else -> "下载或安装未完成。已保留可恢复的进度，请继续或重新选择离线镜像。"
+            }
+            try {
+                if (!cancel.get()) publish(InitialDesktopState.state.value.copy(
+                    phase = if (pause.get() && !installing) SetupPhase.PAUSED else SetupPhase.FAILED,
+                    message = if (pause.get() && !installing) "已暂停，重新打开应用后可继续。" else message, bytesPerSecond = 0))
+            } catch (persistenceError: Exception) {
+                Log.e("InitialDesktop", "Installation state could not be saved: ${persistenceError.javaClass.simpleName}")
+            }
+        } finally {
+            try {
+                if (cancel.get() && !installing) cancelCache()
+            } catch (cleanupError: Exception) {
+                Log.e("InitialDesktop", "Cancellation state could not be saved: ${cleanupError.javaClass.simpleName}")
+            } finally { synchronized(controlLock) { installing = false } }
+        }
+    }
+    private fun runInstall(id: String?, localUri: Uri?, previous: DesktopSetupState) {
         val spec = previous.image?.takeIf { it.id == id }
             ?: InitialImageRepository.available(this).firstOrNull { it.id == id }
             ?: throw IOException("Unknown initial image")

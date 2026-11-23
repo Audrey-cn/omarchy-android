@@ -78,6 +78,12 @@ android {
         getByName("debug") {
             if (stableTestSigning != null) signingConfig = stableTestSigning
         }
+        create("acceptance") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".acceptance"
+            versionNameSuffix = ".acceptance"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

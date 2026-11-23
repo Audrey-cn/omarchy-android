@@ -46,16 +46,34 @@ jobs:
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0" "cmake;3.22.1" "ndk;27.2.12479018" >/dev/null || true
-      - name: Assemble Debug APK
+      - name: Assemble Debug and isolated acceptance APKs
         env:
           OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD: ${{ github.repository == 'Audrey-cn/omarchy-android' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD || '' }}
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest --no-daemon
+          ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest assembleAcceptance --no-daemon
       - name: Verify online installer layout, native libraries, certificate and version
         run: |
           python3 ../../scripts/android-build.py verify --delivery online-installer --apk app/build/outputs/apk/debug/app-debug.apk --metadata "$OMARCHY_ANDROID_BUILD_METADATA" --build-tools "$ANDROID_SDK_ROOT/build-tools/36.0.0"
           cp "$OMARCHY_ANDROID_BUILD_METADATA" app/build/outputs/apk/debug/build-metadata.json
+      - name: Verify isolated acceptance package, certificate and version
+        run: |
+          python3 - "$OMARCHY_ANDROID_BUILD_METADATA" "$RUNNER_TEMP/omarchy-android-acceptance-metadata.json" <<'PY'
+          import json, pathlib, sys
+          metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          if metadata["packageName"] != "com.omarchy.android":
+              raise SystemExit("Normal APK package must remain com.omarchy.android")
+          metadata["packageName"] = "com.omarchy.android.acceptance"
+          metadata["versionName"] += ".acceptance"
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(metadata))
+          PY
+          python3 ../../scripts/android-build.py verify --delivery online-installer --apk app/build/outputs/apk/acceptance/app-acceptance.apk --metadata "$RUNNER_TEMP/omarchy-android-acceptance-metadata.json" --build-tools "$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          python3 - "$OMARCHY_ANDROID_BUILD_METADATA" "$RUNNER_TEMP/omarchy-android-acceptance-metadata.json" <<'PY'
+          import json, pathlib, sys
+          normal, acceptance = [json.loads(pathlib.Path(path).read_text()) for path in sys.argv[1:]]
+          if normal["certificateSha256"] != acceptance["certificateSha256"]:
+              raise SystemExit("Acceptance APK must use the normal APK signing certificate")
+          PY
       - name: Upload OmarchyAndroid APK
         uses: actions/upload-artifact@v4
         with:
@@ -63,6 +81,12 @@ jobs:
           path: |
             apps/android/app/build/outputs/apk/debug/app-debug.apk
             apps/android/app/build/outputs/apk/debug/build-metadata.json
+          if-no-files-found: error
+      - name: Upload isolated device acceptance APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmarchyAndroid-isolated-acceptance${{ steps.android-build.outputs.artifact_suffix }}
+          path: apps/android/app/build/outputs/apk/acceptance/app-acceptance.apk
           if-no-files-found: error
       - name: Upload opt-in device acceptance tests
         uses: actions/upload-artifact@v4

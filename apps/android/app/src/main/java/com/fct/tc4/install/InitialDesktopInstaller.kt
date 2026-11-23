@@ -42,9 +42,10 @@ class InitialDesktopInstaller(
     private fun complete(guest: File) {
         requireConfiguration(guest)
         if (registerGuest) {
-            Global.installedContainers = Global.installedContainers + "omarchy"
-            Global.isFirstLaunchDone = true
-            if (Global.autoLaunch.isEmpty()) Global.autoLaunch = "omarchy"
+            InitialDesktopRegistration.commit(Global.installedContainers, Global.autoLaunch) { installed, firstLaunchDone, autoLaunch ->
+                Global.sharedPrefs.edit().putStringSet("installed_containers", installed)
+                    .putBoolean("first_launch_done", firstLaunchDone).putString("auto_launch", autoLaunch).commit()
+            }
         }
     }
     private fun extract(archive: File, stage: File) {

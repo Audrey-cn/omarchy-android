@@ -64,8 +64,9 @@ class DesktopSetupActivity : AppCompatActivity() {
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 1000; layout.addView(this) }
         fun button(label: String, action: () -> Unit) = Button(this).apply { text = label; setOnClickListener { action() }; layout.addView(this) }
         start = button("下载并安装桌面") {
-            if (InitialDesktopState.state.value.phase == SetupPhase.COMPLETE || "omarchy" in Global.installedContainers) openDesktop()
-            else selected()?.let { image ->
+            val state = InitialDesktopState.state.value
+            if (initialDesktopAction(state.phase == SetupPhase.COMPLETE, "omarchy" in Global.installedContainers) == InitialDesktopAction.LAUNCH) openDesktop()
+            else (state.image ?: selected())?.let { image ->
                 pendingId = image.id
                 if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
                     notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -110,9 +111,10 @@ class DesktopSetupActivity : AppCompatActivity() {
         val installed = "omarchy" in Global.installedContainers
         val existing = File(dataDir, "omarchy").exists()
         val active = state.phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.IMPORTING, SetupPhase.VERIFYING, SetupPhase.INSTALLING)
-        val ready = state.phase == SetupPhase.COMPLETE || installed
-        start.text = when { ready -> "启动桌面"; state.phase == SetupPhase.PAUSED || state.phase == SetupPhase.FAILED -> "继续下载并安装"; else -> "下载并安装桌面" }
-        start.isEnabled = ready || (!active && images.isNotEmpty() && !installed)
+        val action = initialDesktopAction(state.phase == SetupPhase.COMPLETE, installed)
+        val ready = action == InitialDesktopAction.LAUNCH
+        start.text = when { ready -> "启动桌面"; action == InitialDesktopAction.RECOVER -> "恢复桌面安装记录"; state.phase == SetupPhase.PAUSED || state.phase == SetupPhase.FAILED -> "继续下载并安装"; else -> "下载并安装桌面" }
+        start.isEnabled = ready || (!active && (state.image != null || images.isNotEmpty()) && !installed)
         versions.isEnabled = state.phase == SetupPhase.IDLE && !installed
         pause.visibility = if (state.phase == SetupPhase.DOWNLOADING || state.phase == SetupPhase.VERIFYING) View.VISIBLE else View.GONE
         cancel.visibility = if (state.phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.PAUSED, SetupPhase.FAILED, SetupPhase.VERIFYING)) View.VISIBLE else View.GONE
@@ -124,6 +126,7 @@ class DesktopSetupActivity : AppCompatActivity() {
         progress.progress = if (state.image != null) (state.downloaded * 1000 / state.image.bytes).toInt() else 0
         status.text = when {
             ready -> "桌面已安装。更新 App 不会重新导入系统镜像。"
+            action == InitialDesktopAction.RECOVER -> "此前桌面已发布，请点击恢复安装记录后启动。"
             active || state.phase == SetupPhase.PAUSED || state.phase == SetupPhase.FAILED -> {
                 val speed = if (state.bytesPerSecond > 0) " · ${formatBytes(state.bytesPerSecond)}/s" else ""
                 val remaining = if (state.bytesPerSecond > 0 && state.image != null) " · 剩余约 ${(state.image.bytes - state.downloaded) / state.bytesPerSecond} 秒" else ""

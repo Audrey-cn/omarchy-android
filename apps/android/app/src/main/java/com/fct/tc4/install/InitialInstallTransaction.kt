@@ -235,3 +235,75 @@ class InitialImageImportCache(private val directory: File) {
         return digest.digest().joinToString("") { "%02x".format(it) } == spec.sha256
     }
 }
+
+
+enum class InitialDesktopAction { LAUNCH, RECOVER, INSTALL }
+
+fun initialDesktopAction(completed: Boolean, registered: Boolean): InitialDesktopAction =
+    when {
+        registered -> InitialDesktopAction.LAUNCH
+        completed -> InitialDesktopAction.RECOVER
+        else -> InitialDesktopAction.INSTALL
+    }
+
+object InitialDesktopRegistration {
+    fun commit(installed: Set<String>, autoLaunch: String, persist: (Set<String>, Boolean, String) -> Boolean) {
+        if (!persist(installed + "omarchy", true, autoLaunch.ifEmpty { "omarchy" }))
+            throw IOException("Desktop registration could not be saved")
+    }
+}
+
+
+/** At most one install may wait behind idle cancellation; filesystem work always uses the worker. */
+class InitialDesktopWorkQueue(private val executor: java.util.concurrent.Executor,
+                              private val running: java.util.concurrent.atomic.AtomicBoolean,
+                              private val lock: Any = Any(), private val onIdle: () -> Unit = {}) {
+    private enum class Work { INSTALL, CANCEL }
+    private var active: Work? = null
+    private var pendingStart: (() -> Unit)? = null
+
+    fun start(onAccepted: () -> Unit = {}, operation: () -> Unit): Boolean = synchronized(lock) {
+        if (active == Work.CANCEL && pendingStart == null) {
+            onAccepted()
+            pendingStart = operation
+            true
+        } else if (active != null) false
+        else submit(Work.INSTALL, onAccepted, operation)
+    }
+    fun cancelIdle(onAccepted: () -> Unit = {}, operation: () -> Unit): Boolean = synchronized(lock) {
+        if (active != null) false else submit(Work.CANCEL, onAccepted, operation)
+    }
+    private fun submit(work: Work, onAccepted: () -> Unit, operation: () -> Unit): Boolean {
+        if (!running.compareAndSet(false, true)) return false
+        active = work
+        try {
+            onAccepted()
+            executor.execute { drain(operation) }
+        } catch (error: Throwable) {
+            finish()
+            throw error
+        }
+        return true
+    }
+    private fun drain(initial: () -> Unit) {
+        var operation = initial
+        while (true) {
+            try { operation() }
+            catch (error: Throwable) {
+                synchronized(lock) { pendingStart = null; finish() }
+                throw error
+            }
+            operation = synchronized(lock) {
+                val next = pendingStart
+                pendingStart = null
+                if (next != null) { active = Work.INSTALL; next }
+                else { finish(); null }
+            } ?: return
+        }
+    }
+    private fun finish() {
+        active = null
+        running.set(false)
+        onIdle()
+    }
+}

@@ -24,7 +24,7 @@ case "$COMMAND" in
   browser-path) [[ $# -eq 1 && "$1" == chromium ]] || { usage >&2; exit 2; } ;;
   run) [[ $# -gt 0 ]] || { usage >&2; exit 2; } ;;
   cli)
-    # These assets are deployed by Android's managed-file verifier, not npm/PW.
+    # The paired runtime comes from initial-install media, not npm/PW or APK updates.
     for ARG in "$@"; do
       case "$ARG" in install|install-deps|uninstall)
         fail "Bundled browser files cannot be downloaded or removed through this entry."
@@ -36,8 +36,8 @@ case "$COMMAND" in
 esac
 [[ "$PW_HOME" == /* && "$NODE_HOME" == /* ]] || fail "Managed runtime paths must be absolute."
 NODE_BIN="$NODE_HOME/node-v24.15.0-linux-arm64/bin/node"
-[[ -x "$NODE_BIN" ]] || fail "缺少配套 Node 24.15.0；请更新 Omarchy Android 一体包以恢复配套运行时。"
-[[ "$("$NODE_BIN" --version)" == v24.15.0 ]] || fail "配套 Node 版本不符；请更新 Omarchy Android 一体包以恢复配套运行时。"
+[[ -x "$NODE_BIN" ]] || fail "缺少配套 Node 24.15.0；APK 更新不会修复镜像内文件，请按配套版本恢复运行时。"
+[[ "$("$NODE_BIN" --version)" == v24.15.0 ]] || fail "配套 Node 版本不符；APK 更新不会修复镜像内文件，请按配套版本恢复运行时。"
 export OMARCHY_PLAYWRIGHT128_HOME="$PW_HOME"
 export PLAYWRIGHT_BROWSERS_PATH="$PW_HOME/browsers"
 export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
