@@ -81,6 +81,8 @@ omarchy-repair-hermes-onboarding --rollback
 
 在首选页面点击 **Install locally**。桌面按安装 stamp 固定的上游 commit 取得 `scripts/install.sh`，缓存于 `$HERMES_HOME/bootstrap-cache/install-<commit>.sh`，然后按 manifest 分阶段安装：系统依赖、源码、Python venv、Python/Node 依赖、命令入口、配置模板及完成标记。GUI 使用非交互阶段模式，跳过需要用户输入的 API 设置和 gateway 服务配置；完成后由桌面自身启动本地 `hermes ... serve`，无需另建常驻 gateway 服务。
 
+`hermes-desktop-launch` 为 Hermes 及其子安装进程设置 `UV_LINK_MODE=copy`，避免 `uv` 在 PRoot 中创建缓存硬链接时报 `Operation not permitted`；不修改其他应用或全局环境。
+
 默认 `HERMES_HOME` 为 `$HOME/.hermes`。源码和 venv 位于其 `hermes-agent/` 下，初次安装后可做以下不显示模型密钥的检查：
 
 ```bash
