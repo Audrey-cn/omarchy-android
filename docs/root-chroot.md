@@ -17,10 +17,20 @@ bash install.sh --mode chroot
 在普通 Termux 会话启动显示服务器，另开终端启动桌面。前台启动器持续到 Sway 退出，可用 Sway 的退出操作结束。Root 桌面使用自己的 Sway、Waybar、Chromium 和浏览器资料。
 
 ```sh
-termux-x11 :1
+termux-x11 :0
 # 另一个终端
 su -c /data/omarchy-chroot/start-omarchy.sh
 ```
+
+并行保留其他显示会话时，为 Root 桌面分配空闲的显示编号。Termux:X11 与 Root 启动器必须使用同一编号。前提是 Termux:X11 能在所选编号启动。以下以 `:2` 为例：
+
+```sh
+termux-x11 :2
+# 另一个终端
+su -c 'OMARCHY_X11_DISPLAY=:2 /data/omarchy-chroot/start-omarchy.sh'
+```
+
+桌面组件 1.0.3 的 Root Chromium 启动器使用 GTK4，以配合当前 Sway 的输入协议。从当前仓库 checkout 执行冷安装会在新 guest 写入相应启动器。已安装的旧桌面可按组件版本显式升级。[组件更新说明](component-updates.md)
 
 运行单条 guest 命令可使用以下入口。每个命令在独立的挂载命名空间执行。正在运行的桌面的 Wayland、D-Bus 和 Sway IPC 属于该会话，查询它们应在桌面终端进行。退出时 Linux subreaper 会回收本次命令及其分离会话的后代。该实现支持只有挂载命名空间的 Android 内核。
 

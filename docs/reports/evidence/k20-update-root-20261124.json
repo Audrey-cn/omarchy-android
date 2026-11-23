@@ -1,0 +1,62 @@
+{
+  "browser": {
+    "android_input": true,
+    "browser_ime_flag": "--gtk-version=4",
+    "controlled_page": true,
+    "download_bytes": 41,
+    "download_sha256": "cb07ff957715d6956cf392b9d8760ff2dbeb6f918e2b26f1e76e03437a1b724e",
+    "loopbackCDP": true,
+    "pinyin": true,
+    "png_height": 545,
+    "png_sha256": "1557293d1ba5521861b5b9cbb82a887beae127901ad6cb4a25e325ce295e179e",
+    "png_width": 751,
+    "version": "128.0.6613.18"
+  },
+  "desktop": {
+    "active_outputs": [
+      {
+        "name": "X11-1",
+        "rect": {
+          "height": 512,
+          "width": 682,
+          "x": 0,
+          "y": 0
+        },
+        "scale": 1.5,
+        "transform": "normal"
+      }
+    ],
+    "chromium_windows": 1,
+    "components": {
+      "fcitx5": "5.1.7-1build3",
+      "mako-notifier": "1.8.0-2build2",
+      "omarchy-android-desktop": "1.0.2",
+      "omarchy-browser-runtime": "1.0.0",
+      "omarchy-graphics-runtime": "1.0.0",
+      "waybar": "0.9.24-1build3"
+    },
+    "display": ":0",
+    "fcitx_bus_owned": true,
+    "mako_responded": true,
+    "sway": "sway version 1.10.1",
+    "waybar_configured": true
+  },
+  "mako": {
+    "dndOff": true,
+    "dndOn": true,
+    "priorModesRestored": true,
+    "realDBus": true,
+    "reload": true
+  },
+  "managedDefaultLauncher": {
+    "browsers": [
+      {
+        "fcitxGtkLoaded": true,
+        "gtk4Loaded": true,
+        "gtk4Switch": true
+      }
+    ],
+    "defaultLauncher": true,
+    "desktopVersion": "1.0.3"
+  }
+}

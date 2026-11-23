@@ -1,0 +1,43 @@
+{
+  "agent": "run_agent.AIAgent.run_conversation",
+  "callbackCounts": {
+    "step": 7,
+    "stream-delta": 132,
+    "tool-generated": 6
+  },
+  "checks": {
+    "browserDownloadServed": true,
+    "clickEventReceived": true,
+    "downloadAtExpectedPath": true,
+    "downloadMatchesExpected": true,
+    "downloadTargetAbsentAtStart": true,
+    "fixtureServed": true,
+    "screenshotPngSaved": true,
+    "unicodeDomRead": true
+  },
+  "download": {
+    "bytes": 55,
+    "sha256": "64f3919c426249f095f0b323779de24928383d8265037112770917101fdab1ef"
+  },
+  "downloadMode": "profile-default-unique-filename",
+  "model": "qwen3.8-flash",
+  "passed": true,
+  "run": {
+    "apiCalls": 7,
+    "completed": true,
+    "failed": false
+  },
+  "schemaVersion": 1,
+  "screenshots": [
+    {
+      "bytes": 63893,
+      "height": 851,
+      "sha256": "cc3ef6607203394814172faf0a41104186d3ed6fa5fdaa6cfb52373704d3c9d8",
+      "width": 2289
+    }
+  ],
+  "sourceCommit": "2237be355906fbe6065ce1815711eee52b2d646e",
+  "sourceCommitScope": "Hermes Agent",
+  "successfulToolCalls": 6,
+  "toolset": "browser-cdp"
+}

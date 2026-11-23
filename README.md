@@ -34,15 +34,15 @@
 
 ### 免 Root 一体 App
 
-使用已通过 K20 Pro 验证的 [v1.0.72-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.72-test) 精简 APK，约 33.7 MB，仅支持 `arm64-v8a`；下载以主仓库 [Releases](https://github.com/Audrey-cn/omarchy-android/releases) 的实际附件为准。已验证从 `v1.0.62-test` 同签名覆盖升级、既有数据保留和真实 Hermes Agent 回归，详见[本轮实机记录](docs/reports/online-installer-k20-20261123.md)。
+从 [v1.0.79-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.79-test) 安装约 33.8 MB 的 `arm64-v8a` 精简 APK。本轮在 K20 Pro 验证了从 72 的同签名覆盖安装，详细结果见[实机记录](docs/reports/update-maintenance-k20-20261124.md)。
 
-精简 APK 提供首次安装页面：选择初始镜像 → 下载并安装，支持持久断点、暂停后继续和匹配镜像的离线导入。APK 保留 Android 界面、内嵌 X11 与 PRoot，桌面及浏览器内容随初装镜像分发。首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)和[镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，支持 App 版本代码 64 及以上，随包目录也已加入同一镜像。K20 已完成下载恢复、完整镜像校验安装、离线导入和桌面启动验收；测试条件见[实机记录](docs/reports/online-installer-k20-20261123.md)，操作说明见[首次安装与更新](docs/initial-install.md)。
+新用户可在首次安装页面刷新[公开镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)，选择[本轮干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-91a120142609)。App 提供持久断点、暂停后继续和匹配镜像的离线导入，安装包包含 Android 界面、内嵌 X11 与 PRoot。K20 已验证该镜像的离线导入与桌面启动；历史在线续传也有独立记录。操作见[首次安装与更新](docs/initial-install.md)。
 
-后续 App、X11 和 PRoot 更新沿用同一持久签名密钥，通过 Android 覆盖安装保留现有桌面与个人数据；日常启动不再同步 guest 文件或重新导入镜像。Ubuntu 软件包继续使用现有 APT 软件源维护。下一轮将补齐用户显式发起的项目桌面组件更新，负责脚本、界面及适配，当前尚未交付；职责、缺口和验收要求见[更新维护清单](docs/discussions/2026-11-23-update-maintenance.md)。初装镜像低频汇总修正后供新安装选择，已有桌面无需跟随每次镜像重发。
+后续 App、X11 和 PRoot 更新沿用同一持久签名密钥，通过 Android 覆盖安装保留现有桌面与个人数据；日常启动不再同步 guest 文件或重新导入镜像。Ubuntu 软件包继续使用现有 APT 软件源维护。桌面菜单「更新」按来源展示 Ubuntu、APK、项目桌面、图形、浏览器配套和第三方应用的检查结果。项目组件由用户显式安装及恢复。本轮发布[桌面组件 1.0.3](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-v1.0.3)和[运行时 1.0.0](https://github.com/Audrey-cn/omarchy-android/releases/tag/runtime-v1.0.0)。操作与实测范围见[组件更新说明](docs/component-updates.md)和[交付记录](docs/reports/update-maintenance-k20-20261124.md)。初装镜像低频汇总修正后供新安装选择，已有桌面无需跟随每次镜像重发。
 
 ### Root chroot
 
-Root 路线目前提供运行时和桌面部署脚本，依赖已有可用 Ubuntu 环境、Root 和外部 Termux/X11 配套；从零下载、导入系统的完整安装流程尚未交付。具备这些前提的开发环境可从 [`install.sh`](install.sh) 的 `--mode chroot` 入口继续集成，部署现状见[发行与 Root 记录](docs/discussions/2026-11-23-distribution-and-root.md)。
+Root 路线提供干净镜像安装入口，要求 ARM64 Android、Root、支持挂载命名空间的 BusyBox，以及 Termux/X11 配套。安装到新目录 `/data/omarchy-chroot`，支持下载固定公开镜像或导入匹配的本地文件，发现目标已存在会拒绝覆盖。入口为 `./install.sh --mode chroot`；具体前置条件与选项见[首次安装与更新](docs/initial-install.md)。
 
 ### 开发与迁移：外部 Termux
 

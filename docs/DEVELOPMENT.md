@@ -10,11 +10,23 @@ Android 项目通过 Git subtree 导入，保留原仓提交历史；这不是�
 
 ## 默认使用云端构建
 
-默认流程是提交到 GitHub，由 Actions 独立构建精简 APK 和干净初装镜像，再下载产物到 Android 设备验证。本地 JDK/Android SDK 并非采用该流程的前置条件；下文的 Gradle 命令适用于需要本地编译时。
+默认流程是提交到 GitHub，由 Actions 独立构建精简 APK、guest 组件和干净初装镜像，再下载产物到 Android 设备验证。本地 JDK/Android SDK 并非采用该流程的前置条件；下文的 Gradle 命令适用于需要本地编译时。
 
 `build-android.yml` 支持匹配路径的 main push、面向 main 的 PR 和手动 dispatch。`build-container.yml` 仅手动触发，避免频繁 App 变更重建整个系统。feature 分支单独 push 不会触发 main 的 push 过滤；手动 dispatch 需要工作流先在默认分支注册，再选择目标分支。
 
-首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)与[固定镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，随包目录已纳入同一份真实元数据。[v1.0.72-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.72-test) 精简 APK 为 33,745,476 字节，云端构建、布局校验和 K20 实机验收通过。用户流程见[首次安装与更新](initial-install.md)，证据及测试条件见[本轮验收记录](reports/online-installer-k20-20261123.md)。
+当前公开 App 为 [v1.0.79-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.79-test)，推荐镜像为 [desktop-ubuntu24-91a120142609](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-91a120142609)。在线目录保留首个镜像作为历史选项。工作流、产物摘要与 K20 证据见[本轮交付记录](reports/update-maintenance-k20-20261124.md)。
+
+## 构建与验证 guest 组件
+
+`build-components.yml` 手动运行时用 `scope=all` 构建桌面、浏览器和图形三组包，用 `scope=desktop` 独立更新桌面组件。完整构建的 ARM64 运行时作业校验二进制和依赖，汇总作业检查 DEB 控制元数据、实际包载荷和来源。候选包、JSON 清单与校验记录作为 Actions 附件上传。
+
+```sh
+python3 scripts/verify-component-release.py DIR --source-sha SHA --version 1.0.0 --write-evidence
+# 只验证一个独立桌面版本
+python3 scripts/verify-component-release.py DIR --source-sha SHA --version 1.0.1 --component desktop --write-evidence
+```
+
+镜像运行可传 `component_run_id` 复用已验证的完整组件构建。工作流验证运行来源及产物，`sourceSha` 记录镜像组装提交，`componentSourceSha` 记录原组件构建提交。独立修订桌面包无需重建 APK、镜像或未改动的原生运行时。本轮各产物及构建对应关系见[交付记录](reports/update-maintenance-k20-20261124.md)。
 
 ## 编译精简 Android App
 
@@ -31,7 +43,7 @@ Android Studio 应打开 `apps/android/`，而不是仓库根目录。当前 CI 
 
 可信 main 构建使用持续保存的同一测试签名密钥，PR 和其他非可信上下文不取得该密钥，artifact 带相应签名模式后缀。只有证书兼容且版本符合 Android 升级规则的新 APK 才能覆盖既有安装。不要将签名密钥或口令提交入库。
 
-App 普通启动不再调用旧的 guest 受管文件同步。已有桌面脚本、浏览器、用户修改与旧同步记录留在原处；App/X11/PRoot 更新不重导入或替换 rootfs。Ubuntu 软件包在现有 guest 内使用其 APT 源维护。项目后续通过用户显式发起的系统内组件更新交付桌面修正；这项机制尚未实现，不得恢复为 APK 启动时隐式覆盖 guest。
+App 普通启动不再调用旧的 guest 受管文件同步。已有桌面脚本、浏览器、用户修改与旧同步记录留在原处；App/X11/PRoot 更新不重导入或替换 rootfs。Ubuntu 软件包在现有 guest 内使用其 APT 源维护。项目通过 guest 内显式发起的组件更新交付桌面修正。
 
 ## 构建独立初装镜像
 
@@ -42,7 +54,7 @@ App 普通启动不再调用旧的 guest 受管文件同步。已有桌面脚本
 3. `scripts/prepare-initial-image.py` 生成 `rootfs.tar.zst`、`image.json`、`catalog.json`、`SHA256SUMS` 与来源/许可附件，artifact 为 `initial-desktop-image-<完整提交 SHA>`。
 4. 仅主仓可信 main 的手动构建执行发布：版本标签为 `desktop-ubuntu24-<sha12>`，设置 prerelease 和 `latest=false`，不抢占 App 更新入口。
 
-镜像与 APK 分开发行，不再生成 `OmarchyAndroid-AllInOne-apk`。初装镜像低频汇总已验证的 `core/` 与组件修正；已有用户不会因安装新 APK 自动取得这些 guest 文件修正，也不会因镜像重发而重装系统。后续需通过独立组件包和显式更新入口交付已有环境的桌面修正，保留 Ubuntu 软件源与个人配置；当前的上游 Git + APT 菜单不能代表该机制已经具备。源码盘点、优先级和验收要求见[更新维护清单](discussions/2026-11-23-update-maintenance.md)。不建设整套 rootfs 更新或迁移管理器。
+镜像与 APK 分开发行，不再生成 `OmarchyAndroid-AllInOne-apk`。初装镜像低频汇总已验证的 `core/` 与组件修正；已有用户不会因安装新 APK 自动取得这些 guest 文件修正，也不会因镜像重发而重装系统。已有环境从独立组件包与显式更新入口收取桌面修正；Ubuntu APT 保留现有软件源，个人配置继续由 guest 持有。验收要求见[更新维护清单](discussions/2026-11-23-update-maintenance.md)。
 
 首次安装目录 schema 为 1，条目包含镜像 ID、ABI、最低 App 版本、精确字节数、解压大小、SHA256、源码 SHA 与固定 HTTPS 下载地址。首批镜像的 `minAppVersionCode` 设置为 64；随包 `apps/android/app/src/main/assets/initial-images.json` 只应纳入已发布且核对过的真实元数据。App 刷新时通过 GitHub 官方 Release API 查找 `desktop-images` 的 `catalog.json` 附件，保留固定网页下载地址回退；镜像也优先使用官方 API 附件地址并保留网页回退。该目录需单独维护，不能假定版本化镜像发布后已自动更新。保留随包目录作为离线回退，允许目录提供一个或多个兼容初始版本。
 

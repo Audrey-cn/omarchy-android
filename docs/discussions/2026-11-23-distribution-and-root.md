@@ -5,7 +5,7 @@
 ## 已确认的两条正式路线
 
 - **免 Root 一体 App**：集成 Android 界面、X11 和 PRoot，无需另装 Termux；精简 APK 首次运行时引导选择、下载或离线导入桌面镜像。
-- **Root chroot**：与免 Root 路线共享桌面核心，提供单独的运行时适配。现有脚本可集成已有 Root/Ubuntu 环境，完整冷安装与云端镜像、实机集成仍待完成。
+- **Root chroot**：与免 Root 路线共享桌面核心，提供单独的运行时适配。冷安装入口可将固定公开镜像导入新的 Root chroot，独立目录中的运行时与免 Root 一体 App 分开。
 
 外部 Termux + Termux:X11 的免 Root PRoot 组合保留为开发、调试和迁移入口。Deck 是外部 X11 的可选悬浮输入工具，不决定 Linux 运行时，也不构成第三条正式产品路线。
 
@@ -23,7 +23,7 @@
 
 - App、X11、PRoot 可独立于初装镜像频繁发版，继续使用同一持久签名密钥与递增版本。普通覆盖升级保留已有 guest 和个人数据；正常 App 启动不再同步受管 guest 文件、删除旧组件或重新导入 rootfs。
 - Ubuntu 软件包安装和更新继续通过系统内的 APT 软件源处理。项目组件通道补充现有来源，负责自身的桌面脚本、界面及适配；第三方应用保留各自支持的更新方式。
-- 已确认下一轮补齐用户显式发起的 guest 组件更新，当前尚未实现。定制图形栈及固定浏览器配套需单独维护、验证兼容性，APK 或普通 APT 更新不会自动替换这些内容。完整盘点和执行优先级见[更新维护清单](2026-11-23-update-maintenance.md)。
+- guest 组件由用户显式发起更新。定制图形栈和定版浏览器配套各自构建、检查与恢复。软件归属与验收条件见[更新维护清单](2026-11-23-update-maintenance.md)。
 - 初装镜像低频汇总已验证的修正，目录供新用户选择一个或多个兼容版本。镜像只承担初始安装介质角色，新版本发布不触发现有用户重新下载、覆盖或迁移。
 - 此轮不建设完整 rootfs 更新器、个人数据卷管理器、Ubuntu 大版本自动升级或迁移管理器。已有用户的重装与换机迁移是单独操作，不能用重新导入同名容器冒充更新。
 
@@ -37,7 +37,7 @@
 
 ## Root 已核对状态与后续边界
 
-- `install.sh --mode chroot` 依赖已有可用的 `/data/ubuntu`、Root、Magisk BusyBox 与 Termux/X11 配套，尚无完整下载/导入基础 rootfs 的冷安装流程。
-- 现有外部部署的 Sway 运行在 Termux 环境，使用 `WLR_RENDERER=pixman`；Ubuntu 应用进入 chroot，日常 Chromium 使用 Termux 侧桥接。这些是当前运行栈，不代表未来 Root 产品已经完成安装集成。
-- 后续需完成干净镜像到 Root 冷安装的云端和实机集成验收。尚未进行从零安装或与免 Root 一体 App 的同负载性能对比，不能声称已启用 GPU 加速或固定倍数性能提升。
+- `install.sh --mode chroot` 支持下载固定公开镜像或导入匹配的本地镜像。它要求 Root、可用 BusyBox 和外部 Termux:X11；新实例位于 `/data/omarchy-chroot`，该目录已占用时停止安装。
+- 旧外部部署可继续使用 Termux 侧的 Sway 和 Chromium 桥接。新 Root guest 通过外部 Termux:X11 显示，使用项目 guest 图形运行时，启动器通过私有挂载与会话监督程序管理会话。
+- 新 Root guest 的导入、桌面会话和同负载比较以[本轮 K20 记录](../reports/update-maintenance-k20-20261124.md)为准。
 - Root chroot 继续运行在 Android 内核上。独立分区、独立启动属于后续单独议题。
