@@ -322,7 +322,7 @@ def backup(state, pkg, extracted, work, current):
         if occupied:
             raise ValueError(f"File owned by {listing.stem}: {min(occupied)}")
     snapshot = work / "previous"
-    snapshot.mkdir()
+    snapshot.mkdir(mode=0o755)
     removed = {}
     bindings = {}
     # Only four established executable entry points are activated. The old
@@ -352,7 +352,7 @@ def backup(state, pkg, extracted, work, current):
             provenance = legacy_browser_receipt(src, extracted)
             actual = hashlib.sha256(provenance).hexdigest()
         target = snapshot / name
-        target.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
         if provenance is not None:
             target.write_bytes(provenance)
             shutil.copystat(src, target)
@@ -365,13 +365,19 @@ def backup(state, pkg, extracted, work, current):
                 shutil.copy2(src, target)
         removed[name] = actual
     control = snapshot / "DEBIAN"
-    control.mkdir()
+    control.mkdir(mode=0o755)
     details = f"Package: {pkg}\nVersion: {current or '0~initial'}\nArchitecture: arm64\nMaintainer: Omarchy Android maintainers\nDescription: Local recovery snapshot\n"
     if current:
         details = subprocess.check_output(["dpkg-query", "-W",
             "-f=Package: ${Package}\nVersion: ${Version}\nArchitecture: ${Architecture}\nMaintainer: ${Maintainer}\nDepends: ${Depends}\nDescription: ${Description}\n",
             pkg], text=True)
-    (control / "control").write_text(details)
+    control_file = control / "control"
+    control_file.write_text(details)
+    control_file.chmod(0o644)
+    # mkdir(parents=True) inherits the guest umask for intermediate directories.
+    # Set every archived directory mode, including the package metadata root.
+    for directory, _, _ in os.walk(snapshot):
+        os.chmod(directory, 0o755)
     deb = work / "previous.deb"
     subprocess.run(["dpkg-deb", "--root-owner-group", "-Zzstd", "-z1", "--build", snapshot, deb], check=True)
     transaction = Path(tempfile.mkdtemp(prefix="transaction-", dir=state))

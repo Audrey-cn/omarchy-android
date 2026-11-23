@@ -1,5 +1,6 @@
 """Verify runtime ownership, rollback and detached process cleanup on Linux."""
 import io
+from contextlib import contextmanager
 from importlib.machinery import SourceFileLoader
 import importlib.util
 import json
@@ -36,6 +37,15 @@ def receipt_fixture(stage, legacy):
     record["sourceSha"] = "b" * 40
     legacy.write_text(json.dumps(record, indent=4) + "\n")
     return record
+
+
+@contextmanager
+def temporary_umask(mask):
+    previous = os.umask(mask)
+    try:
+        yield
+    finally:
+        os.umask(previous)
 
 
 class RuntimeContracts(unittest.TestCase):
@@ -219,11 +229,16 @@ class DebianTransaction(unittest.TestCase):
             meta = dict(asset=deb.name, bytes=deb.stat().st_size, sha256=module.sha(deb), version="1.0.0")
 
             def run(args, **kwargs):
+                if args[0] == "dpkg-deb" and "--build" in args:
+                    snapshot = args[-2]
+                    for directory, _, _ in os.walk(snapshot):
+                        self.assertEqual(Path(directory).stat().st_mode & 0o777, 0o755)
+                    self.assertEqual((snapshot / "DEBIAN/control").stat().st_mode & 0o777, 0o644)
                 if args[0] == "dpkg":
                     args = ["dpkg", "--root=" + str(root), "--force-architecture", "--force-not-root", *args[1:]]
                 return original_run(args, **kwargs)
 
-            with patch.object(module, "ROOT", root), patch.object(module.subprocess, "run", run), \
+            with temporary_umask(0), patch.object(module, "ROOT", root), patch.object(module.subprocess, "run", run), \
                     patch.object(module, "installed", return_value=None):
                 legacy.write_bytes(b"local edit")
                 with self.assertRaisesRegex(ValueError, "Preserved conflicting"):
