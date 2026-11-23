@@ -1,8 +1,26 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.TinyContainer" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+    <!-- Unified Omarchy Tokyo Night Dark Theme -->
+    <style name="Base.Theme.TinyContainer" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:colorBackground">@color/omarchy_bg</item>
+        <item name="colorSurface">@color/omarchy_surface</item>
+        <item name="colorSurfaceContainer">@color/omarchy_surface_container</item>
+        <item name="colorSurfaceContainerLow">@color/omarchy_surface</item>
+        <item name="colorSurfaceContainerHigh">@color/omarchy_surface_high</item>
+        <item name="colorSurfaceContainerHighest">@color/omarchy_surface_high</item>
+        <item name="colorPrimary">@color/omarchy_primary</item>
+        <item name="colorOnPrimary">@color/omarchy_on_primary</item>
+        <item name="colorPrimaryContainer">@color/omarchy_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/omarchy_on_primary_container</item>
+        <item name="colorSecondary">@color/omarchy_secondary</item>
+        <item name="colorOnSecondary">@color/omarchy_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/omarchy_secondary_container</item>
+        <item name="colorTertiary">@color/omarchy_tertiary</item>
+        <item name="colorOnSurface">@color/omarchy_on_surface</item>
+        <item name="colorOnSurfaceVariant">@color/omarchy_on_surface_variant</item>
+        <item name="colorOutline">@color/omarchy_outline</item>
+        <item name="colorError">@color/omarchy_error</item>
+        <item name="android:statusBarColor">@color/omarchy_bg</item>
+        <item name="android:navigationBarColor">@color/omarchy_bg</item>
     </style>
 
     <style name="Theme.TinyContainer" parent="Base.Theme.TinyContainer" />

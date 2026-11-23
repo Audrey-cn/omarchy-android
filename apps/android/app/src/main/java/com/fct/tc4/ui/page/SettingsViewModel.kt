@@ -18,6 +18,7 @@
 package com.fct.tc4.ui.page
 
 import android.app.Application
+import android.content.Context
 import androidx.annotation.StringRes
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -65,12 +66,27 @@ class SettingsViewModel(
     private val _items = MutableStateFlow<List<SettingsItem>>(emptyList())
     val items: StateFlow<List<SettingsItem>> = _items.asStateFlow()
 
+    private val x11Prefs by lazy {
+        val app = getApplication<Application>()
+        app.getSharedPreferences("${app.packageName}_preferences", Context.MODE_PRIVATE)
+    }
+
     init { refresh() }
 
     /** 切换开关状态并持久化 */
     fun toggle(item: SwitchSetting) {
         val newChecked = !item.isChecked
         when (item.id) {
+            "x11_touch_direct" -> x11Prefs.edit().putString("touchMode", if (newChecked) "2" else "1").apply()
+            "x11_hide_cutout" -> x11Prefs.edit().putBoolean("hideCutout", newChecked).apply()
+            "x11_fullscreen" -> x11Prefs.edit()
+                .putBoolean("fullscreen", newChecked)
+                .putBoolean("keepScreenOn", newChecked)
+                .apply()
+            "x11_ekbar" -> x11Prefs.edit()
+                .putBoolean("showAdditionalKbd", newChecked)
+                .putBoolean("additionalKbdVisible", newChecked)
+                .apply()
             "auto_launch" -> Global.autoLaunch = if (newChecked) code else ""
             "auto_launch_gui" -> Global.autoLaunchGui = newChecked
             "reset_bootstrap" -> Global.shouldResetBootstrap = newChecked
@@ -80,8 +96,37 @@ class SettingsViewModel(
         refresh()
     }
 
-    private fun refresh() {
+    fun refresh() {
+        val directTouch = x11Prefs.getString("touchMode", "1") == "2"
+        val hideCutout = x11Prefs.getBoolean("hideCutout", true)
+        val fullscreen = x11Prefs.getBoolean("fullscreen", true)
+        val showEkBar = x11Prefs.getBoolean("showAdditionalKbd", false)
+
         _items.value = listOf(
+            SwitchSetting(
+                id = "x11_touch_direct",
+                titleRes = R.string.tc4_settings_x11_touch_direct_title,
+                descriptionRes = R.string.tc4_settings_x11_touch_direct_desc,
+                isChecked = directTouch
+            ),
+            SwitchSetting(
+                id = "x11_hide_cutout",
+                titleRes = R.string.tc4_settings_x11_cutout_title,
+                descriptionRes = R.string.tc4_settings_x11_cutout_desc,
+                isChecked = hideCutout
+            ),
+            SwitchSetting(
+                id = "x11_fullscreen",
+                titleRes = R.string.tc4_settings_x11_fullscreen_title,
+                descriptionRes = R.string.tc4_settings_x11_fullscreen_desc,
+                isChecked = fullscreen
+            ),
+            SwitchSetting(
+                id = "x11_ekbar",
+                titleRes = R.string.tc4_settings_x11_ekbar_title,
+                descriptionRes = R.string.tc4_settings_x11_ekbar_desc,
+                isChecked = showEkBar
+            ),
             ActionSetting(
                 id = "x11_settings",
                 titleRes = R.string.tc4_settings_x11_title,

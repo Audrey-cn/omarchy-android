@@ -4,9 +4,14 @@ package com.fct.tc4.ui.page
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.net.Uri
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -51,42 +56,197 @@ class DesktopSetupActivity : AppCompatActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (resources.configuration.smallestScreenWidthDp < 600) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         InitialDesktopState.load(this)
+        window.statusBarColor = Color.parseColor("#1A1B26")
+        window.navigationBarColor = Color.parseColor("#1A1B26")
+
+        val bgDark = Color.parseColor("#1A1B26")
+        val cardBg = Color.parseColor("#24283B")
+        val cardStroke = Color.parseColor("#414868")
+        val primaryBlue = Color.parseColor("#7AA2F7")
+        val onPrimaryDark = Color.parseColor("#16161E")
+        val textPrimary = Color.parseColor("#C0CAF5")
+        val textMuted = Color.parseColor("#9AA5CE")
+        val btnSecondaryBg = Color.parseColor("#2E334D")
+        val btnDangerBg = Color.parseColor("#3B2430")
+        val btnDangerText = Color.parseColor("#F7768E")
+
+        fun roundedBg(fill: Int, stroke: Int = 0, radiusDp: Int = 14) = GradientDrawable().apply {
+            setColor(fill)
+            cornerRadius = dp(radiusDp).toFloat()
+            if (stroke != 0) setStroke(dp(1), stroke)
+        }
+
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(32), dp(24), dp(24))
+            setBackgroundColor(bgDark)
+            setPadding(dp(20), dp(28), dp(20), dp(28))
         }
-        fun text(value: String, size: Float) = TextView(this).apply { text = value; textSize = size; setPadding(0, dp(8), 0, dp(12)); layout.addView(this) }
-        text("安装 Omarchy 桌面", 26f)
-        text("首次使用需下载桌面镜像。安装 APK 与已有系统相互独立，已有桌面不会被此流程覆盖。", 16f)
-        versions = Spinner(this).also(layout::addView)
-        details = text("正在读取可用镜像…", 14f)
-        status = text("", 16f)
-        progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 1000; layout.addView(this) }
-        fun button(label: String, action: () -> Unit) = Button(this).apply { text = label; setOnClickListener { action() }; layout.addView(this) }
-        start = button("下载并安装桌面") {
-            val state = InitialDesktopState.state.value
-            if (initialDesktopAction(state.phase == SetupPhase.COMPLETE, "omarchy" in Global.installedContainers) == InitialDesktopAction.LAUNCH) openDesktop()
-            else (state.image ?: selected())?.let { image ->
-                pendingId = image.id
-                if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                else startTransfer(image.id)
+
+        fun addCard(block: LinearLayout.() -> Unit) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = roundedBg(cardBg, cardStroke, 16)
+                setPadding(dp(18), dp(16), dp(18), dp(16))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { bottomMargin = dp(14) }
+                block()
+            }
+            layout.addView(card)
+        }
+
+        fun styledButton(
+            parent: LinearLayout,
+            label: String,
+            primary: Boolean = false,
+            danger: Boolean = false,
+            action: () -> Unit
+        ) = Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = if (primary) 15f else 14f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(when {
+                primary -> onPrimaryDark
+                danger -> btnDangerText
+                else -> textPrimary
+            })
+            background = roundedBg(
+                fill = when {
+                    primary -> primaryBlue
+                    danger -> btnDangerBg
+                    else -> btnSecondaryBg
+                },
+                stroke = if (primary) 0 else cardStroke,
+                radiusDp = 12
+            )
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(46)
+            ).apply { topMargin = dp(8) }
+            setOnClickListener { action() }
+            parent.addView(this)
+        }
+
+        // Header
+        layout.addView(TextView(this).apply {
+            text = "OMARCHY ANDROID"
+            textSize = 11f
+            letterSpacing = 0.14f
+            setTextColor(primaryBlue)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        })
+        layout.addView(TextView(this).apply {
+            text = "安装 Omarchy 桌面"
+            textSize = 26f
+            setTextColor(textPrimary)
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setPadding(0, dp(4), 0, dp(6))
+        })
+        layout.addView(TextView(this).apply {
+            text = "首次使用需下载桌面初始镜像。APK 升级与已有系统相互独立，绝不会覆盖你的个人数据。"
+            textSize = 13.5f
+            setTextColor(textMuted)
+            setPadding(0, 0, 0, dp(16))
+        })
+
+        // Card 1: Image selection & download progress
+        addCard {
+            addView(TextView(this@DesktopSetupActivity).apply {
+                text = "桌面镜像版本"
+                textSize = 13f
+                setTextColor(primaryBlue)
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setPadding(0, 0, 0, dp(6))
+            })
+            versions = Spinner(this@DesktopSetupActivity).apply {
+                background = roundedBg(bgDark, cardStroke, 10)
+                setPadding(dp(10), dp(6), dp(10), dp(6))
+            }.also(::addView)
+            details = TextView(this@DesktopSetupActivity).apply {
+                text = "正在读取可用镜像…"
+                textSize = 12.5f
+                setTextColor(textMuted)
+                setPadding(0, dp(10), 0, dp(8))
+            }.also(::addView)
+            progress = ProgressBar(this@DesktopSetupActivity, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 1000
+                progressTintList = ColorStateList.valueOf(primaryBlue)
+                progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor("#3B4261"))
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(8)
+                ).apply { topMargin = dp(4); bottomMargin = dp(10) }
+            }.also(::addView)
+            status = TextView(this@DesktopSetupActivity).apply {
+                text = ""
+                textSize = 13.5f
+                setTextColor(textPrimary)
+                setPadding(0, 0, 0, dp(6))
+            }.also(::addView)
+
+            start = styledButton(this, "下载并安装桌面", primary = true) {
+                val state = InitialDesktopState.state.value
+                if (initialDesktopAction(state.phase == SetupPhase.COMPLETE, "omarchy" in Global.installedContainers) == InitialDesktopAction.LAUNCH) openDesktop()
+                else (state.image ?: selected())?.let { image ->
+                    pendingId = image.id
+                    if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this@DesktopSetupActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                        notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    else startTransfer(image.id)
+                }
+            }
+            pause = styledButton(this, "暂停下载") {
+                startService(Intent(this@DesktopSetupActivity, DesktopInstallService::class.java).setAction(DesktopInstallService.PAUSE))
+            }
+            cancel = styledButton(this, "取消下载", danger = true) {
+                startService(Intent(this@DesktopSetupActivity, DesktopInstallService::class.java).setAction(DesktopInstallService.CANCEL))
             }
         }
-        pause = button("暂停下载") { startService(Intent(this, DesktopInstallService::class.java).setAction(DesktopInstallService.PAUSE)) }
-        cancel = button("取消下载") { startService(Intent(this, DesktopInstallService::class.java).setAction(DesktopInstallService.CANCEL)) }
-        local = button("从本地镜像安装") { pickLocal.launch(arrayOf("*/*")) }
-        refresh = button("刷新可用镜像") { loadImages(true) }
-        button("下载较慢？查看离线下载方式") {
-            android.app.AlertDialog.Builder(this).setTitle("离线下载后导入")
-                .setMessage("可以暂停当前任务，在浏览器或支持断点的下载工具中取得同版本 rootfs.tar.zst，再通过“从本地镜像安装”导入。导入仍会核对版本、大小和 SHA256。")
-                .setPositiveButton("打开镜像发行页") { _, _ ->
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(InitialImageCatalog.releasePage(InitialDesktopState.state.value.image ?: selected()))))
-                }.setNegativeButton("返回", null).show()
+
+        // Card 2: Offline import & mirror tools
+        addCard {
+            addView(TextView(this@DesktopSetupActivity).apply {
+                text = "离线导入与镜像源"
+                textSize = 13f
+                setTextColor(Color.parseColor("#9ECE6A"))
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setPadding(0, 0, 0, dp(4))
+            })
+            addView(TextView(this@DesktopSetupActivity).apply {
+                text = "支持多镜像自动回退与断点续传；也可提前下载 rootfs.tar.zst 后直接本地导入。"
+                textSize = 12.5f
+                setTextColor(textMuted)
+                setPadding(0, 0, 0, dp(4))
+            })
+            local = styledButton(this, "从本地 .tar.zst 镜像导入") { pickLocal.launch(arrayOf("*/*")) }
+            refresh = styledButton(this, "刷新可用镜像列表") { loadImages(true) }
+            styledButton(this, "下载较慢？查看离线下载方式") {
+                android.app.AlertDialog.Builder(this@DesktopSetupActivity).setTitle("离线下载后导入")
+                    .setMessage("可以暂停当前任务，在浏览器或支持断点的下载工具中取得同版本 rootfs.tar.zst，再通过“从本地 .tar.zst 镜像导入”导入。导入仍会核对版本、大小和 SHA256。")
+                    .setPositiveButton("打开镜像发行页") { _, _ ->
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(InitialImageCatalog.releasePage(InitialDesktopState.state.value.image ?: selected()))))
+                    }.setNegativeButton("返回", null).show()
+            }
         }
-        text("默认建议使用 Wi-Fi。镜像只用于首次安装；Ubuntu 内的软件通过系统自己的软件源维护。", 14f)
-        setContentView(ScrollView(this).apply { addView(layout) })
+
+        layout.addView(TextView(this).apply {
+            text = "建议在 Wi-Fi 下完成首次下载。镜像仅用于初始化；系统内软件与桌面组件后续均通过系统软件源在线维护。"
+            textSize = 12f
+            setTextColor(textMuted)
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(8), dp(4), dp(8), dp(12))
+        })
+
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(bgDark)
+            isFillViewport = true
+            addView(layout)
+        })
         versions.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { render(InitialDesktopState.state.value) }

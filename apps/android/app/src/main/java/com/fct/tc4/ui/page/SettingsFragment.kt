@@ -93,6 +93,11 @@ class SettingsFragment : Fragment() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        viewModel.refresh()
+    }
+
     private fun handleAction(item: ActionSetting) {
         when (item.id) {
             "x11_settings" -> {

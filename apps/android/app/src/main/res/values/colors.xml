@@ -2,4 +2,22 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Omarchy Tokyo Night Palette -->
+    <color name="omarchy_bg">#FF1A1B26</color>
+    <color name="omarchy_surface">#FF1F2335</color>
+    <color name="omarchy_surface_container">#FF24283B</color>
+    <color name="omarchy_surface_high">#FF292E42</color>
+    <color name="omarchy_primary">#FF7AA2F7</color>
+    <color name="omarchy_on_primary">#FF16161E</color>
+    <color name="omarchy_primary_container">#FF283457</color>
+    <color name="omarchy_on_primary_container">#FFC0CAF5</color>
+    <color name="omarchy_secondary">#FF9ECE6A</color>
+    <color name="omarchy_on_secondary">#FF16161E</color>
+    <color name="omarchy_secondary_container">#FF25352A</color>
+    <color name="omarchy_tertiary">#FFBB9AF7</color>
+    <color name="omarchy_on_surface">#FFC0CAF5</color>
+    <color name="omarchy_on_surface_variant">#FF9AA5CE</color>
+    <color name="omarchy_outline">#FF414868</color>
+    <color name="omarchy_error">#FFF7768E</color>
 </resources>

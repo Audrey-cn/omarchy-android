@@ -90,8 +90,19 @@
     <!-- ==================== Settings Page ==================== -->
     <string name="tc4_settings_title">Settings</string>
     <string name="tc4_settings_description">Unified settings for Omarchy Desktop, X11 display/touch, IME, and permissions.</string>
-    <string name="tc4_settings_x11_title">X11 Display &amp; Touch Settings</string>
-    <string name="tc4_settings_x11_desc">Configure touch mode, pointer speed, fullscreen, and hardware keyboard</string>
+    <string name="tc4_settings_x11_touch_direct_title">Direct Touch Mode</string>
+    <string name="tc4_settings_x11_touch_direct_desc">Tap directly to click; disable for simulated trackpad mode (recommended for precision)</string>
+    <string name="tc4_settings_x11_cutout_title">Extend Into Display Cutout</string>
+    <string name="tc4_settings_x11_cutout_desc">Allow desktop rendering across camera cutout and rounded corners</string>
+    <string name="tc4_settings_x11_fullscreen_title">Immersive Fullscreen &amp; Keep Awake</string>
+    <string name="tc4_settings_x11_fullscreen_desc">Hide Android system bars and keep screen awake while using Omarchy Desktop</string>
+    <string name="tc4_settings_x11_ekbar_title">Show Native Extra Keys Bar</string>
+    <string name="tc4_settings_x11_ekbar_desc">Disabled by default in favor of the Omarchy floating keyboard</string>
+    <string name="tc4_settings_x11_title">Advanced X11 Display &amp; Touch</string>
+    <string name="tc4_settings_x11_desc">Pointer sensitivity, custom resolution, hardware keyboard, and full Termux:X11 options</string>
+    <string name="tc4_home_enter_desktop">Enter Omarchy Desktop</string>
+    <string name="tc4_home_open_terminal">Terminal</string>
+    <string name="tc4_home_hero_subtitle">Sway Wayland desktop ready · Tap to launch</string>
     <string name="tc4_settings_ime_title">System IME &amp; Voice Input</string>
     <string name="tc4_settings_ime_desc">Switch default input method for direct voice and CJK text passthrough</string>
     <string name="tc4_settings_shortcut_title">Launcher Shortcut Generator</string>

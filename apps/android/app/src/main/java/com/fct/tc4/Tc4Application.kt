@@ -25,8 +25,6 @@ import com.google.android.material.color.DynamicColors
 open class Tc4Application : Application() {
     override fun onCreate() {
         super.onCreate()
-        DynamicColors.applyToActivitiesIfAvailable(this)
-
         Global.init(this)
         OmarchyX11Overlay.register(this)
     }

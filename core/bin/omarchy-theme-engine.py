@@ -488,13 +488,57 @@ default-timeout=4000
         exec_apps = "/data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui apps'"
         exec_menu = "/data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui'"
         exec_keys = "/data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui keybindings'"
+        default_mod_mode = "super"
     else:
         exec_term = "alacritty"
         exec_apps = "/usr/local/bin/omarchy-menu-ui apps"
         exec_menu = "/usr/local/bin/omarchy-menu-ui"
         exec_keys = "/usr/local/bin/omarchy-menu-ui keybindings"
+        default_mod_mode = "super+alt"
 
-    sway_cfg = f"""set $mod Mod4
+    mod_mode = default_mod_mode
+    try:
+        if os.path.exists("/root/.config/omarchy/modifier.json"):
+            mcfg = json.load(open("/root/.config/omarchy/modifier.json", "r", encoding="utf-8"))
+            if mcfg.get("mode") in ("super", "alt", "super+alt"):
+                mod_mode = mcfg["mode"]
+    except Exception:
+        pass
+
+    primary_mod = "Mod1" if mod_mode == "alt" else "Mod4"
+    alt_mirror_block = ""
+    if mod_mode == "super+alt":
+        alt_mirror_block = f"""
+# Dual-modifier Alt mirror (for non-root Android external keyboards)
+bindsym $alt+Return exec {exec_term}
+bindsym $alt+space exec {exec_apps}
+bindsym $alt+k exec {exec_keys}
+bindsym $alt+w kill
+bindsym $alt+q kill
+bindsym $alt+j layout toggle split
+bindsym $alt+t floating toggle
+bindsym $alt+f fullscreen toggle
+bindsym $alt+Left focus left
+bindsym $alt+Down focus down
+bindsym $alt+Up focus up
+bindsym $alt+Right focus right
+bindsym $alt+Shift+Left move left
+bindsym $alt+Shift+Down move down
+bindsym $alt+Shift+Up move up
+bindsym $alt+Shift+Right move right
+bindsym $alt+1 workspace number 1
+bindsym $alt+2 workspace number 2
+bindsym $alt+3 workspace number 3
+bindsym $alt+4 workspace number 4
+bindsym $alt+5 workspace number 5
+bindsym $alt+Shift+1 move container to workspace number 1
+bindsym $alt+Shift+2 move container to workspace number 2
+bindsym $alt+Shift+3 move container to workspace number 3
+bindsym $alt+Shift+4 move container to workspace number 4
+bindsym $alt+Shift+5 move container to workspace number 5
+"""
+
+    sway_cfg = f"""set $mod {primary_mod}
 set $alt Mod1
 
 font pango:JetBrainsMono Nerd Font 10
@@ -508,7 +552,7 @@ gaps outer 10
 # class                 border    backgr.   text    indicator child_border
 client.focused          {accent}  {c[0]}    {fg}    {c[6]}    {accent}
 client.focused_inactive {c[8]}    {bg}      {fg}    {c[8]}    {c[8]}
-client.unfocused        {c[8]}    {bg}      {c[8]}  {c[8]}    {c[8]}
+client.unfocused        {c[8]}    {bg}      {fg}  {c[8]}    {c[8]}
 client.urgent           {c[1]}    {c[1]}    {bg}    {c[1]}    {c[1]}
 
 floating_modifier $mod normal
@@ -548,7 +592,7 @@ bindsym $mod+Shift+2 move container to workspace number 2
 bindsym $mod+Shift+3 move container to workspace number 3
 bindsym $mod+Shift+4 move container to workspace number 4
 bindsym $mod+Shift+5 move container to workspace number 5
-"""
+{alt_mirror_block}"""
     with open("/root/.config/sway/config", "w") as f:
         f.write(sway_cfg)
     with open("/tmp/omarchy-sway.conf", "w") as f:

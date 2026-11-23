@@ -96,6 +96,14 @@ class QuicksFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        // ========== Omarchy 桌面快速入口卡片 ==========
+        view.findViewById<View>(R.id.omarchy_launch_desktop_btn)?.setOnClickListener {
+            parentVM.enterGui()
+        }
+        view.findViewById<View>(R.id.omarchy_open_terminal_btn)?.setOnClickListener {
+            mainViewModel.toggleTerminal()
+        }
+
         // ========== 注册结果监听 ==========
 
         childFragmentManager.setFragmentResultListener(

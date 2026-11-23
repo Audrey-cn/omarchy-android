@@ -63,6 +63,10 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         binding = Tc4ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        // Phone management UI stays in crisp Portrait (tablets sw>=600dp remain free; X11 desktop is independent)
+        if (resources.configuration.smallestScreenWidthDp < 600) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
         setSupportActionBar(binding.toolbar)
         ViewCompat.setOnApplyWindowInsetsListener(binding.main) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())

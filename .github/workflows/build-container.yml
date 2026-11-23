@@ -115,7 +115,8 @@ jobs:
             waybar wofi swaybg mako-notifier libnotify-bin wl-clipboard wtype \
             alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
             imv zathura zathura-pdf-poppler mpv \
-            git gh curl wget unzip zstd xz-utils webp imagemagick \
+            git gh curl wget unzip zip p7zip-full zstd xz-utils webp imagemagick \
+            openssh-client rsync tree file lsof iproute2 python3-venv \
             fonts-noto-cjk fonts-noto-color-emoji fonts-dejavu-core papirus-icon-theme \
             python3 python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 gir1.2-webkit2-4.1 \
             grim slurp \
