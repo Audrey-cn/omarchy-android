@@ -45,7 +45,7 @@ jobs:
             imv zathura zathura-pdf-poppler mpv \
             git gh curl wget unzip zstd xz-utils webp imagemagick \
             fonts-noto-cjk fonts-noto-color-emoji fonts-dejavu-core papirus-icon-theme \
-            python3 python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 \
+            python3 python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 gir1.2-webkit2-4.1 \
             grim slurp \
             fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5 \
             build-essential ninja-build pkg-config scdoc python3-pip \
@@ -120,13 +120,6 @@ jobs:
           curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" | tar -xJ -C /usr/share/fonts/truetype/jetbrains-mono-nerd --wildcards '*NerdFont-Regular.ttf' '*NerdFont-Bold.ttf' '*NerdFontMono-Regular.ttf' '*NerdFontPropo-Regular.ttf' || \
             curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" | tar -xJ -C /usr/share/fonts/truetype/jetbrains-mono-nerd
 
-          # Install native ARM64 Chromium (.deb from xtradeb/apps PPA, no Snap!) for in-system WebApps
-          mkdir -p /etc/apt/keyrings
-          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x82BB6851C64F6880" | gpg --dearmor -o /etc/apt/keyrings/xtradeb.gpg
-          echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/xtradeb.gpg] https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu noble main" > /etc/apt/sources.list.d/xtradeb-apps.list
-          apt-get update -qq
-          apt-get install -y --no-install-recommends chromium
-
           # Install lazygit ARM64
           LG_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/jesseduffield/lazygit/releases/latest" | sed 's|.*/tag/v||')
           curl -fsSL "https://github.com/jesseduffield/lazygit/releases/download/v${LG_VER}/lazygit_${LG_VER}_Linux_arm64.tar.gz" -o /tmp/lg.tar.gz
@@ -148,7 +141,7 @@ jobs:
 
           echo 'DPkg::Post-Invoke { "/usr/local/bin/omarchy-fix-desktops || true"; };' > /etc/apt/apt.conf.d/99-omarchy-desktop-guard
 
-          # Deploy official Omarchy WebApps & lowercase icons
+          # Deploy ONLY curated WebApps (Bilibili + DeepSeek) + Omarchy Native Browser
           for ic in /root/.local/share/omarchy/applications/icons/*.png; do
             b=$(basename "$ic")
             low=$(echo "$b" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
@@ -156,13 +149,20 @@ jobs:
             cp -f "$ic" "/root/.local/share/icons/hicolor/256x256/apps/$low"
             cp -f "$ic" "/usr/share/pixmaps/$low"
           done
-          for f in /root/.local/share/omarchy/applications/*.desktop; do
-            b=$(basename "$f")
-            case "$b" in
-              "foot.desktop"|"Activity Monitor.desktop"|"Game Vibes.desktop"|"Herdr.desktop"|omarchy-*.desktop) continue ;;
-              *) cp -f "$f" "/root/.local/share/applications/$b" ;;
-            esac
+          for f in /root/.local/share/omarchy/applications/Bilibili.desktop /root/.local/share/omarchy/applications/DeepSeek.desktop; do
+            [ -f "$f" ] && cp -f "$f" "/root/.local/share/applications/$(basename "$f")"
           done
+          cat > /root/.local/share/applications/omarchy-browser.desktop <<'DESK'
+          [Desktop Entry]
+          Name=Omarchy Browser
+          Name[zh_CN]=Omarchy 浏览器
+          Comment=Lightweight Native Wayland Browser (WebKitGTK)
+          Exec=/usr/local/bin/omarchy-browser
+          Icon=web-browser
+          Terminal=false
+          Type=Application
+          Categories=Network;WebBrowser;
+          DESK
           cat > /root/.local/share/applications/lazygit.desktop <<'DESK'
           [Desktop Entry]
           Name=Lazygit

@@ -1,88 +1,63 @@
-[中文版](README.zh.md)
+# Omarchy Android
 
-# Tiny Container
+**开箱即用的免 Root 单 APK 手机/平板端 Omarchy Wayland Linux 桌面环境。**
 
-> [!NOTE]
-> Linux is powerful. Linux can also be easy to use.
+将完整的 **Ubuntu 24.04 ARM64 + Sway 1.10.1 (`wlroots 0.18.2` 纯 SHM/Pixman 后端) + Waybar + Omarchy 主题与菜单体系 + 内置 Termux:X11 + 原生悬浮手柄与悬浮键盘** 全部打包进一个独立 APK——无需 Root、无需外部 Termux、无需手动导入镜像，安装打开即用。
 
-### Install Tiny Container and instantly get a Linux computer* — run PC software right on your phone or tablet!
+---
 
-![Preview image](doc/tc4.png)
+## 核心特性
 
-## Features
+- **真正免 Root · 单 APK 开箱即用**：内置 `assets/rootfs.tar.zst` 镜像，首次启动自动初始化并直达 Omarchy Wayland 桌面。
+- **原汁原味 Omarchy 桌面体验**：
+  - `Sway 1.10.1` 平铺窗口管理器 + `Waybar` 顶栏（完整 Nerd Font + `omarchy.ttf` + `NotoColorEmoji`）
+  - 6 列原生应用网格（`Super + Space`）、可视化主题与壁纸选择器、完整快捷键速查表（`Super + K`）
+  - 默认 `1.5x` 手机/平板清晰缩放 + **圆角屏（R 角）对称安全边距适配**（可在右上角「显示与缩放」一键切换方屏 / 标准圆角 / 大圆角）
+  - 顶栏实效快捷状态开关：勿扰（`makoctl`）、夜览护眼（硬件暖色滤镜）、防休眠常亮、免密 Sudo、一键全屏截图
+- **内置轻量原生 Wayland 浏览器（WebKitGTK 4.1）**：
+  - 100% 运行在 Linux Sway 桌面内部，秒开（<0.4s）、低内存（<60 MB）、支持 Cookie 与登录态持久化
+  - 精简预装核心原生工具（Alacritty、Thunar、Neovim、Lazygit、imv、Zathura、mpv、Omarchy Browser）与精选 WebApp（DeepSeek、Bilibili），可在「安装」菜单按需安装 CC Switch、AI 工具与开发套件
+- **原生免权限贴边悬浮手柄 & 透明悬浮键盘**：
+  - 默认吸附屏幕边缘收起为半透明小拉条，自由上下拖动并弹性吸附左右边缘，不遮挡操作区
+  - 4 枚自绘极简矢量图标：透明 0.70x 悬浮键盘（底部小白条自由拖动 + 精致细轨透明度滑块）/ 豆包语音与中文穿透 / 横竖屏硬锁定 / 统一控制中心
+  - **竖屏软键盘自动上顶缩放**：竖屏调出安卓输入法时，桌面与终端自动收缩至键盘上方，零遮挡
+  - **豆包输入法无感穿透**：基于自定义 `InputConnectionWrapper`，候选期零泄露、选词/语音一次性精准上屏
+- **统一设置与 4 步箭头引导**：内置 X11 显示与触控设置、系统输入法切换、文件存储与电池优化一键授权，首次启动提供可跳过的交互式箭头指引。
 
-### Designed for ordinary users. You don't need to know Linux...
+---
 
-1. Install the app and open it — no manual steps required*. After a 5-minute initialization, you'll be at the desktop.
-2. Installation commands for common software are already prepared for you. Just tap, and the app handles the rest.
-3. The UI is designed to be as friendly as possible, not just "good enough to have a UI". AI-powered translations are available in many languages. Even RTL layout is supported!
-    - (Admittedly, I don't use RTL myself and can't verify the AI translations, so no guarantees on accuracy! But better to have it than not, right?)
+## 快速上手
 
-### Also a toy for geeks — built-in terminal, rich container configuration options!
+1. 前往 [Releases](https://github.com/Audrey-cn/omarchy-android-app/releases) 下载最新版 `OmarchyAndroid-AllInOne.apk` 并安装（仅支持 `arm64-v8a` 设备）。
+2. 首次打开保持亮屏等待约 30~60 秒完成桌面初始化，自动进入 Omarchy 桌面并弹出 4 步箭头引导。
+3. 推荐搭配 **豆包输入法**（可在引导页或控制中心一键检测/下载），点击悬浮手柄话筒即可直接用中文/离线语音在 Linux 终端与应用内输入。
 
-4. Containers and configurations can be freely shared!
-5. Cutting-edge features from the Termux community are ready to go! No need to learn how to install containers, start graphical sessions, configure audio, and all that tedious stuff. The following features work out of the box:
-    - Import containers via the import button, with graphical session startup included (if supported);
-    - Built-in AVNC and Termux:X11 frontends — no extra app installation needed;
-    - Audio and microphone forwarding;
-    - virglrenderer and turnip+zink graphics acceleration...
-6. Features only possible in a single app!
-    - Audio and VNC transmitted over unix sockets, bypassing the network stack;
-    - Browse container files via the SAF file manager;
-    - Add .desktop files or even arbitrary commands as shortcuts to your Android launcher!
-7. Won't conflict with Termux!
+### 常用快捷键
 
-The goal of this project is to let ordinary users enjoy Linux as effortlessly as possible.  
-Termux is widely known as a treasure trove for developers, massively expanding what your device can do.  
-Yet few people outside the developer community realize the potential sitting in their devices, so I hope this project lowers the barrier to entry.  
+| 快捷键 | 功能 |
+|---|---|
+| `Super + K` | 打开完整快捷键速查表 |
+| `Super + Space` | 打开 6 列原生应用网格 |
+| `Super + Alt + Space` | 打开 Omarchy 主菜单（主题、安装、系统设置） |
+| `Super + Enter` | 打开 Alacritty 终端 |
+| `Super + W` | 关闭当前窗口 |
+| `Super + 1~5` | 切换工作区 1~5 |
 
-> [!CAUTION]  
-> This project makes heavy use of AI. Given the level of completion, it's kind of unavoidable... isn't it? ^_^  
-> This includes code logic, layouts, translations, and more. There may be unexpected bugs in some places. Please be aware.
+---
 
-What I won't do: 
-- Support chroot containers. For the first three years of this project, people occasionally asked me to support it, usually citing "better performance".  
-  While that's true in theory, no one has ever provided actual benchmark data showing under what scenarios proot's slowness becomes a performance bottleneck. Since I have no experience developing apps that use root (and managing root seems like a huge hassle), I won't be supporting chroot.  
-  In short, if you really need it, use Termux! If you need automated setup, try Kali Nethunter or similar.
-- Support Mali GPU acceleration; Wayland; Docker, systemd; GNOME; some specific distro; camera, serial port, etc... (^-^*)  
-  No wish-listing please! If the community comes up with solutions, I may add them in.  
-  As for other distros, you can actually check out the [images repo](https://github.com/tiny-computer/images) and give it a try yourself.
+## 相关仓库
 
-## Download
+- 核心脚本与 Root Chroot 伴侣仓库：[Audrey-cn/omarchy-android](https://github.com/Audrey-cn/omarchy-android)
+- 单 APK 免 Root 一体包仓库（本仓库）：[Audrey-cn/omarchy-android-app](https://github.com/Audrey-cn/omarchy-android-app)
 
-APKs are available on the [releases](https://github.com/Cateners/tiny_container/releases) page.
+---
 
-## Build
+## 开源协议与致谢 (License & Acknowledgments)
 
-After cloning the repository, download the prebuilt library jniLibs.zip from the releases page and extract it to app/src/main/jniLibs/arm64-v8a. Then you can open and build the project normally in Android Studio.  
-For automatic container installation on first launch, rename your container to rootfs.tar.zst and place it in app/src/main/assets.  
-For container information, including how to make your own containers and some pre-built containers I've already prepared, check out [this](https://github.com/tiny-computer/images) repository.
+本项目基于 **GNU General Public License v3.0 (GPL-3.0)** 开源，详见 [COPYING](COPYING)。
 
-The jniLibs.zip prebuilt libraries come from my fork of [termux-packages](https://github.com/tiny-computer/termux-packages).  
-My main modifications there are:
-- scripts/generate-bootstraps.sh, to directly generate the required packages. I manually renamed the needed files to .so and packaged them. You should be able to easily see which .so files correspond to which files in the bootstraps.
-- packages/proot/build.sh, to use my fork of [proot](https://github.com/tiny-computer/proot-termux) (the changes there are a bit messy, nothing worth looking at).
-
-Other files may have minor modifications too, but those are usually just to get things compiling cleanly or to remove some Termux hard-coded paths.
-
-## Documentation?
-
-Not ready yet — please wait just a little bit longer...
-
-- If the screen appears too large or too small, adjust the display scaling in Features -> AVNC.
-- Android storage is mounted at /mnt/sdcard by default. Don't forget to grant storage access permission.
-- If a Linux app can't detect the microphone, check that the microphone is selected (Tiny Microphone Input), or try restarting that Linux app.
-
-## What about the old code?
-
-The Tiny Computer code is preserved on the v1_tiny_computer branch.
-Tiny Container is a complete rewrite of Tiny Computer, and I likely won't maintain Tiny Computer going forward. So, use Tiny Container!
-
-## Acknowledgments
-Thanks to the [termux](https://github.com/termux) community for porting so many excellent programs to Android and providing countless solutions for container configuration scenarios.  
-Thanks to the [tmoe](https://github.com/2moe/tmoe) project for making container configuration easier. Although Tiny Container doesn't directly use tmoe this time, some scripts still bear its influence. tmoe was my introduction to Linux.  
-Thanks to the [avnc](https://github.com/gujjwal00/avnc) and [termux-x11](https://github.com/termux/termux-x11) projects — the Linux graphical interfaces used by Tiny Container.  
-Thanks to vinceliuice's [Fluent](https://github.com/vinceliuice/Fluent-gtk-theme) project — the default theme used by the Xfce container.  
-Thanks to lxgw's [Xiaolai Font](https://github.com/lxgw/kose-font) project — the default font used by containers.  
-Thanks to the [debian](https://www.debian.org/) project and all the open-source maintainers who form the foundation of the containers! All containers currently used in this project are based on Debian.  
-Thanks to all Tiny Computer (and Tiny Container) contributors, users, and everyone who believes in this project.
+衷心感谢以下优秀的开源项目与作者：
+- [**tiny_container**](https://github.com/Cateners/tiny_container)（by Caten Hu, GPL-3.0）—— 本项目 Android 容器壳与 JNI 音频/麦克风/PRoot 集成的基础框架
+- [**basecamp/omarchy**](https://github.com/basecamp/omarchy) —— Omarchy 桌面美学、主题与工作流设计灵感来源
+- [**Termux:X11**](https://github.com/termux/termux-x11) & [**PRoot**](https://github.com/proot-me/proot) —— Android 端高性能 X11 显示与免 Root Linux 容器运行时
+- [**Sway**](https://github.com/swaywm/sway) & [**wlroots**](https://gitlab.freedesktop.org/wlroots/wlroots) —— 现代轻量 Wayland 平铺合成器

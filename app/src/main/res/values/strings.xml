@@ -203,7 +203,7 @@
 
     <!-- ==================== License Page ==================== -->
     <string name="tc4_license_title">GNU General Public License v3.0</string>
-    <string name="tc4_license_description">Tiny Container is open source under the GPLv3 license</string>
+    <string name="tc4_license_description">Omarchy Android is open source under GPLv3 (built with Tiny Container, Termux:X11, PRoot, Sway &amp; Omarchy)</string>
 
     <!-- ==================== Open Source Libs Page ==================== -->
     <string name="tc4_oss_title">Open Source Libraries</string>

@@ -203,7 +203,7 @@
 
     <!-- ==================== License Page ==================== -->
     <string name="tc4_license_title">GNU General Public License v3.0</string>
-    <string name="tc4_license_description">小小容器使用 GPLv3 许可证开源</string>
+    <string name="tc4_license_description">Omarchy Android 基于 GPLv3 许可证开源（致谢 Tiny Container / Termux:X11 / PRoot / Sway / Omarchy）</string>
 
     <!-- ==================== Open Source Libs Page ==================== -->
     <string name="tc4_oss_title">开源库</string>
