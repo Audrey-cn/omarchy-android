@@ -32,7 +32,6 @@ import com.fct.tc4.TinyMicrophone
 import com.fct.tc4.R
 import com.fct.tc4.TinyIpp
 import com.fct.tc4.TinyStorage
-import com.fct.tc4.ManagedCoreAssets
 import com.fct.tc4.ProotRuntimePolicy
 import com.fct.tc4.ui.misc.ConfigManager
 import com.fct.tc4.ui.misc.Global
@@ -105,18 +104,9 @@ class ContainerMainViewModel(
             }
             config = loaded
             _configState.value = config
-            try {
-                withContext(Dispatchers.IO) {
-                    ManagedCoreAssets.syncBeforeStart(getApplication(), code)
-                }
-            } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                Log.e(TAG, "Managed core update failed", error)
-                _errorMessage.value = getApplication<Application>().getString(
-                    R.string.tc4_managed_core_update_failed, error.message ?: error.javaClass.simpleName)
-                _isInitialized.value = true
-                return@launch
-            }
+            // The desktop is persistent user state. App/native updates must not
+            // replace or retire guest files when APK payloads change or disappear.
+            // New Linux contents are delivered only through explicit initial install.
             if (!setupEnvironment()) {
                 _isInitialized.value = true
                 return@launch

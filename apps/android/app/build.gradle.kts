@@ -16,16 +16,9 @@
 // along with this program.  If not, see http://www.gnu.org/licenses/.
 
 import groovy.json.JsonSlurper
-import org.gradle.api.file.DirectoryProperty
-import org.gradle.api.tasks.OutputDirectory
 
 plugins {
     alias(libs.plugins.android.application)
-}
-
-abstract class PrepareManagedCoreAssets : Exec() {
-    @get:OutputDirectory
-    abstract val outputDirectory: DirectoryProperty
 }
 
 // CI prepares this metadata once; local builds use the exact same version calculator.
@@ -48,26 +41,12 @@ val androidVersionName = androidBuildVersion["versionName"].toString().let {
     if (androidSigningMode != "stable-test" && !it.endsWith(".temporary")) "$it.temporary" else it
 }
 
-val managedAssetsDirectory = layout.buildDirectory.dir("generated/managedAssets")
-val extraManagedPayload = providers.environmentVariable("OMARCHY_ANDROID_MANAGED_PAYLOAD_DIR").orNull
-val prepareManagedCoreAssets by tasks.registering(PrepareManagedCoreAssets::class) {
-    val repository = rootProject.file("../..")
-    workingDir(repository)
-    inputs.dir(repository.resolve("core/bin"))
-    inputs.dir(repository.resolve("core/ai-suite"))
-    inputs.file(repository.resolve("scripts/prepare-android-managed.py"))
-    inputs.property("sourceSha", androidBuildVersion["sourceSha"].toString())
-    inputs.property("extraManagedPayload", extraManagedPayload ?: "")
-    if (extraManagedPayload != null) inputs.dir(repository.resolve(extraManagedPayload))
-    outputDirectory.set(managedAssetsDirectory)
-    commandLine("python3", repository.resolve("scripts/prepare-android-managed.py").absolutePath,
-        "--output-dir", outputDirectory.get().asFile.absolutePath,
-        "--source-sha", androidBuildVersion["sourceSha"].toString())
-    if (extraManagedPayload != null) args("--extra-dir", repository.resolve(extraManagedPayload).absolutePath)
+// A previous all-in-one build can leave an ignored rootfs in src/main/assets.
+// Check source sets before resource merging, including normal Android Studio builds.
+val checkInstallerInputs by tasks.registering(Exec::class) {
+    commandLine("python3", rootProject.file("../../scripts/android-build.py"), "check-installer-inputs")
 }
-androidComponents.onVariants { variant ->
-    variant.sources.assets?.addGeneratedSourceDirectory(prepareManagedCoreAssets, PrepareManagedCoreAssets::outputDirectory)
-}
+tasks.named("preBuild") { dependsOn(checkInstallerInputs) }
 
 android {
     namespace = "com.fct.tc4"
@@ -119,11 +98,6 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
         }
-    }
-    androidResources {
-        noCompress += "zst"
-        // Managed Node/npm payloads contain required dotfiles and underscore directories.
-        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~"
     }
     packaging {
         jniLibs {
