@@ -19,24 +19,35 @@ object InitialImageRepository {
         return context.assets.open("initial-images.json").bufferedReader().use { InitialImageCatalog.parse(it.readText()) }
     }
     fun refresh(context: Context): List<ImageSpec> {
-        var url = URL(InitialImageCatalog.CATALOG_URL)
+        val (bytes, catalog) = try {
+            val release = fetch(InitialImageCatalog.RELEASE_API_URL, "application/vnd.github+json")
+            val apiAssetUrl = InitialImageCatalog.catalogAssetUrl(release.toString(Charsets.UTF_8))
+            val downloaded = fetch(apiAssetUrl, "application/octet-stream")
+            downloaded to InitialImageCatalog.parse(downloaded.toString(Charsets.UTF_8))
+        } catch (_: Exception) {
+            val downloaded = fetch(InitialImageCatalog.CATALOG_URL, "application/json")
+            downloaded to InitialImageCatalog.parse(downloaded.toString(Charsets.UTF_8))
+        }
+        val target = File(InitialDesktopState.directory(context), "catalog.json")
+        val temp = File(target.parentFile, "catalog.json.tmp")
+        check(!Files.isSymbolicLink(target.toPath()) && !Files.isSymbolicLink(temp.toPath()))
+        temp.writeBytes(bytes); Files.move(temp.toPath(), target.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
+        return catalog
+    }
+    private fun fetch(address: String, accept: String): ByteArray {
+        var url = URL(address)
         repeat(6) {
             require(url.protocol == "https")
             val connection = url.openConnection() as HttpURLConnection
             connection.connectTimeout = 15_000; connection.readTimeout = 15_000; connection.instanceFollowRedirects = false
+            connection.setRequestProperty("Accept", accept)
             try {
                 val status = connection.responseCode
                 if (status in listOf(301, 302, 303, 307, 308)) {
                     url = URL(url, connection.getHeaderField("Location") ?: throw IOException("Missing catalog address"))
                 } else {
                     if (status != 200) throw IOException("Catalog unavailable")
-                    val bytes = connection.inputStream.use { it.readBytesBounded(InitialImageCatalog.MAX_BYTES) }
-                    val catalog = InitialImageCatalog.parse(bytes.toString(Charsets.UTF_8))
-                    val target = File(InitialDesktopState.directory(context), "catalog.json")
-                    val temp = File(target.parentFile, "catalog.json.tmp")
-                    check(!Files.isSymbolicLink(target.toPath()) && !Files.isSymbolicLink(temp.toPath()))
-                    temp.writeBytes(bytes); Files.move(temp.toPath(), target.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
-                    return catalog
+                    return connection.inputStream.use { it.readBytesBounded(InitialImageCatalog.MAX_BYTES) }
                 }
             } finally { connection.disconnect() }
         }

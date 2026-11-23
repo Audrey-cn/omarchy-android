@@ -10,19 +10,24 @@ import java.net.URI
 object InitialImageCatalog {
     const val MAX_BYTES = 1024 * 1024
     const val CATALOG_URL = "https://github.com/Audrey-cn/omarchy-android/releases/download/desktop-images/catalog.json"
+    const val RELEASE_API_URL = "https://api.github.com/repos/Audrey-cn/omarchy-android/releases/tags/desktop-images"
     private val identifier = Regex("[a-z0-9][a-z0-9._-]{0,79}")
+    private val officialAssetUrl = Regex("https://api\\.github\\.com/repos/Audrey-cn/omarchy-android/releases/assets/[1-9][0-9]*")
+    fun catalogAssetUrl(releaseJson: String): String {
+        val release = parseObject(releaseJson)
+        require(string(release, "tag_name") == "desktop-images") { "Unexpected image release" }
+        val assets = release["assets"] as? List<*> ?: throw IllegalArgumentException("Missing release assets")
+        val catalogs = assets.mapNotNull { (it as? Map<*, *>)?.takeIf { asset -> asset["name"] == "catalog.json" } }
+        require(catalogs.size == 1) { "Expected exactly one image catalog" }
+        val catalog = catalogs.single()
+        require(integer(catalog, "size") in 1..MAX_BYTES.toLong()) { "Invalid catalog size" }
+        return string(catalog, "url").also {
+            require(it.length <= 4096 && officialAssetUrl.matches(it)) { "Invalid official catalog address" }
+        }
+    }
     fun parse(text: String): List<ImageSpec> {
-        require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Image catalog is too large" }
-        require(text.trimStart().startsWith("{")) { "Expected an image catalog" }
         try {
-            val options = LoaderOptions().apply {
-                isAllowDuplicateKeys = false
-                maxAliasesForCollections = 0
-                codePointLimit = MAX_BYTES
-                nestingDepthLimit = 12
-            }
-            val root = Yaml(SafeConstructor(options)).load<Any>(text) as? Map<*, *>
-                ?: throw IllegalArgumentException("Invalid image catalog")
+            val root = parseObject(text)
             require(integer(root, "schemaVersion") == 1L) { "Unsupported image catalog" }
             val entries = root["images"] as? List<*> ?: throw IllegalArgumentException("Missing images")
             require(entries.size <= 32) { "Too many initial images" }
@@ -40,6 +45,21 @@ object InitialImageCatalog {
             return images
         } catch (e: IllegalArgumentException) { throw e
         } catch (_: Exception) { throw IllegalArgumentException("Invalid image catalog") }
+    }
+    private fun parseObject(text: String): Map<*, *> {
+        require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Image catalog response is too large" }
+        require(text.trimStart().startsWith("{")) { "Expected an image catalog response" }
+        try {
+            val options = LoaderOptions().apply {
+                isAllowDuplicateKeys = false
+                maxAliasesForCollections = 0
+                codePointLimit = MAX_BYTES
+                nestingDepthLimit = 12
+            }
+            return Yaml(SafeConstructor(options)).load<Any>(text) as? Map<*, *>
+                ?: throw IllegalArgumentException("Invalid image catalog response")
+        } catch (e: IllegalArgumentException) { throw e
+        } catch (_: Exception) { throw IllegalArgumentException("Invalid image catalog response") }
     }
     fun validate(spec: ImageSpec) {
         require(identifier.matches(spec.id)) { "Invalid image version" }
