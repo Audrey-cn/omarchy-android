@@ -249,6 +249,7 @@ class ResumableImageDownloader(
                 connection.useCaches = false
                 connection.connectTimeout = connectTimeoutMs
                 connection.readTimeout = readTimeoutMs
+                connection.setRequestProperty("Accept", "application/octet-stream")
                 connection.setRequestProperty("Accept-Encoding", "identity")
                 if (resume != null) {
                     connection.setRequestProperty("Range", "bytes=${resume.offset}-")

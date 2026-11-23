@@ -42,6 +42,29 @@ class ResumableImageDownloaderTest {
     }
 
     @Test
+    fun publicAssetEndpointSelectsBinaryAcrossRedirectAndResume() = serve({
+        when {
+            requestHeaders.getFirst("Accept") != "application/octet-stream" -> {
+                responseHeaders.set("Content-Type", "application/json")
+                send("""{"id":123,"name":"image.tar.zst"}""".toByteArray(), "\"metadata\"")
+            }
+            requestURI.path == "/image" -> {
+                responseHeaders.set("Location", "/asset")
+                sendResponseHeaders(302, -1)
+            }
+            else -> {
+                responseHeaders.set("Content-Type", "application/octet-stream")
+                sendImageOrRemainder(tag)
+            }
+        }
+    }) { spec, requests ->
+        val directory = temporary.newFolder()
+        val offset = pause(spec, directory)
+        assertArrayEquals(image, downloader().download(spec, directory)!!.readBytes())
+        assertEquals(listOf(Request(), Request(), Request(), Request("bytes=$offset-", tag)), requests)
+    }
+
+    @Test
     fun pausedPartialResumesInNewInstanceWithRangeAndIfRange() = serve({
         sendImageOrRemainder(tag)
     }) { spec, requests ->
