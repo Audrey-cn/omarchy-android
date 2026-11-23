@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "beforeCode": 62,
+  "afterCode": 72,
+  "sameUid": true,
+  "preservedHashes": {
+    "omarchy/.tiny.yaml": true,
+    "omarchy/root/.hermes/.env": true,
+    "omarchy/root/.hermes/config.yaml": true,
+    "omarchy/root/.config/sway/config": true,
+    "omarchy/etc/passwd": true,
+    "omarchy/etc/group": true,
+    "omarchy/var/lib/dpkg/status": true,
+    "shared_prefs/com.omarchy.android_preferences.xml": true,
+    "shared_prefs/omarchy_overlay_prefs.xml": true,
+    "files/managed-core/omarchy/manifest.tsv": true,
+    "omarchy/usr/local/bin/omarchy-chromium": true,
+    "omarchy/usr/local/bin/omarchy-playwright128": true,
+    "omarchy/opt/omarchy-chromium128/source-manifest.json": true
+  },
+  "imeUnchanged": true,
+  "guestSynchronizedOnLaunch": false
+}

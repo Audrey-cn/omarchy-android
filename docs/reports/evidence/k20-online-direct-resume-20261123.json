@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "network": "K20 direct official GitHub API",
+  "pausedBytes": 5903787,
+  "retainedAfterForceStop": 5903787,
+  "differentProcessAfterRestart": true,
+  "lowestResumedProgress": 5903787,
+  "observedResumedBytes": 6190507,
+  "catalogRefreshViaOfficialApi": true,
+  "completeImageDownload": false,
+  "fullImageAcceptanceUsesSeparateTestFixture": true
+}

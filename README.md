@@ -34,9 +34,9 @@
 
 ### 免 Root 一体 App
 
-下载以主仓库 [Releases](https://github.com/Audrey-cn/omarchy-android/releases) 的实际附件为准，仅支持 `arm64-v8a`。已记录的 K20 Pro 验证版 [v1.0.62-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.62-test) 是内置镜像的旧交付方式，其同签名升级、数据保留和真实 Hermes Agent 验证见[实机记录](docs/reports/k20-round2-20261123.md)。
+使用已通过 K20 Pro 验证的 [v1.0.72-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.72-test) 精简 APK，约 33.7 MB，仅支持 `arm64-v8a`；下载以主仓库 [Releases](https://github.com/Audrey-cn/omarchy-android/releases) 的实际附件为准。已验证从 `v1.0.62-test` 同签名覆盖升级、既有数据保留和真实 Hermes Agent 回归，详见[本轮实机记录](docs/reports/online-installer-k20-20261123.md)。
 
-新的精简 APK 提供首次安装页面：选择初始镜像 → 下载并安装，支持持久断点、暂停后继续和匹配镜像的离线导入。APK 保留 Android 界面、内嵌 X11 与 PRoot，桌面及浏览器内容随初装镜像分发。首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)和[镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，支持 App 版本代码 64 及以上，随包目录也已加入同一镜像。精简 APK 云端构建与布局校验已通过；新的同签名 App Release 和 K20 实机验收仍待完成。操作说明和发布边界见[首次安装与更新](docs/initial-install.md)。
+精简 APK 提供首次安装页面：选择初始镜像 → 下载并安装，支持持久断点、暂停后继续和匹配镜像的离线导入。APK 保留 Android 界面、内嵌 X11 与 PRoot，桌面及浏览器内容随初装镜像分发。首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)和[镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，支持 App 版本代码 64 及以上，随包目录也已加入同一镜像。K20 已完成下载恢复、完整镜像校验安装、离线导入和桌面启动验收；测试条件见[实机记录](docs/reports/online-installer-k20-20261123.md)，操作说明见[首次安装与更新](docs/initial-install.md)。
 
 后续 App、X11 和 PRoot 更新沿用同一持久签名密钥，通过 Android 覆盖安装保留现有桌面与个人数据；日常启动不再同步 guest 文件或重新导入镜像。Ubuntu 内的软件使用其 APT 软件源维护。镜像定期修正后供新安装选择，已有桌面无需跟随每次镜像重发。
 

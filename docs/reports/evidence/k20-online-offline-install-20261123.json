@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "testPackage": "com.omarchy.android.acceptance",
+  "firstRunUi": true,
+  "safOfflineImport": true,
+  "archivePhoneSha256": "88a1558fc93489016ad1c53fccb03ebc0f3986507dccf6b422de444d915f33c6",
+  "nativeFullExtractionAndRegistration": true,
+  "stagingAfterCompletion": 0,
+  "freshChromiumHeadless": "passed",
+  "freshChromiumGui": "Example Domain",
+  "desktopVisibleBeforeGuide": true,
+  "skipRecordsOptOutWithoutCompletion": true,
+  "mainDataPreserved": true,
+  "preservedFiles": 13,
+  "sourceBranchCommit": "94bf78adfa7ad11897489331b6d42784162a7b50"
+}

@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "imageId": "desktop-ubuntu24-e55030353df6",
+  "bytes": 999745976,
+  "sha256": "88a1558fc93489016ad1c53fccb03ebc0f3986507dccf6b422de444d915f33c6",
+  "pausedAtBytes": 599611696,
+  "retainedAfterProcessExit": 599611696,
+  "lowestSubsequentProgress": 599611696,
+  "completeBytes": 999745976,
+  "nativeInstallationComplete": true,
+  "transport": "real official GitHub HTTPS via temporary acceptance-only test proxy",
+  "archivePrefilled": false,
+  "deviceGlobalProxyChanged": false
+}
