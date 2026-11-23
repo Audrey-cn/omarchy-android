@@ -1,6 +1,6 @@
 # Online Initial Installer Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Ship a small same-signature Android APK with persistent resumable first desktop installation, preserve existing guests during App updates, and delay onboarding until desktop readiness.
 
@@ -35,9 +35,9 @@
 
 **Interfaces:** `data class ImageSpec(val id:String,val name:String,val abi:String,val minAppVersionCode:Int,val bytes:Long,val unpackedBytes:Long,val sha256:String,val sourceSha:String,val urls:List<String>)`. `class ResumableImageDownloader(connectTimeoutMs:Int=15000,readTimeoutMs:Int=15000,allowHttpForTests:Boolean=false)` exposes `download(spec:ImageSpec,directory:File,shouldPause:()->Boolean={false},progress:(Long,Long)->Unit={_,_->}):File?`, `partialBytes(spec:ImageSpec,directory:File):Long`, `cancel(spec:ImageSpec,directory:File)`. Null means intentionally paused. HTTP is permitted only for loopback fixtures when explicitly enabled; production accepts HTTPS only. Verified returned file has exact expected bytes/hash.
 
-- [ ] Write and observe failing local-server tests for fresh download, pause/restart instance resume, ranges/ETags, ignored Range, truncation, oversized content, corrupt SHA and cache symlinks.
-- [ ] Implement the minimal bounded downloader with owned hash-addressed files and atomic entity metadata.
-- [ ] Run actual JVM tests; report red/green commands and independent review package.
+- [x] Write and observe failing local-server tests for fresh download, pause/restart instance resume, ranges/ETags, ignored Range, truncation, oversized content, corrupt SHA and cache symlinks.
+- [x] Implement the minimal bounded downloader with owned hash-addressed files and atomic entity metadata.
+- [x] Run actual JVM tests; report red/green commands and independent review package.
 
 ### Task 2: Onboarding readiness
 
@@ -45,9 +45,9 @@
 
 **Interfaces:** Overlay attachment starts a cancellable readiness poll for current app-private X11/Sway session, replaces the unconditional 2200ms guide launch and cancels on detach. Keep completed onboarding preferences and all input/overlay settings intact.
 
-- [ ] Write failing tests for connected viewport without desktop, stale IPC socket, ready desktop, detach/retry and completion flag remaining false until the actual flow completes.
-- [ ] Implement readiness probe using current app-private sockets/processes and actual X11 connection state; bounded polling and useful waiting/retry behavior.
-- [ ] Run focused tests and report boundary/device checks needed.
+- [x] Write failing tests for connected viewport without desktop, stale IPC socket, ready desktop, detach/retry and completion flag remaining false until the actual flow completes.
+- [x] Implement readiness probe using current app-private sockets/processes and actual X11 connection state; bounded polling and useful waiting/retry behavior.
+- [x] Run focused tests and report boundary/device checks needed.
 
 ### Task 3: Independent image and small APK delivery
 
@@ -55,9 +55,9 @@
 
 **Interfaces:** Initial image contains staged core plus browser bundle under opt and outputs the exact catalog schema in spec. Publish canonical trusted main manual image builds with non-latest tag `desktop-ubuntu24-<sha12>` and rootfs.tar.zst/image.json/SHA256SUMS/source/license evidence. A catalog asset is produced separately; root updates the small APK's bundled catalog from verified public metadata. APK verify supports online-installer delivery with no rootfs/managed payload and still verifies certificate, version and the native triplet.
 
-- [ ] Add failing archive/catalog/APK-layout tests for correct size/hash/source and rejection of image/managed payload in small installer.
-- [ ] Move Linux payload staging into the image, materialize tar hardlinks, decouple manual image builds from frequent shell APK workflow and preserve trusted/PR signing boundaries.
-- [ ] Run Python suite and inspect workflow contracts. Do not push/publish/ADB from worker.
+- [x] Add failing archive/catalog/APK-layout tests for correct size/hash/source and rejection of image/managed payload in small installer.
+- [x] Move Linux payload staging into the image, materialize tar hardlinks, decouple manual image builds from frequent shell APK workflow and preserve trusted/PR signing boundaries.
+- [x] Run Python suite and inspect workflow contracts. Do not push/publish/ADB from worker.
 
 ### Task 4: Android first installation and preservation integration (controller)
 
@@ -65,13 +65,13 @@
 
 **Interfaces:** Consume Task1 ImageSpec/downloader. Bundled catalog initial-images.json and refresh the fixed owned Release catalog. Foreground service retains download state, exposes honest progress and controlled pause/resume/cancel; extraction/commit through separate transaction. Main normal startup only offers initial setup when no existing Omarchy; old managed receipt is left in place without synchronization/removal.
 
-- [ ] Add failing catalog, path/space/transaction and existing-guest preservation tests, then implement adapters and first-run UI.
-- [ ] Check actual tar exit status, validate image/config, set fresh aid mapping and commit from private staging into an absent guest; journal and recover interrupted work.
-- [ ] Compile Android and run all unit checks in cloud. Resolve integration failures before device mutation.
+- [x] Add failing catalog, path/space/transaction and existing-guest preservation tests, then implement adapters and first-run UI.
+- [x] Check actual tar exit status, validate image/config, set fresh aid mapping and commit from private staging into an absent guest; journal and recover interrupted work.
+- [x] Compile Android and run all unit checks in cloud. Resolve integration failures before device mutation.
 
 ### Task 5: Review, cloud and K20 delivery
 
-- [ ] Independent spec and broad diff review; no open high-impact data-loss/recovery/signing issues.
-- [ ] Publish verified clean initial image and catalog; build signed small APK with compatible bundled fallback.
-- [ ] K20 install-r preservation + desktop cold start/browser/Agent; download interruption/resume/install readiness in isolated recoverable test environment.
+- [x] Independent spec and broad diff review; no open high-impact data-loss/recovery/signing issues.
+- [x] Publish verified clean initial image and catalog; build signed small APK with compatible bundled fallback.
+- [x] K20 install-r preservation + desktop cold start/browser/Agent; download interruption/resume/install readiness in isolated recoverable test environment.
 - [ ] Publish tested App release, update two-route docs/initial-image policy and report exact validation boundaries. Clean only owned temporary duplicates.

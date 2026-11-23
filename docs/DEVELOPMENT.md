@@ -14,7 +14,7 @@ Android 项目通过 Git subtree 导入，保留原仓提交历史；这不是�
 
 `build-android.yml` 支持匹配路径的 main push、面向 main 的 PR 和手动 dispatch。`build-container.yml` 仅手动触发，避免频繁 App 变更重建整个系统。feature 分支单独 push 不会触发 main 的 push 过滤；手动 dispatch 需要工作流先在默认分支注册，再选择目标分支。
 
-首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)与[固定镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，随包目录已纳入同一份真实元数据。约 33.7 MB 的精简 APK 云端构建及布局校验已通过；新的同签名 App Release 和 K20 实机验收仍待完成。当前状态和用户流程见[首次安装与更新](initial-install.md)。
+首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)与[固定镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，随包目录已纳入同一份真实元数据。[v1.0.72-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.72-test) 精简 APK 为 33,745,476 字节，云端构建、布局校验和 K20 实机验收通过。用户流程见[首次安装与更新](initial-install.md)，证据及测试条件见[本轮验收记录](reports/online-installer-k20-20261123.md)。
 
 ## 编译精简 Android App
 
@@ -44,7 +44,7 @@ App 普通启动不再调用旧的 guest 受管文件同步。已有桌面脚本
 
 镜像与 APK 分开发行，不再生成 `OmarchyAndroid-AllInOne-apk`。修正 `core/` 或镜像组件后重建初装镜像；已有用户不会因安装新 APK 自动取得这些 guest 文件修正，也不会因镜像重发而重装系统。此轮不建设整套 rootfs 更新或迁移管理器。
 
-首次安装目录 schema 为 1，条目包含镜像 ID、ABI、最低 App 版本、精确字节数、解压大小、SHA256、源码 SHA 与固定 HTTPS 下载地址。首批镜像的 `minAppVersionCode` 设置为 64；随包 `apps/android/app/src/main/assets/initial-images.json` 只应纳入已发布且核对过的真实元数据。App 显式刷新读取主仓 `desktop-images` Release 的 `catalog.json`；该固定目录入口需单独维护，不能假定版本化镜像发布后它已自动更新。保留随包目录作为离线回退，允许目录提供一个或多个兼容初始版本。
+首次安装目录 schema 为 1，条目包含镜像 ID、ABI、最低 App 版本、精确字节数、解压大小、SHA256、源码 SHA 与固定 HTTPS 下载地址。首批镜像的 `minAppVersionCode` 设置为 64；随包 `apps/android/app/src/main/assets/initial-images.json` 只应纳入已发布且核对过的真实元数据。App 刷新时通过 GitHub 官方 Release API 查找 `desktop-images` 的 `catalog.json` 附件，保留固定网页下载地址回退；镜像也优先使用官方 API 附件地址并保留网页回退。该目录需单独维护，不能假定版本化镜像发布后已自动更新。保留随包目录作为离线回退，允许目录提供一个或多个兼容初始版本。
 
 镜像、APK、构建目录与本机签名密钥均不入库。首次安装下载支持持久断点；离线导入仍需匹配所选目录条目的大小与校验值。验证时使用隔离测试目录，不清空已有个人桌面。
 
@@ -84,7 +84,11 @@ git diff --check
 python3 -m unittest discover -s tests -v
 ```
 
-完整镜像打包使用云端 ARM64 Linux runner。历史内置镜像交付的提交 `e876b3b` 和运行 [45120464556](https://github.com/Audrey-cn/omarchy-android/actions/runs/45120464556) 的构建、37 项测试及 K20 结果保留在[验证报告](reports/cloud-k20-validation-20261123.md)，不代表新在线安装流程已经验收。新的交付还需分别核对下载恢复、失败安装不覆盖、既有 guest 保留与实际桌面就绪引导。
+完整镜像打包使用云端 ARM64 Linux runner。历史内置镜像交付的提交 `e876b3b` 和运行 [45120464556](https://github.com/Audrey-cn/omarchy-android/actions/runs/45120464556) 的构建、37 项测试及 K20 结果保留在[历史报告](reports/cloud-k20-validation-20261123.md)。本轮正常 App 构建 [45176504196](https://github.com/Audrey-cn/omarchy-android/actions/runs/45176504196) 与隔离验收构建 [45178081509](https://github.com/Audrey-cn/omarchy-android/actions/runs/45178081509) 通过；Python 112 项、下载器 30 项、目录/控制 33 项及引导 19 项检查通过。发布候选 App 来自 `e76c3e8577aa8d294f5c2ec93e0bae8ad0aa053a`，初装镜像仍来自 `e55030353df6bae7496720356f2d4b940495824e`，镜像未因 App 修正而重建。
+
+K20 实机验证包括从 62 到 72 的同签名覆盖升级、启动前后 13 项关键文件校验、原 guest/同步收据/输入法设置保留和真实 Hermes Agent 浏览器任务；另在隔离验收应用中完成整包 SAF 离线导入、原生图形桌面、Chromium 128 及 Example Domain 验证。直接联网通过官方 API 目录刷新，并验证下载暂停、强制结束进程和新进程继续，已下载字节可恢复且继续增长。
+
+完整 999,745,976 字节镜像的真实 HTTPS 下载未预填缓存，使用默认关闭、仅内部验收启用的临时传输代理；TLS 校验和手机全局代理设置保持原状。在 599,611,696 字节处暂停并强制结束后，新进程保留同一偏移继续下载，最终手机独立 SHA256 匹配公开镜像，再完成原生解压与登记。手机直连约 26 KB/s，网页下载曾超时；直连测试未完成整个 1 GB 镜像。内部验收传输方式不进入公开 App 的默认流程，详细证据见[本轮验收记录](reports/online-installer-k20-20261123.md)。
 
 GitHub Actions artifacts 与 Releases 附件是不同入口。App 工作流上传 artifact，App Release 需单独发布已验证的同签名 APK；镜像工作流另有可信 main 发布步骤。对外发布保留对应源码与许可证，并确认目录指向的镜像附件真实可取、大小和校验值一致。
 

@@ -15,7 +15,9 @@
 
 源码中的首次安装页面提供版本选择、下载并安装、暂停/继续、取消与匹配版本的本地导入。下载任务和部分内容持久保存，进程退出或重启后可手动继续。下载校验长度、SHA256 和续传响应；安装检查空间，先暂存、验证，再登记完成，不覆盖已有 guest。新手引导按当前桌面和 X11 就绪状态显示，替代原先固定延迟触发的方式。
 
-首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)与[固定镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，随包目录已包含同一镜像。其压缩包为 999,745,976 字节、逻辑解压大小为 2,973,377,562 字节，支持 App 版本代码 64 及以上；本地完整 SHA256 与公开资源的 HTTP Range 206、强 ETag 已核对。精简 APK 云端构建与布局校验已通过，新的同签名 App Release 和 K20 实机验收仍待完成。已记录的 `v1.0.62-test` 是内置镜像交付，K20 验证见[实机记录](../reports/k20-round2-20261123.md)。
+首个[干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)与[固定镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，随包目录已包含同一镜像。其压缩包为 999,745,976 字节、逻辑解压大小为 2,973,377,562 字节，支持 App 版本代码 64 及以上；完整 SHA256 与公开资源的 HTTP Range 206、强 ETag 已核对。
+
+[v1.0.72-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.72-test) 已通过 K20 从 `v1.0.62-test` 同签名覆盖升级，UID、证书、13 项关键文件、旧受管文件及收据和输入法设置保持一致，真实 Hermes Agent 回归通过。隔离初装完成在线下载恢复、完整校验与登记、本地离线导入、原生桌面和 Chromium 128 验证。完整镜像在线验收使用临时内部传输代理；直连结果覆盖实际目录刷新和较小下载的跨进程续传，不据此声称直连完成整个 1 GB 镜像。详细结果和测试条件见[本轮实机记录](../reports/online-installer-k20-20261123.md)。
 
 ## 已确认的更新边界
 

@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "temporaryAcceptancePackageRemoved": true,
+  "taskAdbForwardRemoved": true,
+  "ownedOfflineMediaRemoved": true,
+  "temporaryModelProfileRemoved": true,
+  "deviceGlobalProxyUnchanged": true,
+  "mainPackageRetained": true
+}

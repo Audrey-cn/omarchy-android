@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "beforeCode": 62,
+  "afterCode": 72,
+  "sameUid": true,
+  "sameCertificate": true,
+  "installOver": true,
+  "dataClearOrUninstall": false,
+  "preservedFileCount": 13,
+  "installedApkSha256": "7387172a0e81677beb2d4189bc0116ef3f78e70b036703709c995d19f6971804",
+  "sourceSha": "e76c3e8577aa8d294f5c2ec93e0bae8ad0aa053a",
+  "certificateSha256": "bcb2f64501107f9425a0efe9193f3703acddb6e34daa54196978de7720c86c17"
+}

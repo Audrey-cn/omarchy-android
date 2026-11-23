@@ -6,13 +6,13 @@
 
 源码已加入在线首次安装、持久断点、本地镜像导入与安装恢复流程。首个[干净初装镜像 `desktop-ubuntu24-e55030353df6`](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-e55030353df6)和[镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)已公开，均不占用 App 的 latest 发布入口；随包 `initial-images.json` 已包含该镜像。镜像支持 App 版本代码 64 及以上，压缩包为 999,745,976 字节，逻辑解压大小为 2,973,377,562 字节，校验值见发布附件。
 
-精简 APK 云端构建与布局校验已通过；新的同签名 App Release 和 K20 实机验收仍待完成。以下步骤对应新流程，镜像预发布不代表新 App 已完成发布或实机验收。
+约 33.7 MB 的 [v1.0.72-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.72-test) 已通过 K20 实机验收：同签名覆盖升级保留已有桌面与数据，初装验证涵盖目录刷新、下载中断恢复、完整镜像校验安装、本地离线导入和桌面启动。具体测试条件与真实 Hermes Agent 回归见[验收记录](reports/online-installer-k20-20261123.md)。下载以 Release 实际附件为准。
 
 旧版 `v1.0.62-test` 使用 APK 内置镜像，已有验证范围见 [K20 记录](reports/k20-round2-20261123.md)。它不具备本文的新下载页面。Root 路线的完整冷安装也尚待交付，状态见[发行与 Root 记录](discussions/2026-11-23-distribution-and-root.md)。
 
 ## 新用户首次安装
 
-1. 从项目 [Releases](https://github.com/Audrey-cn/omarchy-android/releases) 安装兼容的 `arm64-v8a` APK。无需另装 Termux 或 Termux:X11。
+1. 从项目 [v1.0.72-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.72-test) Release 安装 `arm64-v8a` APK。无需另装 Termux 或 Termux:X11。
 2. 打开 App，在“安装 Omarchy 桌面”页面选择初始镜像。列表只提供与当前 App 和架构兼容的版本；“刷新可用镜像”读取项目发布的目录。没有兼容条目时，先等待镜像发布或更新 App。
 3. 查看页面显示的下载量与空间要求，点击“下载并安装桌面”。需要为下载缓存、解压后的桌面和至少 512 MiB 余量留出空间。下载显示实际字节进度与通知；校验和解压显示等待状态。
 4. 可点击“暂停下载”，之后点击“继续下载并安装”。已下载内容与任务信息保存在磁盘；进程退出或设备重启后，重新打开 App 继续任务。网络中断后也可继续，不需要每次从头下载。“取消下载”清理该任务的下载缓存。
