@@ -16,6 +16,7 @@ import unittest
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts/prepare-initial-image.py"
 SHA = "0123456789abcdef" * 2 + "01234567"
+COMPONENT_SHA = "f" * 40
 
 
 class InitialImageTests(unittest.TestCase):
@@ -52,7 +53,7 @@ class InitialImageTests(unittest.TestCase):
         self.image.write_metadata(self.output, SHA, unpacked)
         image = json.loads((self.output / "image.json").read_text())
         self.assertEqual(set(image), {"id", "name", "abi", "minAppVersionCode", "bytes",
-                                     "unpackedBytes", "sha256", "sourceSha", "urls"})
+                                     "unpackedBytes", "sha256", "sourceSha", "componentSourceSha", "urls"})
         self.assertEqual(image["id"], "desktop-ubuntu24-" + SHA[:12])
         self.assertEqual(image["abi"], "arm64-v8a")
         self.assertEqual(image["minAppVersionCode"], 64)
@@ -60,6 +61,7 @@ class InitialImageTests(unittest.TestCase):
         self.assertEqual(image["unpackedBytes"], unpacked)
         self.assertEqual(image["sha256"], hashlib.sha256(compressed.read_bytes()).hexdigest())
         self.assertEqual(image["sourceSha"], SHA)
+        self.assertEqual(image["componentSourceSha"], SHA)
         self.assertEqual(image["urls"], ["https://github.com/Audrey-cn/omarchy-android/releases/download/" +
                                          image["id"] + "/rootfs.tar.zst"])
         self.assertEqual(json.loads((self.output / "catalog.json").read_text()), {"schemaVersion": 1, "images": [image]})
@@ -79,6 +81,30 @@ class InitialImageTests(unittest.TestCase):
             self.image.write_metadata(self.output, "abcd", 42)
         self.assertFalse((self.output / "catalog.json").exists())
 
+    def test_pinned_component_source_must_match_each_staged_receipt(self):
+        root = Path(self.temp.name) / "rootfs"
+        lock = REPO / "scripts/browser-bundle-sources.json"
+        receipts = {
+            "browser": (self.image.BROWSER_RECEIPT, "sourceSha",
+                        {"sourceManifestSha256": self.image.sha256(lock)}),
+            **{kind: (name, key, {}) for kind, (name, key) in self.image.COMPONENT_MANIFESTS.items()},
+        }
+        for name, key, properties in receipts.values():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({**properties, key: COMPONENT_SHA}))
+        _, pinned_source = self.image.check_component_sources(root, SHA, COMPONENT_SHA)
+        self.assertEqual(pinned_source, COMPONENT_SHA)
+        with self.assertRaisesRegex(ValueError, "browser provenance"):
+            self.image.check_component_sources(root, SHA, None)
+        for kind, (name, key, properties) in receipts.items():
+            path = root / name
+            with self.subTest(component=kind):
+                path.write_text(json.dumps({**properties, key: SHA}))
+                with self.assertRaisesRegex(ValueError, f"{kind} provenance"):
+                    self.image.check_component_sources(root, SHA, COMPONENT_SHA)
+                path.write_text(json.dumps({**properties, key: COMPONENT_SHA}))
+
     def test_gnu_tar_materializes_hardlinks_and_preserves_symlinks(self):
         tar = shutil.which("gtar") or shutil.which("tar")
         if not tar or "GNU tar" not in subprocess.check_output([tar, "--version"], text=True):
@@ -93,9 +119,11 @@ class InitialImageTests(unittest.TestCase):
         (root / "launcher").symlink_to("tool")
         checkout = subprocess.check_output(["git", "-C", REPO, "rev-parse", "HEAD"], text=True).strip()
         lock = REPO / "scripts/browser-bundle-sources.json"
-        receipt = dict(sourceSha=checkout, sourceManifestSha256=hashlib.sha256(lock.read_bytes()).hexdigest(),
+        receipt = dict(sourceSha=COMPONENT_SHA, sourceManifestSha256=hashlib.sha256(lock.read_bytes()).hexdigest(),
                        bundleId="local-fixture", versions={})
-        entries = [("opt/omarchy-chromium128/source-manifest.json", json.dumps(receipt).encode())]
+        entries = [(self.image.BROWSER_RECEIPT, json.dumps(receipt).encode())]
+        for name, key in self.image.COMPONENT_MANIFESTS.values():
+            entries.append((name, json.dumps({key: COMPONENT_SHA}).encode()))
         for path in ("usr/local/bin/sway", "usr/local/bin/omarchy-node-runtime",
                      "usr/local/bin/omarchy-playwright128", "root/.config/sway/config",
                      "opt/omarchy-node/node-v24.15.0-linux-arm64/bin/node",
@@ -118,7 +146,8 @@ class InitialImageTests(unittest.TestCase):
             entries.append((nested, b"package header"))
         output = self.output / "desktop-image"
         result = subprocess.run([sys.executable, SCRIPT, "--rootfs", root, "--output-dir", output,
-                                 "--source-sha", checkout], capture_output=True, text=True)
+                                 "--source-sha", checkout, "--component-source-sha", COMPONENT_SHA],
+                                capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         raw = subprocess.check_output(["zstd", "-dc", output / "rootfs.tar.zst"])
         with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
@@ -133,6 +162,10 @@ class InitialImageTests(unittest.TestCase):
             self.assertTrue(archive.getmember("launcher").issym())
             self.assertEqual(archive.getmember("launcher").linkname, "tool")
         image = json.loads((output / "image.json").read_text())
+        source = json.loads((output / "source.json").read_text())
+        self.assertEqual((image["sourceSha"], image["componentSourceSha"]), (checkout, COMPONENT_SHA))
+        self.assertEqual((source["sourceSha"], source["componentSourceSha"]), (checkout, COMPONENT_SHA))
+        self.assertEqual(json.loads((output / "browser-sources.json").read_text()), receipt)
         self.assertEqual(image["unpackedBytes"], 16 + sum(len(data) for _, data in entries))
         self.assertEqual(image["sha256"], hashlib.sha256((output / "rootfs.tar.zst").read_bytes()).hexdigest())
         self.assertEqual(image["bytes"], (output / "rootfs.tar.zst").stat().st_size)

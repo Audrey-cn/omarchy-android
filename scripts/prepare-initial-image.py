@@ -17,6 +17,11 @@ REPO = Path(__file__).resolve().parents[1]
 UPSTREAM = "https://github.com/Audrey-cn/omarchy-android"
 ARCHIVE = "rootfs.tar.zst"
 DOC = "usr/share/doc/omarchy-image"
+BROWSER_RECEIPT = "opt/omarchy-chromium128/source-manifest.json"
+COMPONENT_MANIFESTS = {
+    "desktop": ("usr/lib/omarchy-android/desktop/manifest.json", "source_commit"),
+    "graphics": ("usr/share/doc/omarchy-graphics-runtime/manifest.json", "sourceSha"),
+}
 
 
 def sha256(path):
@@ -62,8 +67,11 @@ def unpacked_bytes(stream):
     return total
 
 
-def write_metadata(output, source_sha, unpacked):
-    if not re.fullmatch(r"[0-9a-f]{40}", source_sha) or unpacked <= 0:
+def write_metadata(output, source_sha, unpacked, component_source_sha=None):
+    component_source_sha = source_sha if component_source_sha is None else component_source_sha
+    if (not re.fullmatch(r"[0-9a-f]{40}", source_sha)
+            or not re.fullmatch(r"[0-9a-f]{40}", component_source_sha)
+            or unpacked <= 0):
         raise ValueError("Invalid image source or unpacked size")
     tag = "desktop-ubuntu24-" + source_sha[:12]
     archive = output / ARCHIVE
@@ -73,7 +81,7 @@ def write_metadata(output, source_sha, unpacked):
     checksum = sha256(archive)
     image = dict(id=tag, name="Ubuntu 24.04 · Omarchy " + source_sha[:12],
                  abi="arm64-v8a", minAppVersionCode=64, bytes=size, unpackedBytes=unpacked,
-                 sha256=checksum, sourceSha=source_sha,
+                 sha256=checksum, sourceSha=source_sha, componentSourceSha=component_source_sha,
                  urls=[f"{UPSTREAM}/releases/download/{tag}/{ARCHIVE}"])
     write_json(output / "image.json", image)
     write_json(output / "catalog.json", dict(schemaVersion=1, images=[image]))
@@ -84,17 +92,32 @@ def write_metadata(output, source_sha, unpacked):
                 sums.write(f"{digest}  {path.name}\n")
 
 
-def build(root, output, source_sha):
+def check_component_sources(root, checkout, component_source_sha):
+    pinned_source = checkout if component_source_sha is None else component_source_sha
+    if not re.fullmatch(r"[0-9a-f]{40}", pinned_source):
+        raise ValueError("Invalid component source SHA")
+    proof = root / BROWSER_RECEIPT
+    browser = json.loads(proof.read_text())
+    lock = REPO / "scripts/browser-bundle-sources.json"
+    if browser["sourceSha"] != pinned_source or browser["sourceManifestSha256"] != sha256(lock):
+        raise ValueError("Staged browser provenance differs from component source or source lock")
+    if component_source_sha is not None:
+        for kind, (name, key) in COMPONENT_MANIFESTS.items():
+            manifest = root / name
+            if manifest.is_symlink() or not manifest.is_file():
+                raise ValueError(f"Missing staged {kind} component manifest")
+            if json.loads(manifest.read_text()).get(key) != pinned_source:
+                raise ValueError(f"Staged {kind} provenance differs from component source")
+    return browser, pinned_source
+
+
+def build(root, output, source_sha, component_source_sha=None):
     checkout = subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip()
     if source_sha != checkout:
         raise ValueError("Image source SHA differs from checkout")
     if output.exists() or output.is_symlink() or root == root.parent or output.is_relative_to(root):
         raise ValueError("Use a new release directory outside the clean rootfs")
-    proof = root / "opt/omarchy-chromium128/source-manifest.json"
-    browser = json.loads(proof.read_text())
-    lock = REPO / "scripts/browser-bundle-sources.json"
-    if browser["sourceSha"] != checkout or browser["sourceManifestSha256"] != sha256(lock):
-        raise ValueError("Staged browser provenance differs from checkout")
+    browser, pinned_source = check_component_sources(root, checkout, component_source_sha)
     for name in ("usr/local/bin/sway", "usr/local/bin/omarchy-node-runtime",
                  "usr/local/bin/omarchy-playwright128", "root/.config/sway/config",
                  "opt/omarchy-node/node-v24.15.0-linux-arm64/bin/node",
@@ -115,13 +138,14 @@ def build(root, output, source_sha):
         staged = Path(temp) / "release"
         staged.mkdir()
         source = dict(repository=UPSTREAM, sourceSha=checkout, sourceUrl=f"{UPSTREAM}/tree/{checkout}",
+                      componentSourceSha=pinned_source,
                       browserBundle=browser["bundleId"], browserVersions=browser["versions"],
                       browserSourceManifest="browser-sources.json", ubuntuPackages="packages.tsv",
                       upstreamComponents="upstream-components.tsv",
                       licenseFiles=[DOC, "usr/share/doc", "usr/share/common-licenses",
                                     "opt/omarchy-chromium128", "opt/omarchy-node"])
         write_json(staged / "source.json", source)
-        shutil.copyfile(proof, staged / "browser-sources.json")
+        shutil.copyfile(root / BROWSER_RECEIPT, staged / "browser-sources.json")
         for name in ("packages.tsv", "upstream-components.tsv", "LICENSES.md"):
             shutil.copyfile(root / DOC / name, staged / name)
         pack_archive(root, staged / ARCHIVE)
@@ -135,7 +159,7 @@ def build(root, output, source_sha):
                 pipe.stdout.close()
             if pipe.wait() != 0:
                 raise ValueError("Cannot verify compressed archive")
-        write_metadata(staged, checkout, unpacked)
+        write_metadata(staged, checkout, unpacked, pinned_source)
         staged.rename(output)
 
 
@@ -144,9 +168,11 @@ def main():
     parser.add_argument("--rootfs", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--source-sha", required=True)
+    parser.add_argument("--component-source-sha",
+                        help="Require all component receipts to match this commit (defaults to the assembly commit for the browser)")
     args = parser.parse_args()
     try:
-        build(args.rootfs.resolve(), args.output_dir.absolute(), args.source_sha)
+        build(args.rootfs.resolve(), args.output_dir.absolute(), args.source_sha, args.component_source_sha)
     except (OSError, ValueError, KeyError, tarfile.TarError, subprocess.CalledProcessError) as error:
         print("Initial image preparation failed: " + str(error), file=sys.stderr)
         return 1

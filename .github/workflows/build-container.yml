@@ -25,6 +25,31 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y debootstrap zstd curl tar
 
+      - name: Resolve the component build provenance
+        id: component-source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPONENT_RUN_ID: ${{ inputs.component_run_id }}
+        run: |
+          if [[ -z "$COMPONENT_RUN_ID" ]]; then
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          else
+            [[ "$COMPONENT_RUN_ID" =~ ^[0-9]+$ ]]
+            gh api "repos/Audrey-cn/omarchy-android/actions/runs/$COMPONENT_RUN_ID" > "$RUNNER_TEMP/component-run.json"
+            python3 - "$RUNNER_TEMP/component-run.json" <<'PY'
+          import json, os, pathlib, re, sys
+          run = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          assert run["repository"]["full_name"] == "Audrey-cn/omarchy-android"
+          assert run["head_repository"]["full_name"] == "Audrey-cn/omarchy-android"
+          assert run["path"] == ".github/workflows/build-components.yml"
+          assert run["event"] == "workflow_dispatch" and run["head_branch"] == "main"
+          assert run["status"] == "completed" and run["conclusion"] == "success"
+          assert re.fullmatch("[0-9a-f]{40}", run["head_sha"])
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("sha=" + run["head_sha"] + "\n")
+          PY
+          fi
+
       - name: Build pinned Chromium, Playwright and Node from verified public sources
         if: inputs.component_run_id == ''
         run: |
@@ -49,9 +74,13 @@ jobs:
           path: ${{ runner.temp }}/components
 
       - name: Verify component source and actual package contents
-        run: python3 scripts/verify-component-release.py "$RUNNER_TEMP/components" --source-sha "$GITHUB_SHA" --version 1.0.0
+        env:
+          COMPONENT_SOURCE_SHA: ${{ steps.component-source.outputs.sha }}
+        run: python3 scripts/verify-component-release.py "$RUNNER_TEMP/components" --source-sha "$COMPONENT_SOURCE_SHA" --version 1.0.0
 
       - name: Build clean Ubuntu 24.04 ARM64 Omarchy rootfs
+        env:
+          COMPONENT_SOURCE_SHA: ${{ steps.component-source.outputs.sha }}
         run: |
           ROOTFS=/tmp/omarchy-rootfs
           sudo mkdir "$ROOTFS"
@@ -97,6 +126,13 @@ jobs:
           dir=/tmp/omarchy-packages
           /usr/local/bin/omarchy-component-update install desktop --candidate-dir "$dir" \
             --catalog-sha256 "$(sha256sum "$dir/desktop-component.json" | cut -d' ' -f1)" --runtime-kind proot
+          # Published APK64+ checks these two entries as native regular files
+          # before PRoot exists. Preserve that contract using the exact package
+          # bytes; explicit future component updates recognize these same hashes.
+          for cmd in omarchy-chromium omarchy-playwright128; do
+            cp -L --remove-destination "/usr/lib/omarchy-android/desktop/bin/$cmd" "/usr/local/bin/$cmd"
+            chmod 755 "/usr/local/bin/$cmd"
+          done
           apt-get install -y --no-install-recommends "$dir"/*_arm64.deb
           for cmd in sway swaymsg swaybar swaynag; do
             ln -s "/opt/omarchy-graphics/bin/$cmd" "/usr/local/bin/$cmd"
@@ -201,6 +237,7 @@ jobs:
           sudo cp apps/android/container/omarchy.tiny.yaml "$ROOTFS/.tiny.yaml"
 
           sudo python3 scripts/prepare-initial-image.py --rootfs "$ROOTFS" --source-sha "$GITHUB_SHA" \
+            --component-source-sha "$COMPONENT_SOURCE_SHA" \
             --output-dir "$RUNNER_TEMP/initial-image"
 
       - name: Upload verified initial installation media
