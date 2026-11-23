@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         **Important Notes:**
-        - First search [all issues](https://github.com/Cateners/tiny_container/issues?q=is%3Aissue). **Duplicate reports will be closed immediately**
+        - First search [all issues](https://github.com/Audrey-cn/omarchy-android/issues?q=is%3Aissue). **Duplicate reports will be closed immediately**
         - Every requirement in this template has its specific purpose. Please complete all fields
 
   - type: input
@@ -15,9 +15,9 @@ body:
     attributes:
       label: "Device Model"
       description: |
-        **Why is this needed?**  
+        **Why is this needed?**
         Many bugs are device-specific, such as:
-        - Samsung OneUI 7 incompatible with v1.0.23 and below (issue #303)
+        - Device-specific display, input and background limits
         - HarmonyOS 4 missing wireless debugging option
       placeholder: "Brand + specific model"
     validations:
@@ -28,7 +28,7 @@ body:
     attributes:
       label: "Operating System Version"
       description: |
-        **Why is this needed?**  
+        **Why is this needed?**
         Compatibility varies across Android versions
       placeholder: "Full OS name + version number"
     validations:
@@ -37,13 +37,13 @@ body:
   - type: input
     id: app-version
     attributes:
-      label: "Tiny Container Version"
+      label: "Omarchy Android Version"
       description: |
-        **Why is this needed?**  
-        1. Old version issues may have been fixed in newer releases (always use the latest version)  
-        2. Different desktop environments (XFCE/LXQT/GXDE) may behave differently  
+        **Why is this needed?**
+        1. Old version issues may have been fixed in newer releases (always use the latest version)
+        2. All-in-One, Deck and Termux deployments may behave differently
         **If not using the latest version, be prepared for your issue to be ignored**
-      placeholder: "Version number + desktop environment (e.g., v1.0.23 GXDE)"
+      placeholder: "Version or commit + All-in-One / Deck / Termux deployment"
     validations:
       required: true
 
@@ -68,14 +68,14 @@ body:
     attributes:
       label: "Steps to reproduce the issue"
       description: |
-        **Please note:**  
-        Provide a **complete screen recording video** starting from launching the software until the issue occurs, rather than using text descriptions or screenshots. Based on past issues, user descriptions often omit potential details.  
-        Due to the complexity of the Linux environment, any operational details (such as permissions, environment configurations, etc.) may affect issue reproduction. Ensure your issue can be reproduced on a freshly installed Tiny Container.
+        **Please note:**
+        Provide a **complete screen recording video** starting from launching the software until the issue occurs, rather than using text descriptions or screenshots. Based on past issues, user descriptions often omit potential details.
+        Due to the complexity of the Linux environment, any operational details (such as permissions, environment configurations, etc.) may affect issue reproduction. Ensure your issue can be reproduced on a freshly installed Omarchy Android.
     validations:
       required: true
 
   - type: markdown
     attributes:
       value: |
-        **Issue Priority Explanation:**  
-        Issues related to the Tiny Container itself will be prioritized. For other issues, especially those involving third-party software or general Linux usage, please post in the [discussion](https://github.com/Cateners/tiny_container/discussions) section.
+        **Issue Priority Explanation:**
+        Issues related to the Omarchy Android itself will be prioritized. For other issues, especially those involving third-party software or general Linux usage, please post in the [discussion](https://github.com/Audrey-cn/omarchy-android/issues) section.

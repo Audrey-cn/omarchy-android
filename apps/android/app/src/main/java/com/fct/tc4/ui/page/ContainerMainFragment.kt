@@ -117,7 +117,7 @@ class ContainerMainFragment : Fragment() {
                         Snackbar.LENGTH_INDEFINITE
                     ).setAction(R.string.tc4_btn_update) {
                         activity.startActivity(Intent(Intent.ACTION_VIEW,
-                            "https://github.com/Audrey-cn/omarchy-android-app/releases".toUri()))
+                            "https://github.com/Audrey-cn/omarchy-android/releases".toUri()))
                     }.show()
                 }
             }

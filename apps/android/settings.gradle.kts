@@ -37,5 +37,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Tiny Container"
+rootProject.name = "Omarchy Android"
 include(":app")

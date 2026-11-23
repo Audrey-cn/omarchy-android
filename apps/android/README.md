@@ -1,14 +1,16 @@
-# Omarchy Android
+# Omarchy Android 一体包
+
+本目录是 [Omarchy Android 单仓项目](../../README.md)中的 Android Gradle 工程，基于 Tiny Container；共享桌面脚本位于仓库根目录的 `core/`。
 
 **开箱即用的免 Root 单 APK 手机/平板端 Omarchy Wayland Linux 桌面环境。**
 
-将完整的 **Ubuntu 24.04 ARM64 + Sway 1.10.1 (`wlroots 0.18.2` 纯 SHM/Pixman 后端) + Waybar + Omarchy 主题与菜单体系 + 内置 Termux:X11 + 原生悬浮手柄与悬浮键盘** 全部打包进一个独立 APK——无需 Root、无需外部 Termux、无需手动导入镜像，安装打开即用。
+一体包构建将完整的 **Ubuntu 24.04 ARM64 + Sway 1.10.1 (`wlroots 0.18.2` 纯 SHM/Pixman 后端) + Waybar + Omarchy 主题与菜单体系 + 内置 Termux:X11 + 原生悬浮手柄与悬浮键盘** 全部打包进一个独立 APK——无需 Root、无需外部 Termux、无需手动导入镜像，安装打开即用。
 
 ---
 
 ## 核心特性
 
-- **真正免 Root · 单 APK 开箱即用**：内置 `assets/rootfs.tar.zst` 镜像，首次启动自动初始化并直达 Omarchy Wayland 桌面。
+- **真正免 Root · 单 APK 开箱即用**：一体包构建内置 `assets/rootfs.tar.zst` 镜像，首次启动自动初始化并直达 Omarchy Wayland 桌面。
 - **原汁原味 Omarchy 桌面体验**：
   - `Sway 1.10.1` 平铺窗口管理器 + `Waybar` 顶栏（完整 Nerd Font + `omarchy.ttf` + `NotoColorEmoji`）
   - 6 列原生应用网格（`Super + Space`）、可视化主题与壁纸选择器、完整快捷键速查表（`Super + K`）
@@ -28,7 +30,7 @@
 
 ## 快速上手
 
-1. 前往 [Releases](https://github.com/Audrey-cn/omarchy-android-app/releases) 下载最新版 `OmarchyAndroid-AllInOne.apk` 并安装（仅支持 `arm64-v8a` 设备）。
+1. 前往 [Releases](https://github.com/Audrey-cn/omarchy-android/releases) 选择已发布的 `OmarchyAndroid-AllInOne.apk` 并安装（仅支持 `arm64-v8a` 设备）。
 2. 首次打开保持亮屏等待约 30~60 秒完成桌面初始化，自动进入 Omarchy 桌面并弹出 4 步箭头引导。
 3. 推荐搭配 **豆包输入法**（可在引导页或控制中心一键检测/下载），点击悬浮手柄话筒即可直接用中文/离线语音在 Linux 终端与应用内输入。
 
@@ -45,18 +47,36 @@
 
 ---
 
-## 相关仓库
+## 开发与构建
 
-- 核心脚本与 Root Chroot 伴侣仓库：[Audrey-cn/omarchy-android](https://github.com/Audrey-cn/omarchy-android)
-- 单 APK 免 Root 一体包仓库（本仓库）：[Audrey-cn/omarchy-android-app](https://github.com/Audrey-cn/omarchy-android-app)
+在仓库根目录运行：
+
+```bash
+cd apps/android
+./gradlew assembleDebug
+```
+
+Android Studio 打开本目录。普通编译输出 `app/build/outputs/apk/debug/app-debug.apk`；只有预先放入 `app/src/main/assets/rootfs.tar.zst` 才会包含桌面镜像。该镜像由 Git 忽略，没有内置镜像的构建需要用户另行导入容器。
+
+根目录的 `.github/workflows/build-container.yml` 从同次 checkout 的 `core/` 构建 rootfs，再嵌入一体包；不再从旧核心仓库拉取另一份代码。工作流 artifact `OmarchyAndroid-AllInOne-apk` 与普通壳包 `OmarchyAndroid-apk` 不同。完整操作见[开发指南](../../docs/DEVELOPMENT.md)。
+
+## 项目位置
+
+- 统一仓库：[Audrey-cn/omarchy-android](https://github.com/Audrey-cn/omarchy-android)
+- 共享桌面核心：[`../../core/`](../../core/)
+- 外部 Termux 部署与 Root 路线：[`../../runtime/`](../../runtime/)
+- Deck 辅助 APK：[`../deck/`](../deck/)
+
+本次本地迁移保留原 `omarchy-android-app` 目录；迁移和 Actions 构建不会自动发布 Release，下载附件以主仓 Releases 实际内容为准。
 
 ---
 
 ## 开源协议与致谢 (License & Acknowledgments)
 
-本项目基于 **GNU General Public License v3.0 (GPL-3.0)** 开源，详见 [COPYING](COPYING)。
+本目录中的应用沿用 **GNU General Public License v3.0 (GPL-3.0)** 及文件内原有声明，详见 [COPYING](COPYING)。共享桌面核心与 Deck 的许可见根目录[许可证说明](../../LICENSES.md)。
 
 衷心感谢以下优秀的开源项目与作者：
+
 - [**tiny_container**](https://github.com/Cateners/tiny_container)（by Caten Hu, GPL-3.0）—— 本项目 Android 容器壳与 JNI 音频/麦克风/PRoot 集成的基础框架
 - [**basecamp/omarchy**](https://github.com/basecamp/omarchy) —— Omarchy 桌面美学、主题与工作流设计灵感来源
 - [**Termux:X11**](https://github.com/termux/termux-x11) & [**PRoot**](https://github.com/proot-me/proot) —— Android 端高性能 X11 显示与免 Root Linux 容器运行时

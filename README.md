@@ -1,123 +1,110 @@
 # Omarchy Android
 
-将完整的 **Omarchy**（基于 `basecamp/omarchy`）原生 Wayland 桌面与 **ARM64 AI 桌面全家桶**（CC Switch / Codex Desktop / Claude Desktop / Hermes Desktop）运行在 Android 手机、折叠屏与平板上。
+在 Android 手机、折叠屏与平板上运行 Omarchy 风格的 Ubuntu ARM64 Wayland 桌面。桌面核心、Android 一体包和 Termux 部署方案在同一个仓库开发与维护。
 
-支持 **Root 原生 `chroot`（满血零损耗）** 与 **免 Root `proot-distro`（无需解锁 Bootloader）** 双引擎，不绑定特定机型，适用于绝大多数 ARM64 Android 10–15 设备。
+## 选择使用方式
 
----
+| 方式 | 项目位置 | 适用场景 |
+| --- | --- | --- |
+| 免 Root 一体包 | [`apps/android/`](apps/android/) | APK 内置 PRoot、Termux:X11 和 Ubuntu 桌面镜像，无需额外安装 Termux |
+| Termux 部署 | [`install.sh`](install.sh)、[`runtime/`](runtime/) | 使用外部 Termux + Termux:X11，选择 Root chroot 或免 Root proot-distro |
+| Omarchy Deck 辅助 APK | [`apps/deck/`](apps/deck/) | 为外部 Termux:X11 桌面提供悬浮球、悬浮键盘和输入桥接 |
+
+一体包与 Deck 是不同应用：一体包包名为 `com.omarchy.android`，Deck 包名为 `com.omarchy.deck`。
 
 ## 实机效果
 
-### 1. 原版布局顶部状态栏 + 原生 Wayland Layer-Shell 零缝隙弹窗
 ![Omarchy Android Waybar & Panel](docs/screenshots/desktop-waybar-panel.png)
 
-### 2. 原生 GTK3 6 列 App Grid（1:1 还原官方 `AppGrid.qml`）
 ![Omarchy Android App Grid](docs/screenshots/app-grid.png)
 
-### 3. 原生 ARM64 AI 桌面全家桶（Hermes Desktop + Codex Desktop + CC Switch）
 ![Omarchy Android AI Suite](docs/screenshots/ai-suite.png)
 
----
+## 桌面功能
 
-## 核心特性
+- Sway 平铺窗口管理、Waybar 顶栏、GtkLayerShell 状态弹窗与 6 列原生应用网格。
+- Omarchy 主题与壁纸，联动 Sway、Waybar、Wofi、App Grid 和 Alacritty 配色。
+- Fcitx5 中文拼音、Android 输入法穿透、悬浮键盘与横竖屏控制。
+- Alacritty、Thunar、Neovim、Lazygit、imv、Zathura、mpv 和轻量 WebKitGTK 浏览器。
+- 按需安装 CC Switch、Codex / ChatGPT Desktop、Claude Desktop、Hermes Desktop 等 AI 工具。
+- Root 路线提供 `evdev` 外接键盘与触控板独占，支持 `Alt` / `Super` 桌面快捷键。
 
-- **原生 Wayland 合成栈**：使用 Termux 原生 `sway 1.12`（`wlroots 0.20`）+ `Termux:X11` 暴露 `/tmp/wayland-1`，Ubuntu 24.04 ARM64 桌面应用全部原生直连 Wayland。
-- **1:1 还原官方 Omarchy 交互体验**：
-  - **顶部状态栏**：严格对照官方 `shell.json` 布局，内置 5 枚一键直切状态灯（勿扰 / 夜览 / 防休眠 / 免密 Sudo / 截屏）、时钟月历、中文拼音 `EN`/`拼` 实时切换按钮、AI 智能体中心、蓝牙/网络/音频/显示缩放/电源状态卡片；
-  - **零闪跳零缝隙弹窗**：全部状态栏弹窗基于原生 `GtkLayerShell` Overlay 锚定，适配任意缩放比例（`1.0x` / `1.25x` / `1.5x`）；
-  - **原生 6 列 App Grid**：GTK3 `FlowBox` 还原官方 `AppGrid.qml` 图标在上、居中文字在下的网格样式，支持实时搜索与键盘方向键导航；
-  - **23 套官方主题与壁纸**：实时联动 Sway 边框、Waybar、Wofi、App Grid、状态栏弹窗与 Alacritty 配色；
-  - **原生中文拼音输入法**：集成 `fcitx5` + `fcitx5-chinese-addons`，支持 `Alt+I` / `Super+I` / 左 `Shift` / 点击状态栏 `EN`/`拼` 随时切换。
-- **ARM64 AI 桌面全家桶（可选模块）**：
-  - 支持一键安装与纯 CPU Skia 稳定渲染封装：**CC Switch**、**Codex / ChatGPT Desktop**、**Claude Desktop**、**Hermes Desktop**（直接对接 Omarchy 官方 ARM64 软件源）；
-  - 全线修复 Wayland `pixman` 下 `--in-process-gpu` 导致的表面假死与鼠标残影问题。
-- **Root 专属硬件增强（`runtime/chroot/`）**：
-  - `omarchy-keygrab.py` 通过内核 `evdev` (`EVIOCGRAB`) 独占蓝牙键盘与触控板，支持 **`Alt` + `Super` 双主键**操控全部桌面热键，不与 Android 系统快捷键冲突；支持 `Alt+Ctrl+R` 一键循环切换触控板 `0°/90°/180°/270°` 方向。
-
----
-
-## Root vs 免 Root 对比
-
-| 特性 | Root 模式（`chroot`） | 免 Root 模式（`proot-distro`） |
-| :--- | :--- | :--- |
-| 桌面 / Waybar / App Grid / 主题 / 拼音 | 完整支持 | 完整支持 |
-| AI 桌面全家桶（Electron / WebKitGTK） | 原生零开销速度 | 支持（启动/包管理约慢 2~4 倍） |
-| 外接蓝牙键盘 `Alt/Super` 底层独占 | 支持（`omarchy-keygrab.py`） | 走 Termux:X11 常规输入 |
-| Android 12+ 后台防杀（Phantom Process Killer） | 自动关闭 | 需通过无线 ADB 执行 1 条命令关闭 |
-
----
+共享桌面逻辑放在 `core/`；两种部署路线各自维护运行时，详细区别见[架构说明](docs/ARCHITECTURE.md)。
 
 ## 快速开始
 
-### 前置条件
-在手机上安装两个免费开源 APK：
-1. **Termux**（F-Droid / GitHub 官方版）
-2. **Termux:X11**（GitHub Nightly）
+### 免 Root 一体包
 
-### 一键部署
+下载入口统一为本仓库的 [Releases](https://github.com/Audrey-cn/omarchy-android/releases)。选择 `OmarchyAndroid-AllInOne.apk`，仅支持 `arm64-v8a`；APK 包含桌面镜像时，首次打开会导入镜像并初始化桌面。
+
+构建工作流生成的 `OmarchyAndroid-apk` 是普通容器壳包；没有嵌入 `rootfs.tar.zst` 时，需要另行导入容器。`OmarchyAndroid-AllInOne-apk` 才是一体包构建产物。详见[应用说明](apps/android/README.md)。
+
+仓库迁移和本地构建不会自动创建 GitHub Release；发布后的安装包以 Releases 实际附件为准。
+
+### Termux 部署
+
+先在 Android 上安装 Termux 和 Termux:X11，再在设备的 Termux 环境运行：
 
 ```bash
 git clone https://github.com/Audrey-cn/omarchy-android.git
 cd omarchy-android
-
-# 自动检测 Root / 非 Root 环境并部署基础桌面
 ./install.sh
 
-# 如需同时安装 AI 桌面全家桶（Claude / Codex / Hermes Desktop）
+# 安装时同时加入 AI 桌面工具
 ./install.sh --with-ai
+
+# 手动选择运行时
+./install.sh --mode chroot
+./install.sh --mode proot
 ```
 
-手动指定运行时引擎：
-```bash
-./install.sh --mode chroot   # Root 旗舰模式
-./install.sh --mode proot    # 免 Root 普适模式
-```
+Root `chroot` 与免 Root `proot-distro` 共用桌面核心；Root 路线另有硬件键盘独占等扩展。Deck 可作为这条路线的辅助应用，不能代替 Termux 或 Termux:X11。
 
-### 常用快捷键（`Alt` 与 `Super` 均可）
+### 常用快捷键
 
 | 快捷键 | 功能 |
-| :--- | :--- |
-| `Alt + Space` | 打开 6 列原生 App Grid |
-| `Alt + M` / `Alt + Ctrl + Space` | 打开 Omarchy 完整中文主菜单 |
-| `Alt + I` | 切换中英文输入法（`EN` ↔ `拼`） |
-| `Alt + Enter` | 打开 Alacritty 终端 |
-| `Alt + W` / `Alt + Q` | 关闭当前窗口 |
-| `Alt + 1 ~ 5` | 切换工作区（加 `Shift` 移动窗口） |
-| `Alt + F` / `Alt + T` / `Alt + J` | 全屏 / 浮动 / 切换分屏方向 |
-| `Alt + Ctrl + R` | 循环切换外接触控板旋转角度（`0°/90°/180°/270°`） |
+| --- | --- |
+| `Super + Space` | 打开应用网格 |
+| `Super + Enter` | 打开终端 |
+| `Super + W` | 关闭当前窗口 |
+| `Super + 1~5` | 切换工作区 |
+| `Super + K` | 打开快捷键速查表 |
 
----
+Termux 路线还提供 `Alt` 组合键；快捷键以当前 Sway 配置与桌面速查表为准。
 
 ## 目录结构
 
 ```text
 omarchy-android/
-├── install.sh                    # 统一一键安装脚本（支持 chroot / proot 双引擎）
-├── core/
-│   ├── bin/                      # 通用桌面核心（App Grid / Panel / Indicator / Menu / Theme / Installer）
-│   ├── ai-suite/                 # AI 桌面客户端稳定启动封装与脱敏配置模板
-│   └── config/                   # Sway 与 Fcitx5 配置文件
+├── core/                     # 共享桌面脚本、AI 启动封装、Sway/Fcitx5 配置
 ├── runtime/
-│   ├── chroot/                   # Root 旗舰运行时（chroot / 浏览器桥接 / 硬件键盘独占）
-│   └── proot/                    # 免 Root 普适运行时（Termux + proot-distro）
+│   ├── chroot/               # 外部 Termux + Root chroot 运行时
+│   └── proot/                # 外部 Termux + proot-distro 运行时
+├── apps/
+│   ├── android/              # 免 Root 一体包：Gradle 工程、容器配置、原生库
+│   └── deck/                 # 外部 Termux:X11 使用的辅助 APK
+├── install.sh                # Termux 路线安装入口
 ├── scripts/
-│   └── backup-personal.sh        # 本地个人配置迁移打包脚本（不入库）
+│   ├── stage-core.sh         # 将本次 checkout 的 core 安装到指定 rootfs
+│   └── backup-personal.sh    # 个人配置迁移脚本，生成的备份不入库
+├── .github/workflows/        # Android 壳包、rootfs + 一体包、Deck 构建
 └── docs/
-    ├── ARCHITECTURE.md           # 架构原理与 Phase 2 单一 APK 演进规划
-    └── screenshots/              # 实机截图
+    ├── ARCHITECTURE.md        # 两种运行栈与共享核心
+    └── DEVELOPMENT.md         # 开发、构建与迁移说明
 ```
 
----
+Android 一体包镜像构建直接读取本仓库的 `core/`，与 App 使用同一次 checkout，无需维护第二个核心仓库副本。桌面和 Android 界面的修改可以放在同一个提交中。
 
-## 隐私与安全说明
+## 开发与维护
 
-本仓库**不包含任何个人 API Key、Token、账号数据库或个人项目数据**。个人换机迁移请使用本地脚本 `scripts/backup-personal.sh`（默认写入权限 `0600` 并已被 `.gitignore` 忽略）。
+开发命令、工作流入口、镜像放置位置及 Git 历史迁移方式见[开发指南](docs/DEVELOPMENT.md)。本地迁移保留原 `omarchy-android-app` 目录，不会自动删除或归档旧远端仓库；后续开发统一在本仓库进行。
 
-## 路线图
+## 个人配置
 
-- [x] **Phase 1**：Root (`chroot`) + 非 Root (`proot`) 双引擎核心仓库、完整 Omarchy 桌面与 AI 桌面全家桶
-- [ ] **Phase 2**：预构建脱敏 RootFS 镜像（GitHub Releases）+ 类似 DroidDeck 的轻量级单一外壳 APK（内置 `LorieView` 画布与一键镜像管理）
+个人换机迁移可使用 `scripts/backup-personal.sh`。API Key、Token、账号数据库及个人备份不应提交到仓库；生成的个人备份已加入忽略规则。
 
-## License
+## 许可证与致谢
 
-[MIT](LICENSE)
+共享核心、Termux 运行时与 Deck 沿用根目录的 [MIT License](LICENSE)。`apps/android/` 基于 [Tiny Container](https://github.com/Cateners/tiny_container)，沿用其 [GPL-3.0 许可及文件声明](apps/android/COPYING)。第三方库、主题、字体和工具保留各自许可，详见[许可证说明](LICENSES.md)。
+
+感谢 [Omarchy](https://github.com/basecamp/omarchy)、[Tiny Container](https://github.com/Cateners/tiny_container)、[Termux:X11](https://github.com/termux/termux-x11)、[PRoot](https://github.com/proot-me/proot)、Sway、wlroots 及相关开源项目。

@@ -5,7 +5,16 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'container/**'
+      - 'core/**'
+      - 'scripts/stage-core.sh'
+      - 'apps/android/**'
+      - '.github/workflows/build-container.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'core/**'
+      - 'scripts/stage-core.sh'
+      - 'apps/android/**'
       - '.github/workflows/build-container.yml'
 
 jobs:
@@ -24,6 +33,8 @@ jobs:
           ROOTFS=/tmp/omarchy-rootfs
           sudo mkdir -p "$ROOTFS"
           sudo debootstrap --arch=arm64 --variant=minbase noble "$ROOTFS" http://ports.ubuntu.com/ubuntu-ports
+
+          sudo bash scripts/stage-core.sh "$ROOTFS"
 
           sudo cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
           sudo mount --bind /dev "$ROOTFS/dev"
@@ -125,19 +136,11 @@ jobs:
           curl -fsSL "https://github.com/jesseduffield/lazygit/releases/download/v${LG_VER}/lazygit_${LG_VER}_Linux_arm64.tar.gz" -o /tmp/lg.tar.gz
           tar -xzf /tmp/lg.tar.gz -C /usr/local/bin lazygit && chmod 755 /usr/local/bin/lazygit && rm -f /tmp/lg.tar.gz
 
-          # Clone official basecamp/omarchy & Audrey-cn/omarchy-android core scripts
+          # Install official Omarchy assets; this checkout's core was staged before chroot
           mkdir -p /root/.local/share/applications /root/.local/share/icons/hicolor/256x256/apps /usr/share/pixmaps /root/.config/sway /root/.config/fcitx5 /root/.config/omarchy /root/.config/alacritty
           git clone --depth 1 https://github.com/basecamp/omarchy.git /root/.local/share/omarchy
           find /root/.local/share/omarchy -maxdepth 3 -name "*.ttf" -exec cp -f {} /usr/share/fonts/truetype/omarchy/ \;
           fc-cache -f
-          git clone --depth 1 https://github.com/Audrey-cn/omarchy-android.git /tmp/omarchy-android
-
-          cp -f /tmp/omarchy-android/core/bin/* /usr/local/bin/
-          cp -f /tmp/omarchy-android/core/ai-suite/*launch /usr/local/bin/
-          cp -f /tmp/omarchy-android/core/config/sway/config /root/.config/sway/config
-          cp -f /tmp/omarchy-android/core/config/fcitx5/profile /root/.config/fcitx5/profile
-          chmod 755 /usr/local/bin/omarchy-* /usr/local/bin/launch-waybar /usr/local/bin/*-launch
-          rm -rf /tmp/omarchy-android
 
           echo 'DPkg::Post-Invoke { "/usr/local/bin/omarchy-fix-desktops || true"; };' > /etc/apt/apt.conf.d/99-omarchy-desktop-guard
 
@@ -181,11 +184,11 @@ jobs:
 
           sudo umount -lf "$ROOTFS/dev" "$ROOTFS/proc" "$ROOTFS/sys"
           sudo bash -c "printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n' > '$ROOTFS/etc/resolv.conf'"
-          sudo cp container/omarchy.tiny.yaml "$ROOTFS/.tiny.yaml"
+          sudo cp apps/android/container/omarchy.tiny.yaml "$ROOTFS/.tiny.yaml"
 
           echo "Packing rootfs.tar.zst with top-level .tiny.yaml FIRST (no ./ prefix)..."
           sudo tar --numeric-owner -C "$ROOTFS" -cf - .tiny.yaml --exclude='./.tiny.yaml' --transform='s|^\./||' . | zstd -T0 -6 -o /tmp/rootfs.tar.zst
-          tar --zstd -tf /tmp/rootfs.tar.zst | head -n 5
+          tar --zstd -tf /tmp/rootfs.tar.zst | sed -n '1,5p'
           ls -lh /tmp/rootfs.tar.zst
 
       - name: Upload Container Artifact
@@ -197,12 +200,15 @@ jobs:
   build-all-in-one-apk:
     needs: build-rootfs
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/android
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: omarchy-ubuntu24-arm64-container
-          path: app/src/main/assets
+          path: apps/android/app/src/main/assets
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -217,9 +223,10 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
           mv app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
+          python3 -c 'import zipfile; z = zipfile.ZipFile("app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk"); assert z.getinfo("assets/rootfs.tar.zst").file_size > 0'
           ls -lh app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
       - name: Upload All-in-One APK
         uses: actions/upload-artifact@v4
         with:
           name: OmarchyAndroid-AllInOne-apk
-          path: app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk
+          path: apps/android/app/build/outputs/apk/debug/OmarchyAndroid-AllInOne.apk

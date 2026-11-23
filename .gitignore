@@ -13,3 +13,11 @@ auth.json
 *.zip
 __pycache__/
 *.pyc
+
+# Android build products (both the standalone app and Deck)
+*.apk
+*.aab
+*.ap_
+*.jks
+*.keystore
+apps/deck/build/

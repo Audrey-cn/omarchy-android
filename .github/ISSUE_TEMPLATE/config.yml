@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 获取帮助或提问
+    url: https://github.com/Audrey-cn/omarchy-android/issues
+    about: 请在统一仓库中检索已有问题，或通过问题模板报告。

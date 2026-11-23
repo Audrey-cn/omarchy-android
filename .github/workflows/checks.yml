@@ -1,0 +1,24 @@
+name: Check Monorepo Integration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell syntax
+        run: |
+          for script in install.sh scripts/*.sh runtime/*/*.sh apps/deck/build.sh; do
+            bash -n "$script"
+          done
+      - name: Test staging the shared core into a rootfs
+        run: python3 -m unittest discover -s tests -v
