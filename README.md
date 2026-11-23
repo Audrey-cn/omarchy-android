@@ -7,7 +7,7 @@
 | 正式路线 | 项目位置 | 使用方式与状态 |
 | --- | --- | --- |
 | 免 Root 一体 App | [`apps/android/`](apps/android/) | APK 集成 PRoot、X11 与桌面入口，无需额外安装 Termux；新流程在首次运行时选择、下载或离线导入桌面镜像 |
-| Root chroot | [`install.sh`](install.sh)、[`runtime/chroot/`](runtime/chroot/) | 为已有 Root 环境提供 chroot 运行时；完整冷安装与云端镜像、实机集成仍待完成 |
+| Root chroot | [`install.sh`](install.sh)、[`runtime/chroot/`](runtime/chroot/) | 为已有 Root 环境提供冷安装（`/data/omarchy-chroot`）与桌面启动，已在 K20 Pro 完成集成与输入验收 |
 
 外部 Termux + Termux:X11 的免 Root PRoot 路线保留为开发、调试和迁移入口。可选的 [Omarchy Deck](apps/deck/) 为外部 X11 提供悬浮输入工具，不是第三条正式产品路线。一体 App 包名为 `com.omarchy.android`，Deck 包名为 `com.omarchy.deck`。
 
@@ -96,7 +96,7 @@ omarchy-android/
 
 ## 开发与维护
 
-开发命令、云端工作流、镜像放置位置及 Git 历史迁移方式见[开发指南](docs/DEVELOPMENT.md)，已有进度见[交接记录](docs/HANDOFF.md)，APK 保留与历史发行版见[版本与备份](docs/VERSIONS.md)。原 App 的源码和历史已导入本仓，后续开发统一在本仓库进行，不依赖旁边的旧目录；旧远端尚未归档。
+开发命令、云端工作流、镜像放置位置及 Git 历史迁移方式见[开发指南](docs/DEVELOPMENT.md)，六大维护通道与发版规范见[维护总览手册](docs/MAINTENANCE.md)，已有进度见[交接记录](docs/HANDOFF.md)，APK 保留与历史发行版见[版本与备份](docs/VERSIONS.md)。原独立 App 仓库已合并入本仓并清理删除，后续所有开发与发布统一在本仓库进行。
 
 ## 个人配置
 
