@@ -16,7 +16,7 @@ for ARG in "$@"; do
       SWITCH="${CHECK#-}"
       SWITCH="${SWITCH#-}"
       case "$SWITCH" in
-        agent|agent=*|remote-debugging*|remote-allow-origins*|user-data-dir*|profile-directory*|headless*|ozone-platform*)
+        agent|agent=*|remote-debugging*|remote-allow-origins*|user-data-dir*|profile-directory*|headless*|ozone-platform*|gtk-version|gtk-version=*)
           echo "omarchy-playwright-chromium: profile/display/CDP options are managed; use --agent for loopback CDP." >&2
           exit 2 ;;
       esac
@@ -37,9 +37,10 @@ if [[ "$AGENT" == 1 ]]; then
   PROFILE="${HOME:-/root}/.local/share/omarchy-chromium128/agent"
 fi
 mkdir -p "$PROFILE"
+# Chromium 128 uses GTK4's input context with Fcitx on Sway.
+export GDK_BACKEND=wayland
+export GTK_IM_MODULE="${GTK_IM_MODULE:-fcitx}"
 if [[ "$AGENT" == 1 ]]; then
-  exec "$BROWSER" --no-sandbox --ozone-platform=wayland --user-data-dir="$PROFILE" \
-    --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 "$@"
-else
-  exec "$BROWSER" --no-sandbox --ozone-platform=wayland --user-data-dir="$PROFILE" "$@"
+  set -- --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 "$@"
 fi
+exec "$BROWSER" --no-sandbox --ozone-platform=wayland --gtk-version=4 --user-data-dir="$PROFILE" "$@"

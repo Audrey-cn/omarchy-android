@@ -51,7 +51,13 @@ require('fs').writeFileSync(process.env.TEST_ARGUMENTS,JSON.stringify({
 ''')
         self.browser = self.home / "browsers/chromium-1129/chrome-linux/chrome"
         self.browser.parent.mkdir(parents=True)
-        self.browser.write_text('#!' + sys.executable + '\nimport json,os,sys\nopen(os.environ["TEST_ARGUMENTS"],"w").write(json.dumps(sys.argv[1:]))\n')
+        self.browser.write_text('#!' + sys.executable + """
+import json, os, sys
+from pathlib import Path
+args = Path(os.environ["TEST_ARGUMENTS"])
+args.write_text(json.dumps(sys.argv[1:]))
+args.with_suffix(".env").write_text(json.dumps([os.getenv("GDK_BACKEND"), os.getenv("GTK_IM_MODULE")]))
+""")
         self.browser.chmod(0o755)
         node_home = self.root / "node"
         self.node = node_home / "node-v24.15.0-linux-arm64/bin/node"
@@ -121,21 +127,29 @@ exec "$TEST_NODE" "$@"
 
     def test_normal_gui_keeps_literal_arguments_and_opens_no_cdp(self):
         url = 'https://example.test/?q=中文&literal=$(touch nope);x="a b"'
-        result = self.invoke("--app=" + url, "--new-window", launcher=True)
+        environment = dict(self.env, GTK_IM_MODULE="", GDK_BACKEND="x11")
+        result = self.invoke("--app=" + url, "--new-window", launcher=True, env=environment)
+        self.assertEqual(json.loads(self.arguments.with_suffix(".env").read_text()), ["wayland", "fcitx"])
+        self.assertEqual([environment["GDK_BACKEND"], environment["GTK_IM_MODULE"]], ["x11", ""])
         self.assertEqual(result.returncode, 0, result.stderr)
         args = json.loads(self.arguments.read_text())
         self.assertEqual(args[-2:], ["--app=" + url, "--new-window"])
         self.assertIn("--user-data-dir=" + str(self.root / ".local/share/omarchy-chromium128/desktop"), args)
         self.assertIn("--ozone-platform=wayland", args)
+        self.assertIn("--gtk-version=4", args)
         self.assertFalse(any(arg.startswith("--remote-debugging") for arg in args))
         self.assertFalse((self.root / "nope").exists())
         self.assertFalse(any("gpu" in arg or "single-process" in arg for arg in args))
 
     def test_explicit_agent_uses_separate_profile_and_only_loopback_9222(self):
-        result = self.invoke("--agent", "https://example.test", launcher=True)
+        environment = dict(self.env, GTK_IM_MODULE="ibus")
+        result = self.invoke("--agent", "https://example.test", launcher=True, env=environment)
+        self.assertEqual(json.loads(self.arguments.with_suffix(".env").read_text()), ["wayland", "ibus"])
+        self.assertFalse((self.root / ".config/environment.d").exists())
         self.assertEqual(result.returncode, 0, result.stderr)
         args = json.loads(self.arguments.read_text())
         self.assertIn("--user-data-dir=" + str(self.root / ".local/share/omarchy-chromium128/agent"), args)
+        self.assertIn("--gtk-version=4", args)
         self.assertIn("--remote-debugging-address=127.0.0.1", args)
         self.assertIn("--remote-debugging-port=9222", args)
         self.assertEqual(args[-1], "https://example.test")
@@ -162,7 +176,7 @@ exec "$TEST_NODE" "$@"
                      ("--user-data-dir=/tmp/shared",), ("--profile-directory=Default",),
                      ("-user-data-dir=/tmp/shared",), ("-profile-directory=Default",),
                      ("--agent", "--remote-allow-origins=*"), ("--agent", "-remote-allow-origins=*"),
-                     ("--headless",), ("-headless",), ("--ozone-platform=x11",), ("-ozone-platform=x11",)]:
+                     ("--gtk-version=3",), ("-gtk-version", "3"), ("--headless",), ("-headless",), ("--ozone-platform=x11",), ("-ozone-platform=x11",)]:
             with self.subTest(args=args):
                 self.assertEqual(self.invoke(*args, launcher=True).returncode, 2)
                 self.assertFalse(self.arguments.exists())
