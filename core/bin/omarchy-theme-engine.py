@@ -262,6 +262,13 @@ white   = "{c[15]}"
     with open("/root/.config/waybar/config.jsonc", "w") as f:
         json.dump(waybar_config, f, indent=2, ensure_ascii=False)
 
+    bar_inset = 18
+    try:
+        if os.path.exists("/root/.config/omarchy/bar-inset"):
+            bar_inset = max(0, min(48, int(open("/root/.config/omarchy/bar-inset").read().strip())))
+    except Exception:
+        pass
+
     waybar_css = f"""@define-color background {bg};
 @define-color foreground {fg};
 @define-color accent {accent};
@@ -278,11 +285,11 @@ white   = "{c[15]}"
 }}
 
 .modules-left {{
-  margin-left: 8px;
+  margin-left: {bar_inset}px;
 }}
 
 .modules-right {{
-  margin-right: 8px;
+  margin-right: {bar_inset}px;
 }}
 
 #workspaces button {{

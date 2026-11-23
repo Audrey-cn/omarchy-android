@@ -1,27 +1,18 @@
 #!/usr/bin/env bash
-# Native Wayland Chromium launcher (works in both Non-Root PRoot APK and Root Chroot)
+# Native Wayland Browser / WebApp launcher
 set -euo pipefail
 
-if command -v chromium >/dev/null 2>&1; then
-  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
-  export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}"
-  export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/tmp/omarchy-dbus.sock}"
-  export MOZ_FAKE_NO_SANDBOX=1
-  exec chromium \
-    --ozone-platform=wayland \
-    --no-sandbox \
-    --disable-gpu-sandbox \
-    --disable-dev-shm-usage \
-    --disable-software-rasterizer \
-    --user-data-dir=/root/.config/omarchy-chromium \
-    "$@"
-fi
-
-# Fallback for Root Chroot mode using Termux host Chromium daemon
-python3 - "$@" <<'PY'
+# In Root Chroot mode, forward to Termux host Chromium daemon if available
+if [[ -f /data/adb/ubuntu-chroot.sh ]]; then
+  python3 - "$@" <<'PY'
 import os, sys, time, json
 QUEUE_DIR = "/tmp/omarchy-browser-queue"
 os.makedirs(QUEUE_DIR, exist_ok=True)
 with open(f"{QUEUE_DIR}/job-{int(time.time()*1000000)}.json", "w") as f:
     json.dump({"args": sys.argv[1:]}, f)
 PY
+  exit 0
+fi
+
+# In Non-Root All-in-One APK (PRoot), launch native in-system WebKitGTK 4.1 browser!
+exec /usr/local/bin/omarchy-browser "$@"

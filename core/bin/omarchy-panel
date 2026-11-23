@@ -396,6 +396,29 @@ class OmarchyPanel(Gtk.Window):
         fbox.pack_start(b_rec, True, True, 0)
         fbox.pack_start(b_inc, True, True, 0)
         self.box.pack_start(fbox, False, False, 0)
+
+        # Symmetrical R-corner safe margin control for Waybar
+        self.add_row("圆角屏安全边距 (状态栏左右内缩)", dim=True)
+        rbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.inset_btns = {}
+        for label, px in (("方屏 6px", 6), ("标准圆角 18px", 18), ("大圆角 28px", 28)):
+            rb = Gtk.Button(label=label)
+            rb.connect("clicked", lambda _, p=px: self.apply_bar_inset(p))
+            rbox.pack_start(rb, True, True, 0)
+            self.inset_btns[px] = rb
+        self.box.pack_start(rbox, False, False, 0)
+        self.refresh_monitor_ui()
+
+    def apply_bar_inset(self, px):
+        os.makedirs("/root/.config/omarchy", exist_ok=True)
+        open("/root/.config/omarchy/bar-inset", "w").write(str(px))
+        css_path = "/root/.config/waybar/style.css"
+        if os.path.exists(css_path):
+            txt = open(css_path, "r", encoding="utf-8").read()
+            txt = re.sub(r"margin-left:\s*\d+px;", f"margin-left: {px}px;", txt, count=1)
+            txt = re.sub(r"margin-right:\s*\d+px;", f"margin-right: {px}px;", txt, count=1)
+            open(css_path, "w", encoding="utf-8").write(txt)
+        subprocess.Popen(["/usr/local/bin/launch-waybar"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.refresh_monitor_ui()
 
     def refresh_monitor_ui(self):
@@ -408,6 +431,17 @@ class OmarchyPanel(Gtk.Window):
             bsc.remove_class("om-btn")
             bsc.remove_class("om-btn-active")
             bsc.add_class("om-btn-active" if abs(sc - self._cur_scale) < 0.015 else "om-btn")
+        cur_inset = 18
+        try:
+            if os.path.exists("/root/.config/omarchy/bar-inset"):
+                cur_inset = int(open("/root/.config/omarchy/bar-inset").read().strip())
+        except Exception:
+            pass
+        for px, rb in self.inset_btns.items():
+            rsc = rb.get_style_context()
+            rsc.remove_class("om-btn")
+            rsc.remove_class("om-btn-active")
+            rsc.add_class("om-btn-active" if px == cur_inset else "om-btn")
 
     def build_network(self):
         self.set_size_request(340, -1)

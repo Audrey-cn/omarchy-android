@@ -25,9 +25,12 @@ EXTRA_HIDES = {
     "thunar-settings", "thunar-bulk-rename", "thunar-volman-settings",
     "foot-server", "footclient", "org.codeberg.dnkl.foot-server",
     "org.codeberg.dnkl.footclient", "btop", "htop", "uxterm", "xterm",
-    "im-config", "cc-switch-handler",
+    "im-config", "cc-switch-handler", "chromium",
     "com.mitchellh.ghostty", "org.gnome.Evince-previewer",
     "xfce4-about", "panel-desktop-handler", "exo-preferred-applications",
+    "python3.12", "fcitx5-configtool", "fcitx5-wayland-launcher",
+    "org.fcitx.Fcitx5", "org.fcitx.fcitx5-qt5-gui-wrapper",
+    "imv-dir", "org.pwmt.zathura-pdf-poppler", "xdg-desktop-portal-gtk",
 }
 
 DESKTOP_DIRS = [
