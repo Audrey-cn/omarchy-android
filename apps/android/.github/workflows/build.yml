@@ -1,0 +1,30 @@
+name: Build Omarchy Android Standalone APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Accept Android SDK licenses & install CMake/NDK
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0" "cmake;3.22.1" "ndk;27.2.12479018" >/dev/null || true
+      - name: Assemble Debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      - name: Upload OmarchyAndroid APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmarchyAndroid-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
