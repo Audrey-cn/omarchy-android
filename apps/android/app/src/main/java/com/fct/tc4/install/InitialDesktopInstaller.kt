@@ -21,20 +21,31 @@ class InitialDesktopInstaller(
     private val stateRoot: File = File(context.filesDir, "initial-desktop"),
     private val registerGuest: Boolean = true
 ) {
-    fun install(spec: ImageSpec, archive: File): File {
+    private fun transaction(): InitialInstallTransaction {
         if (registerGuest && dataRoot.canonicalFile != context.dataDir.canonicalFile) throw IOException("Invalid desktop root")
         if (Files.isSymbolicLink(stateRoot.toPath()) || (!stateRoot.isDirectory && !stateRoot.mkdirs())) throw IOException("Invalid installation state directory")
-        val transaction = InitialInstallTransaction(dataRoot, File(stateRoot, "staging"))
-        val completed = transaction.publishedImage(spec)
-        val guest = completed ?: transaction.install(spec, archive, stateRoot.usableSpace,
+        return InitialInstallTransaction(dataRoot, File(stateRoot, "staging"))
+    }
+    /** Recovery registers a complete owned publication before consulting cache or free space. */
+    fun recoverOrCheckSpace(spec: ImageSpec, downloadedBytes: () -> Long): File? =
+        transaction().recoverOrCheckSpace(spec, { stateRoot.usableSpace }, downloadedBytes, ::complete)
+
+    fun discardInterruptedStages() { transaction().discardInterruptedStages() }
+
+    fun install(spec: ImageSpec, archive: File): File {
+        val transaction = transaction()
+        val guest = transaction.publishedImage(spec) ?: transaction.install(spec, archive, stateRoot.usableSpace,
             { input, stage -> extract(input, stage) }, { stage -> prepare(stage) })
+        complete(guest)
+        return guest
+    }
+    private fun complete(guest: File) {
         requireConfiguration(guest)
         if (registerGuest) {
             Global.installedContainers = Global.installedContainers + "omarchy"
             Global.isFirstLaunchDone = true
             if (Global.autoLaunch.isEmpty()) Global.autoLaunch = "omarchy"
         }
-        return guest
     }
     private fun extract(archive: File, stage: File) {
         val bootstrap = File(context.filesDir, "bootstrap")

@@ -6,6 +6,10 @@ import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.fct.tc4.ui.misc.Global
+import com.fct.tc4.ui.misc.SwayDesktopProbe
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
@@ -25,6 +29,17 @@ class InitialDesktopDeviceTest {
     private fun workspace(context: Context) = File(context.filesDir, "initial-desktop-device-acceptance")
     private fun image(context: Context) = InitialImageRepository.available(context).first {
         InitialImageCatalog.compatible(it, context.packageManager.getPackageInfo(context.packageName, 0).versionCode)
+    }
+    /** Run only with a foreground, already live desktop; reads sockets/proc without changing preferences. */
+    @Test fun existingDesktopReadinessRecognized() = runBlocking<Unit> {
+        val context = context()
+        val probe = SwayDesktopProbe(File(context.filesDir, "tmp"))
+        val desktop = withTimeoutOrNull(15_000) {
+            var current = probe.sample(400)
+            while (current == null) { delay(200); current = probe.sample(400) }
+            current
+        }
+        assertNotNull("A live foreground desktop must be recognized through its owned current sockets and processes", desktop)
     }
     @Test fun pauseDownloadAndExitProcess() {
         val context = context()

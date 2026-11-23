@@ -1,4 +1,18 @@
 {
-  "schemaVersion": 1,
-  "images": []
+  "images": [
+    {
+      "abi": "arm64-v8a",
+      "bytes": 999745976,
+      "id": "desktop-ubuntu24-e55030353df6",
+      "minAppVersionCode": 64,
+      "name": "Ubuntu 24.04 \u00b7 Omarchy e55030353df6",
+      "sha256": "88a1558fc93489016ad1c53fccb03ebc0f3986507dccf6b422de444d915f33c6",
+      "sourceSha": "e55030353df6bae7496720356f2d4b940495824e",
+      "unpackedBytes": 2973377562,
+      "urls": [
+        "https://github.com/Audrey-cn/omarchy-android/releases/download/desktop-ubuntu24-e55030353df6/rootfs.tar.zst"
+      ]
+    }
+  ],
+  "schemaVersion": 1
 }

@@ -14,7 +14,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 enum class SetupPhase { IDLE, DOWNLOADING, IMPORTING, PAUSED, VERIFYING, INSTALLING, COMPLETE, FAILED }
 data class DesktopSetupState(val phase: SetupPhase = SetupPhase.IDLE, val image: ImageSpec? = null,
-    val downloaded: Long = 0, val message: String = "", val bytesPerSecond: Long = 0)
+    val downloaded: Long = 0, val message: String = "", val bytesPerSecond: Long = 0,
+    val importUri: String? = null)
 
 object InitialDesktopState {
     val running = AtomicBoolean(false)
@@ -38,7 +39,8 @@ object InitialDesktopState {
             if (phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.IMPORTING, SetupPhase.VERIFYING, SetupPhase.INSTALLING)) phase = SetupPhase.PAUSED
             if (phase == SetupPhase.COMPLETE && !File(context.dataDir, "omarchy").isDirectory) phase = SetupPhase.IDLE
             mutable.value = DesktopSetupState(phase, image, json.optLong("downloaded").coerceIn(0, image.bytes),
-                if (phase == SetupPhase.PAUSED) "此前任务已中断，进度已保留，可继续。" else json.optString("message"))
+                if (phase == SetupPhase.PAUSED) "此前任务已中断，进度已保留，可继续。" else json.optString("message"),
+                importUri = json.optString("importUri").takeIf { it.startsWith("content://") && it.length <= 16 * 1024 })
         } catch (_: Exception) { mutable.value = DesktopSetupState(message = "此前任务信息不可用，请重新选择镜像。") }
     }
     @Synchronized fun update(context: Context, next: DesktopSetupState, persist: Boolean = true) {
@@ -48,7 +50,7 @@ object InitialDesktopState {
         lastSaved = now
         val image = next.image ?: run { File(directory(context), "state.json").delete(); return }
         val json = JSONObject().put("phase", next.phase.name).put("image", InitialImageCatalog.encode(listOf(image)))
-            .put("downloaded", next.downloaded).put("message", next.message)
+            .put("downloaded", next.downloaded).put("message", next.message).put("importUri", next.importUri)
         val target = File(directory(context), "state.json")
         val temp = File(target.parentFile, "state.json.tmp")
         check(!Files.isSymbolicLink(target.toPath()) && !Files.isSymbolicLink(temp.toPath()))

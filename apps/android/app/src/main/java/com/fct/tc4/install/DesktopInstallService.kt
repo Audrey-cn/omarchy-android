@@ -16,9 +16,7 @@ import android.util.Log
 import com.fct.tc4.ui.misc.Global
 import com.fct.tc4.ui.page.DesktopSetupActivity
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
-import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -37,6 +35,7 @@ class DesktopInstallService : Service() {
     private val cancel = AtomicBoolean(false)
     private val controlLock = Any()
     private var installing = false
+    private var latestStartId = 0
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() {
         super.onCreate()
@@ -45,6 +44,7 @@ class DesktopInstallService : Service() {
             NotificationChannel(CHANNEL, "桌面安装", NotificationManager.IMPORTANCE_LOW))
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        synchronized(controlLock) { latestStartId = startId }
         if (intent?.action in listOf(PAUSE, CANCEL)) {
             synchronized(controlLock) {
                 if (installing) return START_NOT_STICKY
@@ -52,8 +52,9 @@ class DesktopInstallService : Service() {
                 if (intent?.action == CANCEL) cancel.set(true)
             }
             if (!InitialDesktopState.running.get()) {
-                if (cancel.get()) cancelCache()
-                stopSelf(startId)
+                try { if (cancel.get()) cancelCache() }
+                catch (error: Exception) { Log.e("InitialDesktop", "Cancellation state could not be saved: ${error.javaClass.simpleName}") }
+                finally { stopSelf(startId) }
             }
             return START_NOT_STICKY
         }
@@ -74,13 +75,27 @@ class DesktopInstallService : Service() {
                     error.message?.contains("existing", true) == true -> "检测到已有桌面，为保护数据已停止首次安装。"
                     else -> "下载或安装未完成。已保留可恢复的进度，请继续或重新选择离线镜像。"
                 }
-                publish(InitialDesktopState.state.value.copy(phase = SetupPhase.FAILED, message = message, bytesPerSecond = 0))
+                try {
+                    if (!cancel.get()) publish(InitialDesktopState.state.value.copy(
+                        phase = if (pause.get() && !installing) SetupPhase.PAUSED else SetupPhase.FAILED,
+                        message = if (pause.get() && !installing) "已暂停，重新打开应用后可继续。" else message, bytesPerSecond = 0))
+                } catch (persistenceError: Exception) {
+                    Log.e("InitialDesktop", "Installation state could not be saved: ${persistenceError.javaClass.simpleName}")
+                }
             } finally {
-                if (cancel.get() && !installing) cancelCache()
-                synchronized(controlLock) { installing = false }
-                InitialDesktopState.running.set(false)
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                try {
+                    if (cancel.get() && !installing) cancelCache()
+                } catch (cleanupError: Exception) {
+                    Log.e("InitialDesktop", "Cancellation state could not be saved: ${cleanupError.javaClass.simpleName}")
+                } finally {
+                    val finishedStartId = synchronized(controlLock) {
+                        installing = false
+                        InitialDesktopState.running.set(false)
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        latestStartId
+                    }
+                    stopSelf(finishedStartId)
+                }
             }
         }
         return START_NOT_STICKY
@@ -96,21 +111,44 @@ class DesktopInstallService : Service() {
         val root = InitialDesktopState.directory(this)
         val downloads = File(root, "downloads")
         val downloader = ResumableImageDownloader()
-        val offset = if (localUri == null) downloader.partialBytes(spec, downloads) else 0L
-        if (root.usableSpace < InitialInstallTransaction.additionalBytes(spec, offset)) throw IOException("Insufficient download/install space")
+        val imports = InitialImageImportCache(File(root, "imports"))
+        val installer = InitialDesktopInstaller(this)
+        val importUri = localUri ?: previous.importUri?.takeIf { previous.image == spec }?.let(Uri::parse)
+        if (importUri != null && importUri.scheme != "content") throw IOException("Invalid local import")
+        var imported: File? = null
+        var offline = importUri != null
+        var offset = 0L
+        publish(DesktopSetupState(SetupPhase.VERIFYING, spec, message = "正在检查此前安装进度…", importUri = importUri?.toString()))
+        val recovered = installer.recoverOrCheckSpace(spec) {
+            InitialImageImportCache.discardLegacyCopies(root)
+            imported = imports.recover(spec)
+            if (imported != null) offline = true
+            offset = if (imported != null) spec.bytes else if (offline) 0L else downloader.partialBytes(spec, downloads)
+            offset
+        }
+        if (recovered != null) {
+            // Publication already committed; a late cancel may only clean caches, never undo completion.
+            synchronized(controlLock) { installing = true }
+            publish(DesktopSetupState(SetupPhase.COMPLETE, spec, spec.bytes, "桌面安装完成，可以启动。"))
+            cleanCompletedCache(spec, downloads, imports)
+            return
+        }
         val started = SystemClock.elapsedRealtime()
         var lastNotice = 0L
         val progress: (Long, Long) -> Unit = { count, _ ->
             val elapsed = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1)
             val speed = ((count - offset).coerceAtLeast(0) * 1000 / elapsed)
-            val state = DesktopSetupState(if (localUri == null) SetupPhase.DOWNLOADING else SetupPhase.IMPORTING,
-                spec, count, if (count == spec.bytes) "正在校验镜像完整性…" else "", speed)
+            val state = DesktopSetupState(if (offline) SetupPhase.IMPORTING else SetupPhase.DOWNLOADING,
+                spec, count, if (count == spec.bytes) "正在校验镜像完整性…" else "", speed, importUri?.toString())
             InitialDesktopState.update(this, state)
             val now = SystemClock.elapsedRealtime()
             if (now - lastNotice > 1000) { notify(state); lastNotice = now }
         }
-        publish(DesktopSetupState(if (localUri == null) SetupPhase.DOWNLOADING else SetupPhase.IMPORTING, spec, offset))
-        val archive = if (localUri != null) importImage(spec, localUri, root, progress) else {
+        publish(DesktopSetupState(if (offline) SetupPhase.IMPORTING else SetupPhase.DOWNLOADING, spec, offset, importUri = importUri?.toString()))
+        val archive = if (offline) imported ?: imports.importImage(spec, {
+            contentResolver.openInputStream(importUri ?: throw IOException("Select the offline image again"))
+                ?: throw IOException("Cannot open local image")
+        }, { pause.get() }, progress) else {
             var result: File? = null
             var attempts = 0
             while (true) {
@@ -130,40 +168,40 @@ class DesktopInstallService : Service() {
             publish(InitialDesktopState.state.value.copy(phase = SetupPhase.PAUSED, message = "已暂停，重新打开应用后可继续。", bytesPerSecond = 0))
             return
         }
-        publish(DesktopSetupState(SetupPhase.VERIFYING, spec, spec.bytes, "正在校验并准备安装…"))
+        publish(InitialDesktopState.state.value.copy(phase = SetupPhase.VERIFYING, downloaded = spec.bytes, message = "正在校验并准备安装…", bytesPerSecond = 0))
         val begin = synchronized(controlLock) {
             if (pause.get()) false else { installing = true; true }
         }
-        if (!begin) { publish(DesktopSetupState(SetupPhase.PAUSED, spec, spec.bytes)); return }
-        publish(DesktopSetupState(SetupPhase.INSTALLING, spec, spec.bytes, "正在解压和配置桌面，请稍候…"))
-        InitialDesktopInstaller(this).install(spec, archive)
+        if (!begin) { publish(InitialDesktopState.state.value.copy(phase = SetupPhase.PAUSED, downloaded = spec.bytes)); return }
+        publish(InitialDesktopState.state.value.copy(phase = SetupPhase.INSTALLING, downloaded = spec.bytes, message = "正在解压和配置桌面，请稍候…"))
+        installer.install(spec, archive)
         publish(DesktopSetupState(SetupPhase.COMPLETE, spec, spec.bytes, "桌面安装完成，可以启动。"))
-        if (localUri == null) downloader.cancel(spec, downloads) else archive.delete()
+        cleanCompletedCache(spec, downloads, imports)
     }
-    private fun importImage(spec: ImageSpec, uri: Uri, root: File, progress: (Long, Long) -> Unit): File {
-        if (uri.scheme != "content") throw IOException("Invalid local import")
-        val archive = File(root, "local-${UUID.randomUUID()}.tar.zst")
-        try {
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(archive).use { output ->
-                    val buffer = ByteArray(1024 * 1024); var bytes = 0L
-                    while (true) {
-                        if (pause.get()) throw IOException("Local import interrupted")
-                        val n = input.read(buffer); if (n < 0) break
-                        if (bytes + n > spec.bytes) throw IOException("Wrong local image length")
-                        output.write(buffer, 0, n); bytes += n; progress(bytes, spec.bytes)
-                    }
-                    output.fd.sync()
-                    if (bytes != spec.bytes) throw IOException("Wrong local image length")
-                }
-            } ?: throw IOException("Cannot open local image")
-            return archive
-        } catch (e: Exception) { archive.delete(); throw e }
+    private fun cleanCompletedCache(spec: ImageSpec, downloads: File, imports: InitialImageImportCache) {
+        // A cache cleanup failure cannot turn a successfully registered guest into a failed install.
+        try { ResumableImageDownloader().cancel(spec, downloads) }
+        catch (error: Exception) { Log.w("InitialDesktop", "Download cache cleanup stopped: ${error.javaClass.simpleName}") }
+        try { imports.cancel(); InitialImageImportCache.discardLegacyCopies(InitialDesktopState.directory(this)) }
+        catch (error: Exception) { Log.w("InitialDesktop", "Import cache cleanup stopped: ${error.javaClass.simpleName}") }
     }
     private fun cancelCache() {
         val state = InitialDesktopState.state.value
-        state.image?.let { ResumableImageDownloader().cancel(it, File(InitialDesktopState.directory(this), "downloads")) }
-        publish(DesktopSetupState(message = "下载已取消，已有桌面数据未改动。"))
+        val root = InitialDesktopState.directory(this)
+        var failed = false
+        fun clean(action: () -> Unit) {
+            try { action() } catch (error: Exception) {
+                failed = true
+                Log.w("InitialDesktop", "Owned cache cleanup stopped: ${error.javaClass.simpleName}")
+            }
+        }
+        clean { state.image?.let { ResumableImageDownloader().cancel(it, File(root, "downloads")) } }
+        clean { InitialImageImportCache(File(root, "imports")).cancel() }
+        clean { InitialImageImportCache.discardLegacyCopies(root) }
+        clean { InitialDesktopInstaller(this).discardInterruptedStages() }
+        publish(if (failed) state.copy(phase = SetupPhase.FAILED, bytesPerSecond = 0,
+            message = "部分安装缓存未能清理，请重新打开应用后重试取消。")
+            else DesktopSetupState(message = "下载已取消，已有桌面数据未改动。"))
     }
     private fun publish(state: DesktopSetupState) { InitialDesktopState.update(this, state); notify(state) }
     private fun notify(state: DesktopSetupState) { getSystemService(NotificationManager::class.java).notify(NOTICE, notification(state)) }
