@@ -17,6 +17,10 @@ omarchy-playwright128 cli --version
 
 两种 probe 复用仓库现有完整 fixture：中文 DOM/点击、截图、cookie、真实下载和 trace。Wayland probe 应在桌面处于全屏前台时运行；报告写入 `$HOME/.local/state/omarchy/playwright128/`。它们的退出码不会因出现窗口或能读取版本而变为通过。
 
+本轮已复现的 Wayland SIGABRT 来自 `wtype` 临时虚拟键盘退出后的 Sway keymap 状态：新 client 只有 enter/modifiers，Chromium 在空 xkb state 上调用 update_mask 后终止。实机通过同值重发真实 X11 键盘的当前 repeat_delay 触发 reconfigure，即可让原 stock 探针通过；layout/options 不变。这次故障不归因于 Codex 或 Mesa。
+
+`omarchy-restore-x11-keyboard` 保留当前 repeat_delay 与活动 layout index；`wtype` 退出后及 Chromium GUI、Wayland probe、Hermes GUI 启动前会调用它。helper 缺失时保留旧安装兼容；存在但失败时停止启动/自检并报告错误。headless 不调用此恢复，也不添加 GPU 绕过参数。
+
 图形入口使用持久、独立 profile，并逐项保留 URL/参数，不经 shell 二次解析：
 
 ```bash

@@ -176,6 +176,44 @@ exec "$TEST_NODE" "$@"
         self.assertEqual(report["status"], "failed")
         self.assertIn("pinned fixture startup failed", report["error"])
 
+    def keyboard_helper(self, status):
+        marker = self.root / "keyboard-restored"
+        helper = self.bin / "omarchy-restore-x11-keyboard"
+        helper.write_text('#!/bin/sh\nprintf restore > "$TEST_KEYBOARD_MARKER"\nexit ' + str(status) + '\n')
+        helper.chmod(0o755)
+        self.env["TEST_KEYBOARD_MARKER"] = str(marker)
+        return marker
+
+    def test_gui_keyboard_restore_failure_prevents_chromium_launch(self):
+        marker = self.keyboard_helper(37)
+        result = self.invoke("--agent", "https://example.test", launcher=True)
+        self.assertEqual(result.returncode, 37)
+        self.assertTrue(marker.exists())
+        self.assertFalse(self.arguments.exists())
+        self.assertIn("无法恢复 X11 键盘状态", result.stderr)
+
+    def test_only_wayland_probe_restores_keyboard_and_failure_stops_the_probe(self):
+        marker = self.keyboard_helper(37)
+        result = self.invoke("probe", "chromium", "wayland")
+        self.assertEqual(result.returncode, 37)
+        self.assertTrue(marker.exists())
+        self.assertFalse(self.results.exists())
+        self.assertIn("无法恢复 X11 键盘状态", result.stderr)
+        marker.unlink()
+        result = self.invoke("probe", "chromium", "headless")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(marker.exists(), "Headless must not reconfigure the active keyboard")
+        report = json.loads(next(self.results.glob("*/result.json")).read_text())
+        self.assertIn("pinned fixture startup failed", report["error"])
+
+    def test_successful_keyboard_restore_happens_before_gui_browser_exec(self):
+        marker = self.keyboard_helper(0)
+        self.browser.write_text('#!' + sys.executable + '\nimport os,sys\nfrom pathlib import Path\n'
+                                'sys.exit(0 if Path(os.environ["TEST_KEYBOARD_MARKER"]).is_file() else 99)\n')
+        result = self.invoke("https://example.test", launcher=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(marker.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

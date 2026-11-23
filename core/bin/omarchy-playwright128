@@ -48,6 +48,16 @@ case "$COMMAND" in
   check) echo 'Bundled Chromium 128 / Playwright 1.46.1 / Node 24.15.0 files verified; runtime probes are separate.' ;;
   browser-path) printf '%s\n' "$PW_HOME/browsers/chromium-1129/chrome-linux/chrome" ;;
   probe)
+    if [[ "${2:-headless}" == wayland ]]; then
+      KEYBOARD_RESTORE="$SCRIPT_DIR/omarchy-restore-x11-keyboard"
+      if [[ -e "$KEYBOARD_RESTORE" || -L "$KEYBOARD_RESTORE" ]]; then
+        "$KEYBOARD_RESTORE" || {
+          STATUS=$?
+          echo "Wayland 自检已停止：无法恢复 X11 键盘状态。" >&2
+          exit "$STATUS"
+        }
+      fi
+    fi
     export OMARCHY_PLAYWRIGHT_HOME="$PW_HOME"
     export OMARCHY_PLAYWRIGHT_RESULTS="${OMARCHY_PLAYWRIGHT128_RESULTS:-${HOME:-/root}/.local/state/omarchy/playwright128}"
     exec "$NODE_BIN" "$SCRIPT_DIR/omarchy-playwright-tool.cjs" probe "$@"

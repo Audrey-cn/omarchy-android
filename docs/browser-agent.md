@@ -17,6 +17,10 @@ PRoot 一体应用现在选择固定 **Chromium 128.0.6613.18 / revision 1129 + 
 
 Qwen 单独 HTTP 200、Electron 子进程存在、读取浏览器版本或仅出现窗口，都不能替代上述真实 Agent 任务。模型配置、key 和私人数据不随仓库或 APK 发布。
 
+本轮切换运行时后出现的 Wayland `SIGABRT` 已定位到**键盘状态**：短命 `wtype` 虚拟键盘退出后，Sway 的新 client 收到 keyboard.enter/modifiers，却没有 keymap；Chromium 128 随后在 `xkb_state_update_mask` 对空状态访问并终止。实机多次 `wtype -k Tab` 可重现，同值重发真实 X11 键盘当前 repeat_delay 触发 reconfigure 后，原 stock Wayland 完整探针通过；没有修改 layout/options，也没有据此添加 Mesa、GPU 或 native shim 绕过。
+
+修复由 `omarchy-restore-x11-keyboard` 读取并重发当前设置、保留活动 layout index；`wtype` 包装器在退出后恢复，Chromium GUI、Wayland probe 和 Hermes GUI 在新 client 启动前再次恢复。helper 存在但失败时明确停止；headless probe 不更改当前键盘。最终包含此恢复链的 APK 仍需按第二轮记录完成实机回归。
+
 历史 Chromium 159 的失败环境、Firefox 原始结果及 Codex 捆绑 Chromium 158 的只读共享内存诊断分别保留在[首轮云编译与 K20 记录](reports/cloud-k20-validation-20261123.md)和[原生启动诊断](reports/codex-native-startup-20261123.md)。不同 Chromium 版本不能仅凭同样的 SIGTRAP 判定为同一处根因，也不能由 128 通过推定其他版本已修复。
 
 ## 日常浏览与显式 Agent 模式

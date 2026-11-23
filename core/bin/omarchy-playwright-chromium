@@ -24,6 +24,14 @@ for ARG in "$@"; do
   esac
 done
 BROWSER="$("$SCRIPT_DIR/omarchy-playwright128" browser-path chromium)"
+KEYBOARD_RESTORE="$SCRIPT_DIR/omarchy-restore-x11-keyboard"
+if [[ -e "$KEYBOARD_RESTORE" || -L "$KEYBOARD_RESTORE" ]]; then
+  "$KEYBOARD_RESTORE" || {
+    STATUS=$?
+    echo "Chromium 启动已停止：无法恢复 X11 键盘状态。" >&2
+    exit "$STATUS"
+  }
+fi
 PROFILE="${HOME:-/root}/.local/share/omarchy-chromium128/desktop"
 if [[ "$AGENT" == 1 ]]; then
   PROFILE="${HOME:-/root}/.local/share/omarchy-chromium128/agent"

@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Run the system wtype, then restore Sway's physical X11 keyboard."""
+
+import os
+import signal
+import subprocess
+import sys
+
+SYSTEM_WTYPE = "/usr/bin/wtype"
+RESTORE_HELPER = "/usr/local/bin/omarchy-restore-x11-keyboard"
+
+
+def main(arguments=None):
+    arguments = sys.argv[1:] if arguments is None else arguments
+    status = 127
+    try:
+        try:
+            status = subprocess.run([SYSTEM_WTYPE, *arguments], check=False).returncode
+        except OSError as error:
+            print("wtype: cannot run /usr/bin/wtype: " + str(error), file=sys.stderr)
+        except KeyboardInterrupt:
+            status = -signal.SIGINT
+    finally:
+        try:
+            restored = subprocess.run([RESTORE_HELPER], check=False, stdout=subprocess.DEVNULL)
+            if restored.returncode:
+                print("wtype: X11 keyboard restore failed (exit " + str(restored.returncode) + ")", file=sys.stderr)
+        except OSError as error:
+            print("wtype: cannot restore X11 keyboard: " + str(error), file=sys.stderr)
+        except KeyboardInterrupt:
+            print("wtype: X11 keyboard restore was interrupted", file=sys.stderr)
+    return status
+
+
+def exit_with_status(status):
+    if status < 0:
+        # Match the original process's signal status after the cleanup finishes.
+        original_signal = -status
+        if original_signal not in (signal.SIGKILL, signal.SIGSTOP):
+            signal.signal(original_signal, signal.SIG_DFL)
+        os.kill(os.getpid(), original_signal)
+        return 128 + original_signal
+    return status
+
+
+if __name__ == "__main__":
+    sys.exit(exit_with_status(main()))
