@@ -100,6 +100,7 @@ def handle_key(msg):
     if sup:
         if code == "space": run_bg("/usr/local/bin/omarchy-menu-ui apps"); return
         if code == "m": run_bg("/usr/local/bin/omarchy-menu-ui"); return
+        if code == "k": run_bg("/usr/local/bin/omarchy-menu-ui keybindings"); return
         if code == "Return": run_bg("alacritty"); return
         if code in ("w", "q"): run_bg("swaymsg kill"); return
         if code == "f": run_bg("swaymsg fullscreen toggle"); return
@@ -153,6 +154,7 @@ def handle_cmd(msg):
     mapping = {
         "apps": "/usr/local/bin/omarchy-menu-ui apps",
         "menu": "/usr/local/bin/omarchy-menu-ui",
+        "keybindings": "/usr/local/bin/omarchy-menu-ui keybindings",
         "terminal": "alacritty",
         "kill": "swaymsg kill",
         "fullscreen": "swaymsg fullscreen toggle",
@@ -167,14 +169,13 @@ def handle_resize(msg):
     h = int(msg.get("h", 0))
     if w < 300 or h < 300:
         return
-    saved_scale = "1.25"
+    saved_scale = "1.5"
     try:
         if os.path.exists("/root/.config/omarchy/display-scale"):
-            saved_scale = open("/root/.config/omarchy/display-scale").read().strip() or "1.25"
+            saved_scale = open("/root/.config/omarchy/display-scale").read().strip() or "1.5"
     except Exception:
         pass
-    scale = "1.35" if h > w else saved_scale
-    run_bg(f"swaymsg 'output X11-1 mode {w}x{h} scale {scale}'")
+    run_bg(f"swaymsg 'output X11-1 mode {w}x{h} scale {saved_scale}'")
 
 
 def cmd_server():

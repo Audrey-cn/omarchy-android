@@ -456,10 +456,10 @@ default-timeout=4000
         f.write(mako_cfg)
 
     # 5. Update Sway Wayland Compositor Config (Matches Omarchy looknfeel.conf & tiling-v2.conf)
-    saved_scale = "1.25"
+    saved_scale = "1.5"
     try:
         if os.path.exists("/root/.config/omarchy/display-scale"):
-            saved_scale = open("/root/.config/omarchy/display-scale").read().strip() or "1.25"
+            saved_scale = open("/root/.config/omarchy/display-scale").read().strip() or "1.5"
     except Exception:
         pass
 
@@ -470,8 +470,7 @@ default-timeout=4000
         if m:
             w, h = int(m.group(1)), int(m.group(2))
             if w >= 300 and h >= 300:
-                sc = "1.35" if h > w else saved_scale
-                output_line = f"output X11-1 mode {w}x{h} scale {sc}"
+                output_line = f"output X11-1 mode {w}x{h} scale {saved_scale}"
     except Exception:
         pass
 
@@ -479,10 +478,12 @@ default-timeout=4000
         exec_term = "/data/adb/ubuntu-chroot.sh 'WAYLAND_DISPLAY=wayland-1 XDG_RUNTIME_DIR=/tmp alacritty'"
         exec_apps = "/data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui apps'"
         exec_menu = "/data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui'"
+        exec_keys = "/data/adb/ubuntu-chroot.sh '/usr/local/bin/omarchy-menu-ui keybindings'"
     else:
         exec_term = "alacritty"
         exec_apps = "/usr/local/bin/omarchy-menu-ui apps"
         exec_menu = "/usr/local/bin/omarchy-menu-ui"
+        exec_keys = "/usr/local/bin/omarchy-menu-ui keybindings"
 
     sway_cfg = f"""set $mod Mod4
 set $alt Mod1
@@ -507,6 +508,7 @@ floating_modifier $mod normal
 bindsym $mod+Return exec {exec_term}
 bindsym $mod+space exec {exec_apps}
 bindsym $mod+$alt+space exec {exec_menu}
+bindsym $mod+k exec {exec_keys}
 bindsym $mod+w kill
 bindsym $mod+q kill
 bindsym $mod+j layout toggle split

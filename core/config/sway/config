@@ -2,7 +2,7 @@ set $mod Mod4
 set $alt Mod1
 
 font pango:JetBrainsMono Nerd Font 10
-output X11-1 scale 1.25
+output X11-1 scale 1.5
 
 default_border pixel 2
 default_floating_border pixel 2
@@ -21,6 +21,7 @@ floating_modifier $mod normal
 bindsym $mod+Return exec alacritty
 bindsym $mod+space exec /usr/local/bin/omarchy-menu-ui apps
 bindsym $mod+$alt+space exec /usr/local/bin/omarchy-menu-ui
+bindsym $mod+k exec /usr/local/bin/omarchy-menu-ui keybindings
 bindsym $mod+w kill
 bindsym $mod+q kill
 bindsym $mod+j layout toggle split

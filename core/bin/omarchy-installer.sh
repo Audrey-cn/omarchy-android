@@ -22,6 +22,13 @@ APP_DIR="/root/.local/share/applications"
 ICON_DIR="/root/.local/share/icons/hicolor/256x256/apps"
 mkdir -p "$APP_DIR" "$ICON_DIR"
 
+ensure_apt_updated() {
+    if [ -z "$(ls -A /var/lib/apt/lists 2>/dev/null | grep -v '^partial$\|^auxfiles$\|^lock$')" ]; then
+        echo "正在更新 APT 软件源索引..."
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    fi
+}
+
 install_webapp_desktop() {
     local name="$1"
     local url="$2"
@@ -68,6 +75,8 @@ install_nerd_font() {
     echo "✓ 字体 $display ($family) 已安装并刷新字体缓存！"
 }
 
+ensure_apt_updated
+
 case "$KEY" in
     # --- 1. Package & AUR Fuzzy Search ---
     install.package|install.aur)
@@ -112,6 +121,7 @@ DESKTOP
         CC_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/farion1231/cc-switch/releases/latest" | sed 's|.*/tag/v||')
         echo "检测到最新版本: v${CC_VER}"
         curl -fSL -o /tmp/cc-switch_arm64.deb "https://github.com/farion1231/cc-switch/releases/download/v${CC_VER}/CC-Switch-v${CC_VER}-Linux-arm64.deb"
+        ensure_apt_updated
         DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cc-switch_arm64.deb
         rm -f /tmp/cc-switch_arm64.deb
         for f in /usr/share/applications/*CC*Switch*.desktop /usr/share/applications/*cc-switch*.desktop; do

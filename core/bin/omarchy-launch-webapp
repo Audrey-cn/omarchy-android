@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
-# Native Omarchy WebApp launcher for Android/Wayland
+# Native Omarchy WebApp launcher for in-system Wayland Chromium
 set -euo pipefail
 url="${1:-}"
 [[ -n "$url" ]] || exit 0
-if command -v chromium >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1 || command -v google-chrome >/dev/null 2>&1; then
-  exec /usr/local/bin/omarchy-chromium --app="$url"
-else
-  # Fallback for lean Non-Root All-in-One APK: open in native Android browser via queue
-  mkdir -p /tmp/omarchy-browser-queue
-  printf '{"action":"open_url","url":"%s"}\n' "$url" > "/tmp/omarchy-browser-queue/url_$(date +%s%N).json"
-fi
+exec /usr/local/bin/omarchy-chromium --app="$url"
