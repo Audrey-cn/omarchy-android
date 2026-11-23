@@ -89,7 +89,11 @@
 
     <!-- ==================== Settings Page ==================== -->
     <string name="tc4_settings_title">Settings</string>
-    <string name="tc4_settings_description">Configure app settings here!\nFor container-specific settings, see "Features" or "Shortcuts - Options".</string>
+    <string name="tc4_settings_description">Unified settings for Omarchy Desktop, X11 display/touch, IME, and permissions.</string>
+    <string name="tc4_settings_x11_title">X11 Display &amp; Touch Settings</string>
+    <string name="tc4_settings_x11_desc">Configure touch mode, pointer speed, fullscreen, and hardware keyboard</string>
+    <string name="tc4_settings_ime_title">System IME &amp; Voice Input</string>
+    <string name="tc4_settings_ime_desc">Switch default input method for direct voice and CJK text passthrough</string>
     <string name="tc4_settings_shortcut_title">Launcher Shortcut Generator</string>
     <string name="tc4_settings_shortcut_desc">Create a desktop shortcut for the current container to run commands directly</string>
     <string name="tc4_settings_auto_launch_title">Auto-launch Container</string>

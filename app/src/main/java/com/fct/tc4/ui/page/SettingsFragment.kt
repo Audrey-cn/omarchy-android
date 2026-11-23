@@ -95,6 +95,15 @@ class SettingsFragment : Fragment() {
 
     private fun handleAction(item: ActionSetting) {
         when (item.id) {
+            "x11_settings" -> {
+                try {
+                    startActivity(Intent(requireContext(), Class.forName("com.termux.x11.LoriePreferences")))
+                } catch (_: Exception) {}
+            }
+            "ime_picker" -> {
+                val imm = requireContext().getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+                imm?.showInputMethodPicker()
+            }
             "launcher_shortcut" -> {
                 val code = arguments?.getString("code") ?: ""
                 LauncherShortcutDialogFragment.newInstance(code)

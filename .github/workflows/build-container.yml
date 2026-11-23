@@ -39,7 +39,7 @@ jobs:
           SRC
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            ca-certificates sudo locales tzdata dbus dbus-x11 x11-xserver-utils fontconfig \
+            ca-certificates sudo locales tzdata dbus dbus-x11 x11-xserver-utils fontconfig gnupg \
             waybar wofi swaybg mako-notifier libnotify-bin wl-clipboard wtype \
             alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
             imv zathura zathura-pdf-poppler mpv \
@@ -119,6 +119,13 @@ jobs:
           mkdir -p /usr/share/fonts/truetype/omarchy /usr/share/fonts/truetype/jetbrains-mono-nerd
           curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" | tar -xJ -C /usr/share/fonts/truetype/jetbrains-mono-nerd --wildcards '*NerdFont-Regular.ttf' '*NerdFont-Bold.ttf' '*NerdFontMono-Regular.ttf' '*NerdFontPropo-Regular.ttf' || \
             curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.tar.xz" | tar -xJ -C /usr/share/fonts/truetype/jetbrains-mono-nerd
+
+          # Install native ARM64 Chromium (.deb from xtradeb/apps PPA, no Snap!) for in-system WebApps
+          mkdir -p /etc/apt/keyrings
+          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x82BB6851C64F6880" | gpg --dearmor -o /etc/apt/keyrings/xtradeb.gpg
+          echo "deb [arch=arm64 signed-by=/etc/apt/keyrings/xtradeb.gpg] https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu noble main" > /etc/apt/sources.list.d/xtradeb-apps.list
+          apt-get update -qq
+          apt-get install -y --no-install-recommends chromium
 
           # Install lazygit ARM64
           LG_VER=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/jesseduffield/lazygit/releases/latest" | sed 's|.*/tag/v||')

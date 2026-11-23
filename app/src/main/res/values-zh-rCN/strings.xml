@@ -89,7 +89,11 @@
 
     <!-- ==================== Settings Page ==================== -->
     <string name="tc4_settings_title">设置</string>
-    <string name="tc4_settings_description">这里可以进行软件相关设置！\n针对特定容器的设置见"功能"或"快捷方式-选项"。</string>
+    <string name="tc4_settings_description">统一管理 Omarchy 桌面、X11 显示触控、输入法与系统权限。</string>
+    <string name="tc4_settings_x11_title">X11 显示与触控设置</string>
+    <string name="tc4_settings_x11_desc">调整触控模式（触控板/直触）、指针速度、全屏与硬件键盘映射</string>
+    <string name="tc4_settings_ime_title">系统输入法与豆包语音</string>
+    <string name="tc4_settings_ime_desc">切换默认输入法（推荐搭配豆包输入法实现离线语音精准上屏）</string>
     <string name="tc4_settings_shortcut_title">启动器捷径生成器</string>
     <string name="tc4_settings_shortcut_desc">为当前容器生成桌面捷径，直接点击执行命令</string>
     <string name="tc4_settings_auto_launch_title">自动启动容器</string>

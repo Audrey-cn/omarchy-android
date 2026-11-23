@@ -83,6 +83,16 @@ class SettingsViewModel(
     private fun refresh() {
         _items.value = listOf(
             ActionSetting(
+                id = "x11_settings",
+                titleRes = R.string.tc4_settings_x11_title,
+                descriptionRes = R.string.tc4_settings_x11_desc
+            ),
+            ActionSetting(
+                id = "ime_picker",
+                titleRes = R.string.tc4_settings_ime_title,
+                descriptionRes = R.string.tc4_settings_ime_desc
+            ),
+            ActionSetting(
                 id = "launcher_shortcut",
                 titleRes = R.string.tc4_settings_shortcut_title,
                 descriptionRes = R.string.tc4_settings_shortcut_desc
