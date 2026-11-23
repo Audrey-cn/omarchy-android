@@ -74,4 +74,4 @@
 - [x] Independent spec and broad diff review; no open high-impact data-loss/recovery/signing issues.
 - [x] Publish verified clean initial image and catalog; build signed small APK with compatible bundled fallback.
 - [x] K20 install-r preservation + desktop cold start/browser/Agent; download interruption/resume/install readiness in isolated recoverable test environment.
-- [ ] Publish tested App release, update two-route docs/initial-image policy and report exact validation boundaries. Clean only owned temporary duplicates.
+- [x] Publish tested App release, update two-route docs/initial-image policy and report exact validation boundaries. Clean only owned temporary duplicates.
