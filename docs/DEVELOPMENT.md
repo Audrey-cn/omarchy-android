@@ -6,13 +6,13 @@
 
 Android 项目通过 Git subtree 导入，保留原仓提交历史；这不是需要另行初始化的 Git submodule。`git log --all` 可查看合并后的历史。
 
-原 App 历史已导入本仓，后续不依赖独立的 `omarchy-android-app` 目录，也不与旧仓自动同步。迁移不会自动归档旧远端或发布新 APK；本仓文档与应用入口统一指向主仓库的 Releases。已有工作进度与云端运行见[交接记录](HANDOFF.md)。
+原 App 历史已导入本仓，后续不依赖独立的 `omarchy-android-app` 目录，也不与旧仓自动同步。迁移不会自动归档旧远端或发布新 APK；本仓文档与应用入口统一指向主仓库的 Releases。接手历史见[交接记录](HANDOFF.md)，持续更新的设备实证与云端运行见[K20 Pro 验证报告](reports/cloud-k20-validation-20261123.md)。
 
 ## 默认使用云端构建
 
 本项目已有的开发流程是提交到 GitHub，由 Actions 构建 rootfs 和 APK，再下载产物到 Android 设备验证。本地 JDK/Android SDK 并非采用该流程的前置条件；下文的 Gradle 命令适用于需要本地编译时。
 
-合并后的构建工作流支持 main 的 push、面向 main 的 PR 和手动 dispatch。feature 分支单独 push 不会触发 main 的 push 过滤，可用 PR 验证合并版；手动 dispatch 需要工作流先在默认分支注册，再选择目标分支。
+统一仓库已经推送并完成云端 rootfs 与一体 APK 构建。合并后的构建工作流支持 main 的 push、面向 main 的 PR 和手动 dispatch。feature 分支单独 push 不会触发 main 的 push 过滤，可用 PR 验证合并版；手动 dispatch 需要工作流先在默认分支注册，再选择目标分支。
 
 ## 编译 Android 容器壳
 
@@ -80,7 +80,7 @@ git diff --check
 python3 -m unittest discover -s tests -v
 ```
 
-目录、脚本与 YAML 校验只能证明迁移配置一致；完整镜像打包使用云端 ARM64 Linux runner，一体包启动与输入行为还需 Android 设备验证。旧 App 仓最新 `2792678` 已有成功的云端一体包构建，合并版仍需单独验证。
+完整镜像打包使用云端 ARM64 Linux runner。最终产品提交 `e876b3b` 的 [45120464556](https://github.com/Audrey-cn/omarchy-android/actions/runs/45120464556) 已完成 rootfs 与一体包构建，四项工作流均成功；K20 Pro 清洁初始化、中文输入、横竖屏及键盘避让已通过。本地与云端均有 37 项测试通过；各可选工具的实际通过项与限制见[验证报告](reports/cloud-k20-validation-20261123.md)。
 
 GitHub Actions artifacts 与 Releases 附件是两个发布入口。现有工作流上传 artifacts，不会自动创建 Release；对外发布时应确认上传的是包含镜像的一体包，并保留对应版本的源码与许可证声明。
 
