@@ -26,6 +26,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.fct.tc4.R
 import com.fct.tc4.install.*
 import com.fct.tc4.ui.main.MainActivity
 import com.fct.tc4.ui.misc.Global
@@ -135,21 +136,21 @@ class DesktopSetupActivity : AppCompatActivity() {
 
         // Header
         layout.addView(TextView(this).apply {
-            text = "OMARCHY ANDROID"
+            text = getString(R.string.omarchy_setup_brand)
             textSize = 11f
             letterSpacing = 0.14f
             setTextColor(primaryBlue)
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
         })
         layout.addView(TextView(this).apply {
-            text = "安装 Omarchy 桌面"
+            text = getString(R.string.omarchy_setup_title)
             textSize = 26f
             setTextColor(textPrimary)
             typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
             setPadding(0, dp(4), 0, dp(6))
         })
         layout.addView(TextView(this).apply {
-            text = "首次使用需下载桌面初始镜像。APK 升级与已有系统相互独立，绝不会覆盖你的个人数据。"
+            text = getString(R.string.omarchy_setup_intro)
             textSize = 13.5f
             setTextColor(textMuted)
             setPadding(0, 0, 0, dp(16))
@@ -158,7 +159,7 @@ class DesktopSetupActivity : AppCompatActivity() {
         // Card 1: Image selection & download progress
         addCard {
             addView(TextView(this@DesktopSetupActivity).apply {
-                text = "桌面镜像版本"
+                text = getString(R.string.omarchy_setup_image_version)
                 textSize = 13f
                 setTextColor(primaryBlue)
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
@@ -169,7 +170,7 @@ class DesktopSetupActivity : AppCompatActivity() {
                 setPadding(dp(10), dp(6), dp(10), dp(6))
             }.also(::addView)
             details = TextView(this@DesktopSetupActivity).apply {
-                text = "正在读取可用镜像…"
+                text = getString(R.string.omarchy_setup_loading_images)
                 textSize = 12.5f
                 setTextColor(textMuted)
                 setPadding(0, dp(10), 0, dp(8))
@@ -190,7 +191,7 @@ class DesktopSetupActivity : AppCompatActivity() {
                 setPadding(0, 0, 0, dp(6))
             }.also(::addView)
 
-            start = styledButton(this, "下载并安装桌面", primary = true) {
+            start = styledButton(this, getString(R.string.omarchy_setup_download_install), primary = true) {
                 val state = InitialDesktopState.state.value
                 if (initialDesktopAction(state.phase == SetupPhase.COMPLETE, "omarchy" in Global.installedContainers) == InitialDesktopAction.LAUNCH) openDesktop()
                 else (state.image ?: selected())?.let { image ->
@@ -200,10 +201,10 @@ class DesktopSetupActivity : AppCompatActivity() {
                     else startTransfer(image.id)
                 }
             }
-            pause = styledButton(this, "暂停下载") {
+            pause = styledButton(this, getString(R.string.omarchy_setup_pause_download)) {
                 startService(Intent(this@DesktopSetupActivity, DesktopInstallService::class.java).setAction(DesktopInstallService.PAUSE))
             }
-            cancel = styledButton(this, "取消下载", danger = true) {
+            cancel = styledButton(this, getString(R.string.omarchy_setup_cancel_download), danger = true) {
                 startService(Intent(this@DesktopSetupActivity, DesktopInstallService::class.java).setAction(DesktopInstallService.CANCEL))
             }
         }
@@ -211,31 +212,31 @@ class DesktopSetupActivity : AppCompatActivity() {
         // Card 2: Offline import & mirror tools
         addCard {
             addView(TextView(this@DesktopSetupActivity).apply {
-                text = "离线导入与镜像源"
+                text = getString(R.string.omarchy_setup_offline_title)
                 textSize = 13f
                 setTextColor(Color.parseColor("#9ECE6A"))
                 typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
                 setPadding(0, 0, 0, dp(4))
             })
             addView(TextView(this@DesktopSetupActivity).apply {
-                text = "支持多镜像自动回退与断点续传；也可提前下载 rootfs.tar.zst 后直接本地导入。"
+                text = getString(R.string.omarchy_setup_offline_summary)
                 textSize = 12.5f
                 setTextColor(textMuted)
                 setPadding(0, 0, 0, dp(4))
             })
-            local = styledButton(this, "从本地 .tar.zst 镜像导入") { pickLocal.launch(arrayOf("*/*")) }
-            refresh = styledButton(this, "刷新可用镜像列表") { loadImages(true) }
-            styledButton(this, "下载较慢？查看离线下载方式") {
-                android.app.AlertDialog.Builder(this@DesktopSetupActivity).setTitle("离线下载后导入")
-                    .setMessage("可以暂停当前任务，在浏览器或支持断点的下载工具中取得同版本 rootfs.tar.zst，再通过“从本地 .tar.zst 镜像导入”导入。导入仍会核对版本、大小和 SHA256。")
-                    .setPositiveButton("打开镜像发行页") { _, _ ->
+            local = styledButton(this, getString(R.string.omarchy_setup_import_local)) { pickLocal.launch(arrayOf("*/*")) }
+            refresh = styledButton(this, getString(R.string.omarchy_setup_refresh_images)) { loadImages(true) }
+            styledButton(this, getString(R.string.omarchy_setup_slow_download)) {
+                android.app.AlertDialog.Builder(this@DesktopSetupActivity).setTitle(R.string.omarchy_setup_offline_dialog_title)
+                    .setMessage(R.string.omarchy_setup_offline_dialog_message)
+                    .setPositiveButton(R.string.omarchy_setup_open_releases) { _, _ ->
                         startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(InitialImageCatalog.releasePage(InitialDesktopState.state.value.image ?: selected()))))
-                    }.setNegativeButton("返回", null).show()
+                    }.setNegativeButton(R.string.tc4_btn_back, null).show()
             }
         }
 
         layout.addView(TextView(this).apply {
-            text = "建议在 Wi-Fi 下完成首次下载。镜像仅用于初始化；系统内软件与桌面组件后续均通过系统软件源在线维护。"
+            text = getString(R.string.omarchy_setup_download_tip)
             textSize = 12f
             setTextColor(textMuted)
             gravity = Gravity.CENTER_HORIZONTAL
@@ -263,8 +264,8 @@ class DesktopSetupActivity : AppCompatActivity() {
                 val pending = InitialDesktopState.state.value.image
                 images = (listOfNotNull(pending) + available).distinctBy { it.id }.filter { InitialImageCatalog.compatible(it, code) }
                 versions.adapter = ArrayAdapter(this@DesktopSetupActivity, android.R.layout.simple_spinner_dropdown_item, images.map { it.name })
-                if (images.isEmpty()) status.text = "暂未找到兼容镜像，请刷新列表或更新 App。"
-            } catch (_: Exception) { status.text = "镜像列表暂时不可用。可使用已缓存的版本，或稍后重试。" }
+                if (images.isEmpty()) status.setText(R.string.omarchy_setup_no_images)
+            } catch (_: Exception) { status.setText(R.string.omarchy_setup_catalog_unavailable) }
             finally { refresh.isEnabled = !InitialDesktopState.running.get(); render(InitialDesktopState.state.value) }
         }
     }
@@ -281,7 +282,7 @@ class DesktopSetupActivity : AppCompatActivity() {
         val active = state.phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.IMPORTING, SetupPhase.VERIFYING, SetupPhase.INSTALLING)
         val action = initialDesktopAction(state.phase == SetupPhase.COMPLETE, installed)
         val ready = action == InitialDesktopAction.LAUNCH
-        start.text = when { ready -> "启动桌面"; action == InitialDesktopAction.RECOVER -> "恢复桌面安装记录"; state.phase == SetupPhase.PAUSED || state.phase == SetupPhase.FAILED -> "继续下载并安装"; else -> "下载并安装桌面" }
+        start.setText(when { ready -> R.string.omarchy_setup_launch; action == InitialDesktopAction.RECOVER -> R.string.omarchy_setup_recover; state.phase == SetupPhase.PAUSED || state.phase == SetupPhase.FAILED -> R.string.omarchy_setup_resume; else -> R.string.omarchy_setup_download_install })
         start.isEnabled = ready || (!active && (state.image != null || images.isNotEmpty()) && !installed)
         versions.isEnabled = state.phase == SetupPhase.IDLE && !installed
         pause.visibility = if (state.phase == SetupPhase.DOWNLOADING || state.phase == SetupPhase.VERIFYING) View.VISIBLE else View.GONE
@@ -289,20 +290,20 @@ class DesktopSetupActivity : AppCompatActivity() {
         local.isEnabled = !active && !installed && images.isNotEmpty()
         refresh.isEnabled = !active
         val image = if (active || state.phase != SetupPhase.IDLE) state.image ?: selected() else selected()
-        details.text = image?.let { "下载 ${formatBytes(it.bytes)} · 预计安装空间至少 ${formatBytes(it.unpackedBytes + InitialInstallTransaction.HEADROOM_BYTES)}（另需下载缓存空间）" } ?: "暂无兼容镜像。"
+        details.text = image?.let { getString(R.string.omarchy_setup_image_size, formatBytes(it.bytes), formatBytes(it.unpackedBytes + InitialInstallTransaction.HEADROOM_BYTES)) } ?: getString(R.string.omarchy_setup_no_compatible_image)
         progress.isIndeterminate = state.phase in setOf(SetupPhase.IMPORTING, SetupPhase.VERIFYING, SetupPhase.INSTALLING)
         progress.progress = if (state.image != null) (state.downloaded * 1000 / state.image.bytes).toInt() else 0
         status.text = when {
-            ready -> "桌面已安装。更新 App 不会重新导入系统镜像。"
-            action == InitialDesktopAction.RECOVER -> "此前桌面已发布，请点击恢复安装记录后启动。"
+            ready -> getString(R.string.omarchy_setup_installed)
+            action == InitialDesktopAction.RECOVER -> getString(R.string.omarchy_setup_recover_hint)
             active || state.phase == SetupPhase.PAUSED || state.phase == SetupPhase.FAILED -> {
-                val speed = if (state.bytesPerSecond > 0) " · ${formatBytes(state.bytesPerSecond)}/s" else ""
-                val remaining = if (state.bytesPerSecond > 0 && state.image != null) " · 剩余约 ${(state.image.bytes - state.downloaded) / state.bytesPerSecond} 秒" else ""
-                "${state.message}\n${formatBytes(state.downloaded)} / ${state.image?.let { formatBytes(it.bytes) } ?: "—"}$speed$remaining".trim()
+                val speed = if (state.bytesPerSecond > 0) getString(R.string.omarchy_setup_speed, formatBytes(state.bytesPerSecond)) else ""
+                val remaining = if (state.bytesPerSecond > 0 && state.image != null) getString(R.string.omarchy_setup_remaining, (state.image.bytes - state.downloaded) / state.bytesPerSecond) else ""
+                getString(R.string.omarchy_setup_progress, state.message, formatBytes(state.downloaded), state.image?.let { formatBytes(it.bytes) } ?: "—", speed, remaining).trim()
             }
-            existing -> "检测到已有桌面文件。首次安装不会覆盖它们，请返回应用管理。"
-            images.isEmpty() -> "暂未找到兼容镜像，请刷新列表或更新 App。"
-            else -> "选择初始镜像后点击下载，支持暂停和断点继续。"
+            existing -> getString(R.string.omarchy_setup_existing_files)
+            images.isEmpty() -> getString(R.string.omarchy_setup_no_images)
+            else -> getString(R.string.omarchy_setup_select_hint)
         }
     }
     private fun openDesktop() {

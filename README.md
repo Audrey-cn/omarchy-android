@@ -1,109 +1,122 @@
-# Omarchy Android
+<div align="center">
+  <img src="docs/assets/omarchy-icon.png" width="100" alt="Omarchy Android logo">
+  <h1>Omarchy Android</h1>
+  <p><strong>Your phone. A real Linux desktop.</strong></p>
+  <p>An Omarchy-inspired Ubuntu ARM64 desktop, built for Android touch, keyboards and everyday tinkering.</p>
+  <p>
+    <a href="https://github.com/Audrey-cn/omarchy-android/releases"><img src="https://img.shields.io/github/v/release/Audrey-cn/omarchy-android?include_prereleases&amp;label=Release" alt="Release"></a>
+    <a href="apps/android/COPYING"><img src="https://img.shields.io/badge/Android_app-GPL--3.0-blue" alt="Android app license: GPL-3.0"></a>
+    <img src="https://img.shields.io/badge/Android-ARM64-3DDC84?logo=android&amp;logoColor=white" alt="Android ARM64">
+    <img src="https://img.shields.io/badge/Ubuntu-24.04%20%2B%20Sway-E95420?logo=ubuntu&amp;logoColor=white" alt="Ubuntu 24.04 + Sway">
+    <a href="https://github.com/Audrey-cn/omarchy-android/forks"><img src="https://img.shields.io/github/forks/Audrey-cn/omarchy-android?style=flat" alt="Forks"></a>
+    <a href="https://github.com/Audrey-cn/omarchy-android/issues"><img src="https://img.shields.io/github/issues/Audrey-cn/omarchy-android" alt="Issues"></a>
+  </p>
+  <p><strong>English</strong> | <a href="README.zh-CN.md"><strong>简体中文</strong></a></p>
+  <p><a href="https://github.com/Audrey-cn/omarchy-android/releases"><strong>Download APK</strong></a> · <a href="docs/initial-install.md">Installation guide</a> · <a href="CONTRIBUTING.md">Contribute</a></p>
+</div>
 
-在 Android 手机、折叠屏与平板上运行 Omarchy 风格的 Ubuntu ARM64 Wayland 桌面。桌面核心、免 Root 一体 App 和 Root chroot 运行时在同一个仓库开发与维护。
+## Real-device showcase
 
-## 选择使用方式
+| Sway desktop & edge dock | Transparent floating keyboard |
+| --- | --- |
+| ![Ubuntu desktop with tiled applications and the expanded edge dock](docs/assets/showcase-desktop-dock.png) | ![Linux desktop with the transparent floating keyboard](docs/assets/showcase-floating-keyboard.png) |
+| **One place for your controls** | **Choose, download or import your desktop** |
+| ![Unified settings for display, input and Android permissions](docs/assets/showcase-unified-settings.png) | ![First-run desktop image installer](docs/assets/showcase-setup-installer.png) |
 
-| 正式路线 | 项目位置 | 使用方式与状态 |
+## Why Omarchy Android?
+
+- **Rootless by default.** Install the Android app and set up Ubuntu inside it. X11 and PRoot are included; no separate Termux installation is needed. An optional **Root chroot** route is available for rooted devices.
+- **A real Wayland session.** Sway, Waybar, a native app grid, themes and Linux applications run inside Ubuntu 24.04 ARM64. Sway uses an X11 backend to display through Android's embedded X server.
+- **One gesture away.** An edge handle opens Android input, toggles a transparent floating keyboard, or reveals orientation and settings controls. Move it to either edge at a comfortable height.
+- **Made for touch and keyboards.** Android IME bridging, Chinese input, adjustable scaling and Super/Alt shortcuts make a phone, foldable or tablet usable as a desktop.
+- **Updates at their own pace.** APK, desktop components, graphics/browser runtimes and the initial image have separate release channels. Compatible, same-signature APK updates preserve the existing guest; Ubuntu packages use APT and guest components update explicitly from the desktop.
+
+Start with Alacritty, Thunar, Neovim, Lazygit, imv, Zathura, mpv and Chromium. Add CC Switch, Codex / ChatGPT Desktop, Claude Desktop or Hermes Desktop from the installer as needed. See the [architecture](docs/ARCHITECTURE.md) for both runtime routes.
+
+## Quick start — the 30-second overview
+
+You need an **ARM64 Android device** and enough free space for the download, extracted desktop and the installer's stated reserve. Download and extraction time depend on your connection and device.
+
+| Step | What to do |
+| --- | --- |
+| **1 · Install** | Download the `arm64-v8a` APK from [Releases](https://github.com/Audrey-cn/omarchy-android/releases) and open Omarchy Android. |
+| **2 · Set up Ubuntu** | Select a compatible image and choose **Download and install desktop**. Downloads support pause/resume. For offline setup, select the matching image, then import its original `rootfs.tar.zst`. |
+| **3 · Launch** | Tap **Launch desktop** and follow the skippable four-step guide. Open the app grid with `Super + Space`. |
+
+[Full installation and update guide](docs/initial-install.md) · [Published image catalog](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)
+
+### Four edge-handle gestures
+
+| Gesture on the handle | Action |
+| --- | --- |
+| **Swipe inward** | Open Android IME input; use Doubao IME for Chinese and voice input. |
+| **Double-tap** | Show or hide the transparent floating keyboard. |
+| **Tap** | Expand the dock for keyboard, input, orientation lock and unified settings. |
+| **Drag** | Reposition vertically and snap to the left or right edge. |
+
+### Six core shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Super + Space` | Open the app grid |
+| `Super + Enter` | Open Alacritty terminal |
+| `Super + W` | Close the focused window |
+| `Super + 1` … `5` | Switch workspaces |
+| `Super + K` | Open the complete shortcut guide |
+| `Super + Alt + Space` | Open the Omarchy menu |
+
+**Super / Alt dual modifiers:** the rootless desktop uses dual modifiers by default, so the first five shortcuts also work with `Alt` in place of `Super`. The keyboard settings offer Super-only and Alt-only modes; the menu chord above uses both modifiers. `Super` is usually the Windows/Command key. Check `Super + K` for your active configuration.
+
+### Five tips for a smoother start
+
+1. **Use Wi-Fi for the first image.** If downloading on the phone is slow, copy the matching original `rootfs.tar.zst` from another device and use offline import. The installer checks its size and SHA-256.
+2. **Try an external keyboard and Doubao IME.** Bluetooth or USB makes terminal work easier. If Android intercepts a Super shortcut, use the supported Alt mode. Choose Doubao in Android's input method picker for Chinese/voice input.
+3. **Adjust the display scale.** The desktop starts at **1.5×** scale; adjust it with the monitor icon in the top bar.
+4. **Check child-process limits on Android 12+.** If the session ends with **Signal 9**, open the app's guidance and check the device's Developer Options for disabling child-process restrictions. The setting and availability vary by device.
+5. **Allow background operation.** Set Omarchy Android's battery usage to **Unrestricted** (or the vendor equivalent) so battery management is less likely to stop an active desktop.
+
+## Pinned versions & maintenance
+
+| Component | Baseline | Update approach |
 | --- | --- | --- |
-| 免 Root 一体 App | [`apps/android/`](apps/android/) | APK 集成 PRoot、X11 与桌面入口，无需额外安装 Termux；新流程在首次运行时选择、下载或离线导入桌面镜像 |
-| Root chroot | [`install.sh`](install.sh)、[`runtime/chroot/`](runtime/chroot/) | 为已有 Root 环境提供冷安装（`/data/omarchy-chroot`）与桌面启动，已在 K20 Pro 完成集成与输入验收 |
+| **Chromium** | **128.0.6613.18** | Pinned with its Playwright/Node bundle for tested PRoot compatibility and stability; maintained through the project runtime channel. |
+| **Hermes Desktop** | **2026.9.7-7** | The installer uses a pinned, reviewed build with matching native-module and onboarding repairs. |
+| **Ubuntu** | **24.04 ARM64** | Continue regular Ubuntu **APT updates** in the existing guest. |
 
-外部 Termux + Termux:X11 的免 Root PRoot 路线保留为开发、调试和迁移入口。可选的 [Omarchy Deck](apps/deck/) 为外部 X11 提供悬浮输入工具，不是第三条正式产品路线。一体 App 包名为 `com.omarchy.android`，Deck 包名为 `com.omarchy.deck`。
+The pins describe the compatibility baseline. Version selection, browser security-update limits, component updates and recovery are documented in the [maintenance handbook](docs/MAINTENANCE.md), [runtime guide](docs/runtime-components.md) and [third-party update guide](docs/third-party-updates.md).
 
-## 实机效果
+APK updates and new initial images serve different purposes: use a compatible same-signature APK to update the app, and desktop update tools for the guest. A new initial image is a baseline for new installs. [Details](docs/initial-install.md).
 
-![Omarchy Android Waybar & Panel](docs/screenshots/desktop-waybar-panel.png)
+## Optional Root chroot & development routes
 
-![Omarchy Android App Grid](docs/screenshots/app-grid.png)
-
-![Omarchy Android AI Suite](docs/screenshots/ai-suite.png)
-
-## 桌面功能
-
-- Sway 平铺窗口管理、Waybar 顶栏、GtkLayerShell 状态弹窗与 6 列原生应用网格。
-- Omarchy 主题与壁纸，联动 Sway、Waybar、Wofi、App Grid 和 Alacritty 配色。
-- Fcitx5 中文拼音、Android 输入法穿透、悬浮键盘与横竖屏控制。
-- Alacritty、Thunar、Neovim、Lazygit、imv、Zathura、mpv；免 Root 初装镜像包含配套 Chromium 128，保留轻量 WebKitGTK 浏览器。
-- 按需安装 CC Switch、Codex / ChatGPT Desktop、Claude Desktop、Hermes Desktop 等 AI 工具。
-- Root 路线提供 `evdev` 外接键盘与触控板独占，支持 `Alt` / `Super` 桌面快捷键。
-
-共享桌面逻辑放在 `core/`；两种部署路线各自维护运行时，详细区别见[架构说明](docs/ARCHITECTURE.md)。
-
-## 快速开始
-
-### 免 Root 一体 App
-
-从 [v1.0.79-test](https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.79-test) 安装约 33.8 MB 的 `arm64-v8a` 精简 APK。本轮在 K20 Pro 验证了从 72 的同签名覆盖安装，详细结果见[实机记录](docs/reports/update-maintenance-k20-20261124.md)。
-
-新用户可在首次安装页面刷新[公开镜像目录](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)，选择[本轮干净初装镜像](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-ubuntu24-91a120142609)。App 提供持久断点、暂停后继续和匹配镜像的离线导入，安装包包含 Android 界面、内嵌 X11 与 PRoot。K20 已验证该镜像的离线导入与桌面启动；历史在线续传也有独立记录。操作见[首次安装与更新](docs/initial-install.md)。
-
-后续 App、X11 和 PRoot 更新沿用同一持久签名密钥，通过 Android 覆盖安装保留现有桌面与个人数据；日常启动不再同步 guest 文件或重新导入镜像。Ubuntu 软件包继续使用现有 APT 软件源维护。桌面菜单「更新」按来源展示 Ubuntu、APK、项目桌面、图形、浏览器配套和第三方应用的检查结果。项目组件由用户显式安装及恢复。本轮发布[桌面组件 1.0.3](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-v1.0.3)和[运行时 1.0.0](https://github.com/Audrey-cn/omarchy-android/releases/tag/runtime-v1.0.0)。操作与实测范围见[组件更新说明](docs/component-updates.md)和[交付记录](docs/reports/update-maintenance-k20-20261124.md)。初装镜像低频汇总修正后供新安装选择，已有桌面无需跟随每次镜像重发。
-
-### Root chroot
-
-Root 路线提供干净镜像安装入口，要求 ARM64 Android、Root、支持挂载命名空间的 BusyBox，以及 Termux/X11 配套。安装到新目录 `/data/omarchy-chroot`，支持下载固定公开镜像或导入匹配的本地文件，发现目标已存在会拒绝覆盖。入口为 `./install.sh --mode chroot`；具体前置条件与选项见[首次安装与更新](docs/initial-install.md)。
-
-### 开发与迁移：外部 Termux
-
-免 Root 分体部署可在已安装 Termux 和 Termux:X11 的设备上运行：
+For a rooted ARM64 device, the chroot installer provides a separate runtime with external Termux:X11 and hardware input support. Review the [prerequisites and installation guide](docs/root-chroot.md) before running:
 
 ```bash
 git clone https://github.com/Audrey-cn/omarchy-android.git
 cd omarchy-android
-./install.sh --mode proot
-
-# 安装时同时加入 AI 桌面工具
-./install.sh --mode proot --with-ai
+./install.sh --mode chroot --inspect
+./install.sh --mode chroot
 ```
 
-这一路径用于开发、调试和迁移；Deck 可辅助输入，不能代替 Termux 或 Termux:X11。
+The installer targets a new `/data/omarchy-chroot` directory and refuses to overwrite an existing installation. The external Termux + Termux:X11 PRoot route (`./install.sh --mode proot`) is retained for development and migration; [Omarchy Deck](apps/deck/) is its optional input companion. See [development and build instructions](docs/DEVELOPMENT.md).
 
-### 常用快捷键
+## Fork, customize & contribute
 
-| 快捷键 | 功能 |
+Make this desktop yours. Fork the repository, build a theme, improve an app package, adapt the runtime to a device, or explore another distribution in your own fork. Bring a focused proposal to an [issue](https://github.com/Audrey-cn/omarchy-android/issues) and send a PR when it is ready. Device reports, documentation and translations are useful contributions too.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the project map, checks and PR workflow. Device-specific results belong with their exact Android version, runtime route and tested build; existing [K20 Pro validation records](docs/reports/update-maintenance-k20-20261124.md) show the tested scope.
+
+| Explore | Start here |
 | --- | --- |
-| `Super + Space` | 打开应用网格 |
-| `Super + Enter` | 打开终端 |
-| `Super + W` | 关闭当前窗口 |
-| `Super + 1~5` | 切换工作区 |
-| `Super + K` | 打开快捷键速查表 |
+| Shared desktop scripts, themes and configuration | [`core/`](core/) |
+| Android app, installer and floating controls | [`apps/android/`](apps/android/) |
+| Root and external Termux runtimes | [`runtime/`](runtime/) |
+| Release channels and recovery | [Maintenance handbook](docs/MAINTENANCE.md) |
+| Building and testing | [Development guide](docs/DEVELOPMENT.md) |
+| Personal configuration migration | [`scripts/backup-personal.sh`](scripts/backup-personal.sh) |
 
-Termux 路线还提供 `Alt` 组合键；快捷键以当前 Sway 配置与桌面速查表为准。
+## License & acknowledgments
 
-## 目录结构
+The Android application is based on **[Tiny Container](https://github.com/Cateners/tiny_container)** by Caten Hu and retains **GPL-3.0-or-later** and its original notices; see [COPYING](apps/android/COPYING). The shared desktop core, Termux runtimes, Deck and original repository documentation retain the root [MIT license](LICENSE). Third-party code, themes, fonts and tools retain their own licenses. See [LICENSES.md](LICENSES.md) for the component boundaries.
 
-```text
-omarchy-android/
-├── core/                     # 共享桌面脚本、AI 启动封装、Sway/Fcitx5 配置
-├── runtime/
-│   ├── chroot/               # 外部 Termux + Root chroot 运行时
-│   └── proot/                # 外部 Termux + proot-distro 运行时
-├── apps/
-│   ├── android/              # 免 Root 一体包：Gradle 工程、容器配置、原生库
-│   └── deck/                 # 外部 Termux:X11 使用的辅助 APK
-├── install.sh                # Root 集成与外部 Termux 开发部署入口
-├── scripts/
-│   ├── stage-core.sh         # 将本次 checkout 的 core 安装到指定 rootfs
-│   └── backup-personal.sh    # 个人配置迁移脚本，生成的备份不入库
-├── .github/workflows/        # 精简 App、独立初装镜像与 Deck 构建
-└── docs/
-    ├── ARCHITECTURE.md        # 两种运行栈与共享核心
-    └── DEVELOPMENT.md         # 开发、构建与迁移说明
-```
-
-初装镜像从本仓库的 `core/` 构建，并记录来源提交、配套组件及校验信息。镜像构建与频繁的 App 构建独立；镜像 Release 不占用 App 的 latest 发布入口。桌面和 Android 界面的修改仍可放在同一个提交中。
-
-## 开发与维护
-
-开发命令、云端工作流、镜像放置位置及 Git 历史迁移方式见[开发指南](docs/DEVELOPMENT.md)，六大维护通道与发版规范见[维护总览手册](docs/MAINTENANCE.md)，已有进度见[交接记录](docs/HANDOFF.md)，APK 保留与历史发行版见[版本与备份](docs/VERSIONS.md)。原独立 App 仓库已合并入本仓并清理删除，后续所有开发与发布统一在本仓库进行。
-
-## 个人配置
-
-个人换机迁移可使用 `scripts/backup-personal.sh`。API Key、Token、账号数据库及个人备份不应提交到仓库；生成的个人备份已加入忽略规则。
-
-## 许可证与致谢
-
-共享核心、Termux 运行时与 Deck 沿用根目录的 [MIT License](LICENSE)。`apps/android/` 基于 [Tiny Container](https://github.com/Cateners/tiny_container)，沿用其 [GPL-3.0 许可及文件声明](apps/android/COPYING)。第三方库、主题、字体和工具保留各自许可，详见[许可证说明](LICENSES.md)。
-
-感谢 [Omarchy](https://github.com/basecamp/omarchy)、[Tiny Container](https://github.com/Cateners/tiny_container)、[Termux:X11](https://github.com/termux/termux-x11)、[PRoot](https://github.com/proot-me/proot)、Sway、wlroots 及相关开源项目。
+Thank you to [Omarchy](https://github.com/basecamp/omarchy) for the desktop inspiration, [Tiny Container](https://github.com/Cateners/tiny_container) for the Android container foundation, [Termux:X11](https://github.com/termux/termux-x11), [PRoot](https://github.com/proot-me/proot), [Sway](https://github.com/swaywm/sway), [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots), and their contributors.

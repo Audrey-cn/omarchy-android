@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
+import com.fct.tc4.R
 import com.fct.tc4.ui.misc.Global
 import com.fct.tc4.ui.page.DesktopSetupActivity
 import java.io.File
@@ -46,7 +47,7 @@ class DesktopInstallService : Service() {
         super.onCreate()
         InitialDesktopState.load(this)
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL, "桌面安装", NotificationManager.IMPORTANCE_LOW))
+            NotificationChannel(CHANNEL, getString(R.string.omarchy_setup_install_channel), NotificationManager.IMPORTANCE_LOW))
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = synchronized(controlLock) {
         // Keep the new id and acceptance atomic with worker idle/stopSelf finalization.
@@ -83,7 +84,7 @@ class DesktopInstallService : Service() {
         else startForeground(NOTICE, notice)
     }
     private fun cancellingState() = InitialDesktopState.state.value.copy(
-        phase = SetupPhase.VERIFYING, message = "正在清理已取消的安装缓存…", bytesPerSecond = 0)
+        phase = SetupPhase.VERIFYING, message = getString(R.string.omarchy_setup_cleaning_cache), bytesPerSecond = 0)
     private fun performCancellation() {
         try { publish(cancellingState()) }
         catch (error: Exception) { Log.e("InitialDesktop", "Cancellation progress could not be saved: ${error.javaClass.simpleName}") }
@@ -96,14 +97,14 @@ class DesktopInstallService : Service() {
         catch (error: Exception) {
             Log.e("InitialDesktop", "Initial installation stopped: ${error.javaClass.simpleName}")
             val message = when {
-                error.message?.contains("space", true) == true -> "存储空间不足。请释放空间后重试，已有数据未改动。"
-                error.message?.contains("existing", true) == true -> "检测到已有桌面，为保护数据已停止首次安装。"
-                else -> "下载或安装未完成。已保留可恢复的进度，请继续或重新选择离线镜像。"
+                error.message?.contains("space", true) == true -> getString(R.string.omarchy_setup_insufficient_space)
+                error.message?.contains("existing", true) == true -> getString(R.string.omarchy_setup_existing_desktop)
+                else -> getString(R.string.omarchy_setup_incomplete)
             }
             try {
                 if (!cancel.get()) publish(InitialDesktopState.state.value.copy(
                     phase = if (pause.get() && !installing) SetupPhase.PAUSED else SetupPhase.FAILED,
-                    message = if (pause.get() && !installing) "已暂停，重新打开应用后可继续。" else message, bytesPerSecond = 0))
+                    message = if (pause.get() && !installing) getString(R.string.omarchy_setup_paused) else message, bytesPerSecond = 0))
             } catch (persistenceError: Exception) {
                 Log.e("InitialDesktop", "Installation state could not be saved: ${persistenceError.javaClass.simpleName}")
             }
@@ -126,8 +127,8 @@ class DesktopInstallService : Service() {
         val downloads = File(root, "downloads")
         var downloadSource = ""
         val downloader = ResumableImageDownloader(onSource = { index, total ->
-            downloadSource = "镜像来源 $index / $total"
-            publish(InitialDesktopState.state.value.copy(message = "$downloadSource · 正在连接…"))
+            downloadSource = getString(R.string.omarchy_setup_source, index, total)
+            publish(InitialDesktopState.state.value.copy(message = getString(R.string.omarchy_setup_connecting, downloadSource)))
         })
         val imports = InitialImageImportCache(File(root, "imports"))
         val installer = InitialDesktopInstaller(this)
@@ -136,7 +137,7 @@ class DesktopInstallService : Service() {
         var imported: File? = null
         var offline = importUri != null
         var offset = 0L
-        publish(DesktopSetupState(SetupPhase.VERIFYING, spec, message = "正在检查此前安装进度…", importUri = importUri?.toString()))
+        publish(DesktopSetupState(SetupPhase.VERIFYING, spec, message = getString(R.string.omarchy_setup_checking_progress), importUri = importUri?.toString()))
         val recovered = installer.recoverOrCheckSpace(spec) {
             InitialImageImportCache.discardLegacyCopies(root)
             imported = imports.recover(spec)
@@ -147,7 +148,7 @@ class DesktopInstallService : Service() {
         if (recovered != null) {
             // Publication already committed; a late cancel may only clean caches, never undo completion.
             synchronized(controlLock) { installing = true }
-            publish(DesktopSetupState(SetupPhase.COMPLETE, spec, spec.bytes, "桌面安装完成，可以启动。"))
+            publish(DesktopSetupState(SetupPhase.COMPLETE, spec, spec.bytes, getString(R.string.omarchy_setup_complete)))
             cleanCompletedCache(spec, downloads, imports)
             return
         }
@@ -157,7 +158,7 @@ class DesktopInstallService : Service() {
             val elapsed = (SystemClock.elapsedRealtime() - started).coerceAtLeast(1)
             val speed = ((count - offset).coerceAtLeast(0) * 1000 / elapsed)
             val state = DesktopSetupState(if (offline) SetupPhase.IMPORTING else SetupPhase.DOWNLOADING,
-                spec, count, if (count == spec.bytes) "正在校验镜像完整性…" else if (offline) "正在读取本地镜像…" else downloadSource, speed, importUri?.toString())
+                spec, count, if (count == spec.bytes) getString(R.string.omarchy_setup_verifying_image) else if (offline) getString(R.string.omarchy_setup_reading_local) else downloadSource, speed, importUri?.toString())
             InitialDesktopState.update(this, state)
             val now = SystemClock.elapsedRealtime()
             if (now - lastNotice > 1000) { notify(state); lastNotice = now }
@@ -176,7 +177,7 @@ class DesktopInstallService : Service() {
                         it is java.net.SocketException || it is java.net.SocketTimeoutException || it is java.net.UnknownHostException || it is RetryableImageResponse
                     }
                     if (!networkError || attempts++ >= 2 || pause.get()) throw e
-                    publish(InitialDesktopState.state.value.copy(message = "网络或镜像服务暂时不可用，正在重试，已下载内容会保留。"))
+                    publish(InitialDesktopState.state.value.copy(message = getString(R.string.omarchy_setup_network_retry)))
                     val retryDelay = (e as? RetryableImageResponse)?.retryAfterSeconds?.coerceIn(1, 5) ?: 3L
                     repeat((retryDelay * 10).toInt()) { if (!pause.get()) Thread.sleep(100) }
                 }
@@ -184,17 +185,17 @@ class DesktopInstallService : Service() {
             result
         }
         if (archive == null || pause.get()) {
-            publish(InitialDesktopState.state.value.copy(phase = SetupPhase.PAUSED, message = "已暂停，重新打开应用后可继续。", bytesPerSecond = 0))
+            publish(InitialDesktopState.state.value.copy(phase = SetupPhase.PAUSED, message = getString(R.string.omarchy_setup_paused), bytesPerSecond = 0))
             return
         }
-        publish(InitialDesktopState.state.value.copy(phase = SetupPhase.VERIFYING, downloaded = spec.bytes, message = "正在校验并准备安装…", bytesPerSecond = 0))
+        publish(InitialDesktopState.state.value.copy(phase = SetupPhase.VERIFYING, downloaded = spec.bytes, message = getString(R.string.omarchy_setup_preparing_install), bytesPerSecond = 0))
         val begin = synchronized(controlLock) {
             if (pause.get()) false else { installing = true; true }
         }
         if (!begin) { publish(InitialDesktopState.state.value.copy(phase = SetupPhase.PAUSED, downloaded = spec.bytes)); return }
-        publish(InitialDesktopState.state.value.copy(phase = SetupPhase.INSTALLING, downloaded = spec.bytes, message = "正在解压和配置桌面，请稍候…"))
+        publish(InitialDesktopState.state.value.copy(phase = SetupPhase.INSTALLING, downloaded = spec.bytes, message = getString(R.string.omarchy_setup_extracting)))
         installer.install(spec, archive)
-        publish(DesktopSetupState(SetupPhase.COMPLETE, spec, spec.bytes, "桌面安装完成，可以启动。"))
+        publish(DesktopSetupState(SetupPhase.COMPLETE, spec, spec.bytes, getString(R.string.omarchy_setup_complete)))
         cleanCompletedCache(spec, downloads, imports)
     }
     private fun cleanCompletedCache(spec: ImageSpec, downloads: File, imports: InitialImageImportCache) {
@@ -219,23 +220,23 @@ class DesktopInstallService : Service() {
         clean { InitialImageImportCache.discardLegacyCopies(root) }
         clean { InitialDesktopInstaller(this).discardInterruptedStages() }
         publish(if (failed) state.copy(phase = SetupPhase.FAILED, bytesPerSecond = 0,
-            message = "部分安装缓存未能清理，请重新打开应用后重试取消。")
-            else DesktopSetupState(message = "下载已取消，已有桌面数据未改动。"))
+            message = getString(R.string.omarchy_setup_cleanup_failed))
+            else DesktopSetupState(message = getString(R.string.omarchy_setup_cancelled)))
     }
     private fun publish(state: DesktopSetupState) { InitialDesktopState.update(this, state); notify(state) }
     private fun notify(state: DesktopSetupState) { getSystemService(NotificationManager::class.java).notify(NOTICE, notification(state)) }
     private fun notification(state: DesktopSetupState): Notification {
         val open = PendingIntent.getActivity(this, 1, Intent(this, DesktopSetupActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Omarchy 桌面安装").setContentIntent(open).setOnlyAlertOnce(true)
-            .setContentText(state.message.ifEmpty { "下载进度已保存，可返回应用查看。" })
+            .setContentTitle(getString(R.string.omarchy_setup_notification_title)).setContentIntent(open).setOnlyAlertOnce(true)
+            .setContentText(state.message.ifEmpty { getString(R.string.omarchy_setup_progress_saved) })
             .setOngoing(state.phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.IMPORTING, SetupPhase.VERIFYING, SetupPhase.INSTALLING))
         val total = state.image?.bytes ?: 0
         if (total > 0 && state.phase == SetupPhase.DOWNLOADING) builder.setProgress(1000, (state.downloaded * 1000 / total).toInt(), false)
         else builder.setProgress(0, 0, state.phase == SetupPhase.INSTALLING || state.phase == SetupPhase.VERIFYING)
         if (state.phase == SetupPhase.DOWNLOADING) {
             val pauseIntent = PendingIntent.getService(this, 2, Intent(this, javaClass).setAction(PAUSE), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            builder.addAction(Notification.Action.Builder(null, "暂停", pauseIntent).build())
+            builder.addAction(Notification.Action.Builder(null, getString(R.string.omarchy_setup_pause_download), pauseIntent).build())
         }
         return builder.build()
     }

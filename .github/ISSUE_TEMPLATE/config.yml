@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
-  - name: 获取帮助或提问
+  - name: Search existing issues / 搜索已有问题
     url: https://github.com/Audrey-cn/omarchy-android/issues
-    about: 请在统一仓库中检索已有问题，或通过问题模板报告。
+    about: Find existing reports and suggestions before opening a new issue. 提交前请先查找已有报告与建议。

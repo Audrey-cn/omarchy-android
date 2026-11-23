@@ -1,82 +1,55 @@
-name: Bug 报告
-description: 报告软件异常行为（提交前请阅读所有说明文字）
+name: Bug report / 问题报告
+description: Report a reproducible problem with the app, desktop or runtime / 报告可复现的问题
 title: "[Bug] "
-labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        **必读须知：**
-        - 请先搜索[所有issue](https://github.com/Audrey-cn/omarchy-android/issues?q=is%3Aissue)，**相同问题重复提交会被直接关闭**
-        - 请先自查[常见使用问题](https://gitee.com/caten/tc-hints/blob/master/pool/faq.md)，是否能解决你的问题（虽然是小小电脑的文档。呃，希望有帮助吧）
-        - 本模板中的每项要求都有其特定原因，请完整填写
-
+        Thanks for helping improve Omarchy Android. Search existing issues first and include the details you have. Text steps are welcome; do not clear your desktop or reinstall just to submit a report.
+        感谢反馈。请先搜索已有问题，尽量提供以下信息；文字步骤即可，无需为了报告而清数据或重装。请删除日志中的密钥、令牌、账号和私人路径。
+  - type: dropdown
+    id: route
+    attributes:
+      label: Runtime route / 运行路线
+      options:
+        - Rootless Android app / 免 Root 一体 App
+        - Root chroot + external Termux:X11 / Root chroot + 外部 Termux:X11
+        - External Termux PRoot (+ optional Deck) / 外部 Termux PRoot（可选 Deck）
+        - Not sure / 不确定
+    validations:
+      required: true
   - type: input
     id: device
     attributes:
-      label: "设备型号"
-      description: |
-        **为什么需要这个信息？**
-        许多Bug与设备强相关，例如：
-        - 不同设备的显示、输入和后台运行限制可能不同
-        - 鸿蒙4缺少无线调试选项
-      placeholder: "品牌+具体型号"
+      label: Device and Android version / 设备与 Android 版本
+      placeholder: "Redmi K20 Pro; Android 11; vendor ROM/build; ARM64; rooted or rootless"
     validations:
       required: true
-
-  - type: input
-    id: os-version
-    attributes:
-      label: "操作系统版本"
-      description: |
-        **为什么需要这个信息？**
-        Android各版本存在兼容性差异
-      placeholder: "完整系统名称+版本号"
-    validations:
-      required: true
-
-  - type: input
-    id: app-version
-    attributes:
-      label: "Omarchy Android版本"
-      description: |
-        **为什么需要这个信息？**
-        1. 旧版问题可能已在新版修复（请始终使用最新版）
-        2. 一体包、Deck 辅助 APK 和 Termux 部署方式可能有不同表现
-        **如果不是最新版，请做好问题被忽略的准备**
-      placeholder: "版本号或提交号 + 一体包 / Deck / Termux 部署"
-    validations:
-      required: true
-
-  - type: dropdown
-    id: is-latest
-    attributes:
-      label: "是否最新版？"
-      options:
-        - "是"
-        - "否"
-    validations:
-      required: true
-
   - type: textarea
-    id: why-not-latest
+    id: versions
     attributes:
-      label: "若非最新版，必须说明不使用最新版的原因"
-      placeholder: "详细解释原因..."
-
+      label: Versions and installation source / 版本与安装来源
+      description: APK version or source commit; initial image ID; desktop/runtime component versions if known. Say whether this is an official build, a fork or a local build.
+      placeholder: "APK: …\nImage ID: …\nComponents: …\nDownload/build source: …"
+    validations:
+      required: true
   - type: textarea
     id: steps
     attributes:
-      label: "重现问题的操作过程"
-      description: |
-        **请注意：**
-        请提供从启动软件开始到问题发生的**完整屏幕录制视频**，而不要使用文字描述或截图，因为根据以往的issue来看，用户的描述会遗漏可能的细节。
-        由于Linux环境的复杂性，任何操作细节（如权限、环境配置等）都可能影响问题的重现。确保你的问题在新安装的Omarchy Android上可以复现。
+      label: Steps to reproduce / 复现步骤
+      description: Include the starting state and any relevant settings, keyboard or IME. Tell us if it happens every time or intermittently.
+      placeholder: "1. Open …\n2. Tap/run …\n3. Observe …"
     validations:
       required: true
-
-  - type: markdown
+  - type: textarea
+    id: result
     attributes:
-      value: |
-        **问题优先级说明：**
-        Omarchy Android本身的问题会得到重视。如果是其他问题，尤其是第三方软件或Linux本身的使用方法等，请在[discussion](https://github.com/Audrey-cn/omarchy-android/issues)区发布讨论
+      label: Expected and actual behavior / 预期与实际结果
+      description: Paste exact errors when available. If this is a regression, include the last version that worked.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots or recording / 日志、截图或录屏
+      description: Attach relevant evidence if available and redact private data. Include what you already tried; a recording is optional.

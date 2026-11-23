@@ -1,0 +1,51 @@
+name: Feature request / 功能建议
+description: Propose a focused improvement, theme, package or runtime change / 提出功能、主题、软件包或运行时改进
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share the task you want to accomplish and how this improvement would help. Search existing requests first. Experiments in forks are welcome.
+        请先搜索已有建议，并说明你想完成什么、目前遇到什么困难。欢迎提供 Fork 中的实验或原型。
+  - type: textarea
+    id: need
+    attributes:
+      label: User need / 使用需求
+      description: What are you trying to do? Who would benefit, and what currently gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior / 期望的功能
+      description: Give a concrete example. For a package, theme or distribution, include its upstream source and license if known.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area / 涉及范围
+      multiple: true
+      options:
+        - Android app and input / Android App 与输入
+        - Desktop, themes and shortcuts / 桌面、主题与快捷键
+        - App packages and installers / 软件包与安装器
+        - Device or runtime compatibility / 设备与运行时兼容性
+        - Another distribution / 其他发行版
+        - Documentation and translation / 文档与翻译
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and context / 替代方案与背景
+      description: Include existing workarounds, relevant device/runtime details, references or screenshots. Explain tradeoffs you already know about.
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: How would you like to help? / 希望如何参与？
+      options:
+        - Share the idea / 提供建议
+        - Test a candidate / 参与测试
+        - Help with documentation or design / 参与文档或设计
+        - Submit a PR or fork prototype / 提交 PR 或 Fork 原型

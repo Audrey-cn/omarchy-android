@@ -1,0 +1,63 @@
+name: Device compatibility report / 设备兼容报告
+description: Share what works and what fails on your phone, foldable or tablet / 分享设备实测结果
+title: "[Device] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Both successful and unsuccessful results help. Report only what you tested; use “not tested” for everything else. A compatibility report describes this device and build, not all models or Android versions.
+        成功和失败都值得记录。请只填写实际测试过的内容，其余写“未测”；结果只代表所列设备与构建。请先清除证据中的个人信息。
+  - type: input
+    id: device
+    attributes:
+      label: Manufacturer and exact model / 厂商与完整型号
+      placeholder: "Redmi K20 Pro (raphael); RAM/storage if relevant"
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android, vendor OS and root status / Android、厂商系统与 Root 状态
+      placeholder: "Android version; ROM/build; rootless or rooted"
+    validations:
+      required: true
+  - type: dropdown
+    id: route
+    attributes:
+      label: Tested route / 测试路线
+      options:
+        - Rootless Android app / 免 Root 一体 App
+        - Root chroot + external Termux:X11 / Root chroot + 外部 Termux:X11
+        - External Termux PRoot (+ optional Deck) / 外部 Termux PRoot（可选 Deck）
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Tested versions and install method / 测试版本与安装方式
+      description: Include APK/source commit, image ID and component versions when known. State fresh online install, offline import, or upgrade; include the previous version for an upgrade.
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Observed results / 实测结果
+      description: Mark each item PASS, FAIL or NOT TESTED and add observations. Include exact errors or settings needed to make a feature work.
+      value: |
+        - Install/import:
+        - Desktop startup and restart:
+        - Display, rotation and scaling:
+        - Touch and floating keyboard:
+        - Android IME / Chinese or voice input:
+        - External keyboard / Super and Alt shortcuts:
+        - Network and browser:
+        - Audio / microphone:
+        - Background / battery behavior:
+        - Upgrade and data preservation:
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and workarounds / 证据与解决办法
+      description: Attach screenshots, redacted logs, commands or repeatable steps. Note test duration and any untested paths. Use a separate bug report for a problem needing detailed investigation and link it here.

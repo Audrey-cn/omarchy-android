@@ -12,6 +12,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
@@ -47,6 +48,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import com.fct.tc4.R
 import com.termux.x11.MainActivity as X11Activity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -65,6 +67,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Native in-process Omarchy overlay attached directly to com.termux.x11.MainActivity.
@@ -107,6 +110,7 @@ object OmarchyX11Overlay {
                 if (activity is X11Activity) {
                     val ctrl = controllers.getOrPut(activity) { Controller(activity) }
                     ctrl.attachIfNeeded()
+                    ctrl.refreshOnboardingIfVisible()
                 }
             }
             override fun onActivityPaused(activity: Activity) {}
@@ -240,29 +244,34 @@ object OmarchyX11Overlay {
             canvas.drawCircle(targetX, targetY, ringRadius, glowPaint)
             canvas.drawCircle(targetX, targetY, ringRadius, ringPaint)
 
-            // Curved arrow from card toward target ring
-            val ctrlX = (fromX + targetX) * 0.5f
-            val ctrlY = min(fromY, targetY) - 40f
+            // Stop outside the spotlight and use the curve tangent for a smooth, pointed head.
+            val dx = targetX - fromX
+            val dy = targetY - fromY
+            val distance = sqrt(dx * dx + dy * dy).coerceAtLeast(1f)
+            val gap = ringRadius + 6f * resources.displayMetrics.density
+            val endX = targetX - dx / distance * gap
+            val endY = targetY - dy / distance * gap
+            val ctrlX = (fromX + endX) * 0.5f
+            val ctrlY = fromY + (endY - fromY) * 0.18f
             val path = Path().apply {
                 moveTo(fromX, fromY)
-                quadTo(ctrlX, ctrlY, targetX, targetY + if (targetY < fromY) ringRadius + 10f else -(ringRadius + 10f))
+                quadTo(ctrlX, ctrlY, endX, endY)
             }
             canvas.drawPath(path, arrowPaint)
 
-            val endY = targetY + if (targetY < fromY) ringRadius + 10f else -(ringRadius + 10f)
-            val angle = atan2((endY - ctrlY).toDouble(), (targetX - ctrlX).toDouble())
-            val headLen = 24f
+            val angle = atan2((endY - ctrlY).toDouble(), (endX - ctrlX).toDouble())
+            val headLen = 9f * resources.displayMetrics.density
             val a1 = angle - Math.toRadians(30.0)
             val a2 = angle + Math.toRadians(30.0)
             canvas.drawLine(
-                targetX, endY,
-                targetX - (headLen * cos(a1)).toFloat(),
+                endX, endY,
+                endX - (headLen * cos(a1)).toFloat(),
                 endY - (headLen * sin(a1)).toFloat(),
                 arrowPaint
             )
             canvas.drawLine(
-                targetX, endY,
-                targetX - (headLen * cos(a2)).toFloat(),
+                endX, endY,
+                endX - (headLen * cos(a2)).toFloat(),
                 endY - (headLen * sin(a2)).toFloat(),
                 arrowPaint
             )
@@ -375,6 +384,9 @@ object OmarchyX11Overlay {
         private var onboardingStatus: View? = null
         private var onboardingProbeJob: Job? = null
         private var onboardingReadiness: OnboardingReadiness? = null
+        private var currentOnboardingStep: Int? = null
+        private var selectedOnboardingScale: String? = null
+        private var onboardingScaleInitialized = false
         private var oskView: View? = null
         private var imeAnchor: EditText? = null
 
@@ -516,6 +528,7 @@ object OmarchyX11Overlay {
             expandedDockView = null
             quickMenuOverlay = null
             onboardingOverlay = null
+            currentOnboardingStep = null
             oskView = null
             imeAnchor = null
             netExec.shutdownNow()
@@ -608,6 +621,8 @@ object OmarchyX11Overlay {
             }
         }
 
+        private fun s(id: Int, vararg args: Any): String = activity.getString(id, *args)
+
         private fun sendCmd(cmd: String) = sendJson("""{"type":"cmd","cmd":"$cmd"}""")
 
         private fun sendKey(key: String) {
@@ -686,6 +701,7 @@ object OmarchyX11Overlay {
                 background = makeEdgeTabBg(dockedRight)
                 elevation = dp(14).toFloat()
                 alpha = 0.78f
+                contentDescription = s(R.string.omarchy_overlay_handle)
             }
             val chevron = VectorIconView(
                 activity,
@@ -842,6 +858,14 @@ object OmarchyX11Overlay {
                     if (highlightBg) {
                         background = makeRounded("#2E414868", "#447aa2f7", 14, 1)
                     }
+                    contentDescription = s(when (kind) {
+                        VectorKind.KEYBOARD -> R.string.omarchy_overlay_keyboard_toggle
+                        VectorKind.MIC -> R.string.omarchy_overlay_voice_ime
+                        VectorKind.ORIENT_PORT -> R.string.omarchy_overlay_lock_portrait
+                        VectorKind.ORIENT_LAND -> R.string.omarchy_overlay_lock_landscape
+                        VectorKind.SETTINGS -> R.string.omarchy_overlay_control_title
+                        else -> R.string.omarchy_overlay_dock_collapse
+                    })
                     setPadding(dp(9), dp(7), dp(9), dp(7))
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -975,13 +999,13 @@ object OmarchyX11Overlay {
             }
 
             card.addView(TextView(activity).apply {
-                text = "OMARCHY CONTROL"
+                text = s(R.string.omarchy_overlay_control_eyebrow)
                 textSize = 10.5f
                 letterSpacing = 0.14f
                 setTextColor(Color.parseColor("#7aa2f7"))
             })
             card.addView(TextView(activity).apply {
-                text = "Omarchy 控制中心"
+                text = s(R.string.omarchy_overlay_control_title)
                 textSize = 17.5f
                 setTextColor(Color.parseColor("#c0caf5"))
                 setPadding(0, dp(2), 0, dp(12))
@@ -1030,7 +1054,7 @@ object OmarchyX11Overlay {
                 card.addView(item)
             }
 
-            addMenuItem("Omarchy 统一设置与系统管理", "集中管理 X11 触控设置、存储权限、电池优化、音频与终端日志") {
+            addMenuItem(s(R.string.omarchy_overlay_settings_title), s(R.string.omarchy_overlay_settings_desc)) {
                 try {
                     val intent = Intent(activity, Class.forName("com.fct.tc4.ui.main.MainActivity")).apply {
                         addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
@@ -1039,26 +1063,26 @@ object OmarchyX11Overlay {
                 } catch (_: Exception) {}
             }
 
-            addMenuItem("快捷键一览（Super + K）", "查看 Omarchy 完整桌面快捷键与窗口平铺操作", "#7aa2f7") {
+            addMenuItem(s(R.string.omarchy_overlay_shortcuts_title), s(R.string.omarchy_overlay_shortcuts_desc), "#7aa2f7") {
                 sendCmd("keybindings")
             }
 
-            addMenuItem("更新与维护", "查看 App、Ubuntu 软件、桌面组件和第三方应用的更新", "#9ece6a") {
+            addMenuItem(s(R.string.omarchy_overlay_updates_title), s(R.string.omarchy_overlay_updates_desc), "#9ece6a") {
                 val updater = File(activity.dataDir, "omarchy/usr/local/bin/omarchy-updates")
                 if (updater.isFile || java.nio.file.Files.isSymbolicLink(updater.toPath())) sendCmd("updates")
                 else android.app.AlertDialog.Builder(activity)
-                    .setTitle("桌面组件更新")
-                    .setMessage("当前桌面尚未安装更新入口。请按发行说明显式安装桌面组件包，现有配置会保留。")
-                    .setPositiveButton("查看发行说明") { _, _ -> activity.startActivity(Intent(Intent.ACTION_VIEW,
+                    .setTitle(R.string.omarchy_overlay_update_missing_title)
+                    .setMessage(R.string.omarchy_overlay_update_missing_desc)
+                    .setPositiveButton(R.string.omarchy_overlay_release_notes) { _, _ -> activity.startActivity(Intent(Intent.ACTION_VIEW,
                         Uri.parse("https://github.com/Audrey-cn/omarchy-android/releases"))) }
-                    .setNegativeButton("返回", null).show()
+                    .setNegativeButton(R.string.tc4_btn_back, null).show()
             }
 
-            addMenuItem("当前窗口：浮动 / 平铺", "切换当前 Linux 窗口的布局，保留窗口内容", "#7aa2f7") {
+            addMenuItem(s(R.string.omarchy_overlay_floating_title), s(R.string.omarchy_overlay_floating_desc), "#7aa2f7") {
                 sendJson("""{"type":"key","key":"t","super":true}""")
             }
 
-            addMenuItem("当前窗口：全屏 / 恢复", "切换当前 Linux 窗口的全屏状态", "#7aa2f7") {
+            addMenuItem(s(R.string.omarchy_overlay_fullscreen_title), s(R.string.omarchy_overlay_fullscreen_desc), "#7aa2f7") {
                 fullscreenActive = !fullscreenActive
                 refreshFullscreenButton()
                 sendCmd("fullscreen")
@@ -1066,9 +1090,9 @@ object OmarchyX11Overlay {
 
             val doubaoReady = isDoubaoInstalled()
             addMenuItem(
-                if (doubaoReady) "切换系统输入法（已安装豆包输入法）" else "推荐安装豆包输入法（语音 + 中文）",
-                if (doubaoReady) "一键调起输入法选择器，设为豆包后点手柄话筒直通桌面"
-                else "搭配豆包输入法可实现离线高精度中文语音直入 Linux 应用",
+                if (doubaoReady) s(R.string.omarchy_overlay_ime_installed_title) else s(R.string.omarchy_overlay_ime_install_title),
+                if (doubaoReady) s(R.string.omarchy_overlay_ime_installed_desc)
+                else s(R.string.omarchy_overlay_ime_install_desc),
                 if (doubaoReady) "#9ece6a" else "#e0af68"
             ) {
                 if (doubaoReady) openInputMethodPicker()
@@ -1076,14 +1100,14 @@ object OmarchyX11Overlay {
             }
 
             addMenuItem(
-                if (isLandscapeNow()) "切换并锁定为竖屏模式" else "切换并锁定为横屏模式",
-                "竖屏调出输入法时自动缩放桌面，不再遮挡终端与输入框",
+                if (isLandscapeNow()) s(R.string.omarchy_overlay_lock_portrait) else s(R.string.omarchy_overlay_lock_landscape),
+                s(R.string.omarchy_overlay_orientation_desc),
                 "#7aa2f7"
             ) {
                 toggleOrientationLock()
             }
 
-            addMenuItem("查看新手引导", "重播箭头指引教程（缩放、悬浮手柄、Super+K、豆包输入法）", "#a9b1d6") {
+            addMenuItem(s(R.string.omarchy_overlay_replay_title), s(R.string.omarchy_overlay_replay_desc), "#a9b1d6") {
                 waitForOnboardingDesktop()
             }
 
@@ -1104,6 +1128,8 @@ object OmarchyX11Overlay {
         private fun waitForOnboardingDesktop() {
             cancelOnboardingProbe()
             hideOnboarding()
+            selectedOnboardingScale = null
+            onboardingScaleInitialized = false
             val readiness = OnboardingReadiness(SystemClock.elapsedRealtime())
             onboardingReadiness = readiness
             showOnboardingStatus(timedOut = false)
@@ -1160,7 +1186,7 @@ object OmarchyX11Overlay {
                 elevation = dp(12).toFloat()
             }
             card.addView(TextView(activity).apply {
-                text = if (timedOut) "桌面启动时间较长，请重新检测或暂时跳过引导。" else "正在等待桌面和顶部状态栏启动…"
+                text = if (timedOut) s(R.string.omarchy_onboarding_wait_timeout) else s(R.string.omarchy_onboarding_waiting)
                 setTextColor(Color.parseColor("#c0caf5"))
                 textSize = 13f
                 accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
@@ -1168,11 +1194,11 @@ object OmarchyX11Overlay {
             if (timedOut) {
                 val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER }
                 actions.addView(
-                    makeBarBtn("重试检测", true, ::waitForOnboardingDesktop),
+                    makeBarBtn(s(R.string.omarchy_onboarding_retry), true, ::waitForOnboardingDesktop),
                     LinearLayout.LayoutParams(dp(84), dp(44)).apply { marginEnd = dp(8) }
                 )
                 actions.addView(
-                    makeBarBtn("暂时跳过", false, ::cancelOnboardingProbe),
+                    makeBarBtn(s(R.string.omarchy_onboarding_skip_for_now), false, ::cancelOnboardingProbe),
                     LinearLayout.LayoutParams(dp(84), dp(44))
                 )
                 card.addView(actions)
@@ -1200,6 +1226,38 @@ object OmarchyX11Overlay {
         private fun hideOnboarding() {
             onboardingOverlay?.let { overlayHost?.removeView(it) }
             onboardingOverlay = null
+            currentOnboardingStep = null
+        }
+
+        fun refreshOnboardingIfVisible() {
+            val step = currentOnboardingStep ?: return
+            if (onboardingOverlay != null && step == 3) showOnboardingStep(step)
+        }
+
+        private fun readSavedOnboardingScale(): String? {
+            return try {
+                val file = File(activity.dataDir, "omarchy/root/.config/omarchy/display-scale")
+                if (!file.isFile || file.length() !in 1L..32L) return null
+                // Bound the read as well as the initial size check in case the file changes.
+                val bytes = ByteArray(33)
+                val size = file.inputStream().use { input ->
+                    var total = 0
+                    while (total < bytes.size) {
+                        val count = input.read(bytes, total, bytes.size - total)
+                        if (count <= 0) break
+                        total += count
+                    }
+                    total
+                }
+                if (size !in 1..32) return null
+                val scale = String(bytes, 0, size, Charsets.US_ASCII).trim().toBigDecimalOrNull()
+                    ?: return null
+                listOf("1.0", "1.25", "1.5", "1.75").firstOrNull {
+                    scale.compareTo(it.toBigDecimal()) == 0
+                }
+            } catch (_: Exception) {
+                null
+            }
         }
 
         private fun onboardingProgress() = OnboardingProgress(
@@ -1226,6 +1284,7 @@ object OmarchyX11Overlay {
         private fun showOnboardingStep(step: Int) {
             val host = overlayHost ?: return
             hideOnboarding()
+            currentOnboardingStep = step
 
             val w = host.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
             val h = host.height.takeIf { it > 0 } ?: activity.resources.displayMetrics.heightPixels
@@ -1234,11 +1293,9 @@ object OmarchyX11Overlay {
                 setBackgroundColor(Color.parseColor("#88000000"))
                 isClickable = true
             }
-
             val arrowView = GuideArrowOverlay(activity)
             root.addView(arrowView, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
             ))
 
             val card = LinearLayout(activity).apply {
@@ -1247,82 +1304,190 @@ object OmarchyX11Overlay {
                 setPadding(dp(18), dp(16), dp(18), dp(16))
                 elevation = dp(20).toFloat()
             }
-
-            // Header row: step badge + Skip button
             val header = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 0, 0, dp(8))
+                setPadding(0, 0, 0, dp(12))
             }
+            val dots = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                contentDescription = s(R.string.omarchy_onboarding_step, step + 1, 4)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            }
+            repeat(4) { index ->
+                dots.addView(View(activity).apply {
+                    background = GradientDrawable().apply {
+                        setColor(Color.parseColor(if (index == step) "#7AA2F7" else "#414868"))
+                        cornerRadius = dp(4).toFloat()
+                    }
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(dp(if (index == step) 24 else 7), dp(7)).apply {
+                    marginEnd = dp(6)
+                })
+            }
+            header.addView(dots, LinearLayout.LayoutParams(0, dp(28), 1f))
             header.addView(TextView(activity).apply {
-                text = "新手引导  ${step + 1} / 4"
+                text = s(R.string.omarchy_onboarding_skip)
                 textSize = 12f
-                setTextColor(Color.parseColor("#9ece6a"))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            header.addView(TextView(activity).apply {
-                text = "跳过引导"
-                textSize = 12f
+                gravity = Gravity.CENTER
+                minHeight = dp(48)
                 setTextColor(Color.parseColor("#9aa5ce"))
-                setPadding(dp(8), dp(4), dp(4), dp(4))
+                setPadding(dp(12), 0, dp(4), 0)
                 setOnClickListener { closeOnboarding(OnboardingExit.SKIP) }
             })
             card.addView(header)
 
+            fun addTitle(id: Int) {
+                card.addView(TextView(activity).apply {
+                    text = s(id)
+                    textSize = 16.5f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(Color.parseColor("#7aa2f7"))
+                    setPadding(0, 0, 0, dp(8))
+                })
+            }
+            fun addBody(id: Int) {
+                card.addView(TextView(activity).apply {
+                    text = s(id)
+                    textSize = 13f
+                    setTextColor(Color.parseColor("#c0caf5"))
+                    setPadding(0, 0, 0, dp(14))
+                })
+            }
+
             when (step) {
                 0 -> {
-                    // Step 1: Describe the guest's Monitor icon without guessing its position.
-                    card.addView(TextView(activity).apply {
-                        text = "① 屏幕缩放与显示（默认 1.5x）"
-                        textSize = 16.5f
-                        setTextColor(Color.parseColor("#7aa2f7"))
-                        setPadding(0, 0, 0, dp(6))
-                    })
-                    card.addView(TextView(activity).apply {
-                        text = "已针对手机和平板预设 1.5 倍清晰缩放。\n随时点击桌面顶部状态栏的「显示器图标」，即可按个人习惯自由调节 0.85x ~ 2.0x 缩放比例。"
-                        textSize = 13f
-                        setTextColor(Color.parseColor("#c0caf5"))
-                        setPadding(0, 0, 0, dp(14))
-                    })
-                    arrowView.showArrow = false
+                    addTitle(R.string.omarchy_onboarding_scale_title)
+                    addBody(R.string.omarchy_onboarding_scale_desc)
+                    if (!onboardingScaleInitialized) {
+                        selectedOnboardingScale = readSavedOnboardingScale()
+                        onboardingScaleInitialized = true
+                    }
+                    val scales = listOf(
+                        "1.0" to R.string.omarchy_onboarding_scale_100,
+                        "1.25" to R.string.omarchy_onboarding_scale_125,
+                        "1.5" to R.string.omarchy_onboarding_scale_150,
+                        "1.75" to R.string.omarchy_onboarding_scale_175
+                    )
+                    val scaleRow = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
+                    val scaleButtons = mutableListOf<Pair<String, Button>>()
+                    fun refreshScaleButtons() {
+                        scaleButtons.forEach { (value, button) ->
+                            val active = value == selectedOnboardingScale
+                            button.isSelected = active
+                            button.setTextColor(Color.parseColor(if (active) "#1a1b26" else "#c0caf5"))
+                            button.background = makeRounded(
+                                if (active) "#7aa2f7" else "#CC24283b",
+                                if (active) "#7aa2f7" else "#414868", 10, 1
+                            )
+                        }
+                    }
+                    scales.forEachIndexed { index, (value, label) ->
+                        val button = makeBarBtn(s(label), value == selectedOnboardingScale) {
+                            selectedOnboardingScale = value
+                            refreshScaleButtons()
+                            sendCmd("scale_$value")
+                        }.apply {
+                            textSize = 12f
+                            setPadding(dp(2), 0, dp(2), 0)
+                        }
+                        scaleButtons.add(value to button)
+                        scaleRow.addView(button, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                            if (index < scales.lastIndex) marginEnd = dp(6)
+                        })
+                    }
+                    refreshScaleButtons()
+                    card.addView(scaleRow, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                    ).apply { bottomMargin = dp(14) })
+                    arrowView.showArrow = true
+                    arrowView.targetX = w * 0.79f
+                    arrowView.targetY = dp(16).toFloat()
+                    arrowView.ringRadius = dp(14).toFloat()
                 }
                 1 -> {
-                    // Step 2: Point to Edge Floating Handle
-                    card.addView(TextView(activity).apply {
-                        text = "② 贴边悬浮手柄（免权限）"
-                        textSize = 16.5f
-                        setTextColor(Color.parseColor("#7aa2f7"))
-                        setPadding(0, 0, 0, dp(6))
-                    })
-                    card.addView(TextView(activity).apply {
-                        text = "屏幕边缘的小拉条平时自动贴边收起，支持一步直达手势：\n• 向内轻滑：一步直达豆包语音 / 中文输入\n• 双击拉条：一键呼出或收起透明悬浮键盘\n• 轻点拉条：展开快捷菜单（横竖屏锁定 / 控制中心）\n• 上下拖动：自由调整高度并自动吸附左/右边缘"
-                        textSize = 13f
-                        setTextColor(Color.parseColor("#c0caf5"))
-                        setPadding(0, 0, 0, dp(14))
-                    })
+                    addTitle(R.string.omarchy_onboarding_handle_title)
+                    addBody(R.string.omarchy_onboarding_handle_desc)
+                    listOf(
+                        R.string.omarchy_onboarding_swipe to R.string.omarchy_onboarding_voice_ime,
+                        R.string.omarchy_onboarding_double_tap to R.string.omarchy_onboarding_keyboard,
+                        R.string.omarchy_onboarding_tap to R.string.omarchy_onboarding_dock,
+                        R.string.omarchy_onboarding_drag to R.string.omarchy_onboarding_snap
+                    ).forEach { (gesture, action) ->
+                        val capsule = LinearLayout(activity).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            background = makeRounded("#CC24283b", "#414868", 22, 1)
+                            setPadding(dp(14), dp(10), dp(14), dp(10))
+                            minimumHeight = dp(44)
+                        }
+                        capsule.addView(TextView(activity).apply {
+                            text = s(gesture)
+                            textSize = 12.5f
+                            setTypeface(typeface, Typeface.BOLD)
+                            setTextColor(Color.parseColor("#7aa2f7"))
+                        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                        capsule.addView(TextView(activity).apply {
+                            text = s(action)
+                            textSize = 12f
+                            setTextColor(Color.parseColor("#c0caf5"))
+                        })
+                        card.addView(capsule, LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply { bottomMargin = dp(7) })
+                    }
                     arrowView.showArrow = true
                     arrowView.targetX = if (dockedRight) (w - dp(12)).toFloat() else dp(12).toFloat()
-                    arrowView.targetY = (h * dockYFraction).coerceIn(dp(60).toFloat(), (h - dp(60)).toFloat())
-                    arrowView.fromX = w * 0.68f
-                    arrowView.fromY = h * 0.56f
+                    arrowView.targetY = edgeTabView?.let { it.y + it.height / 2f }
+                        ?: (h * dockYFraction).coerceIn(dp(60).toFloat(), (h - dp(60)).toFloat())
                     arrowView.ringRadius = dp(28).toFloat()
                 }
                 2 -> {
-                    // Step 3: Super + K Shortcut Overview
-                    card.addView(TextView(activity).apply {
-                        text = "③ 掌握核心快捷键（Super + K）"
-                        textSize = 16.5f
-                        setTextColor(Color.parseColor("#7aa2f7"))
-                        setPadding(0, 0, 0, dp(6))
-                    })
-                    card.addView(TextView(activity).apply {
-                        text = "Omarchy 以高效键盘流为核心，记住这几个最常用组合：\n• Super + K ：打开完整快捷键速查表\n• Super + Space ：打开 6 列应用网格\n• Super + Enter ：打开 Alacritty 终端\n• Super + W ：关闭当前窗口"
-                        textSize = 13f
+                    addTitle(R.string.omarchy_onboarding_shortcuts_title)
+                    addBody(R.string.omarchy_onboarding_shortcuts_desc)
+                    fun keycap(id: Int): TextView = TextView(activity).apply {
+                        text = s(id)
+                        textSize = 11f
+                        gravity = Gravity.CENTER
+                        setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
                         setTextColor(Color.parseColor("#c0caf5"))
-                        setPadding(0, 0, 0, dp(10))
-                    })
-                    val previewBtn = Button(activity).apply {
-                        text = "立即预览 Super + K 快捷键表"
+                        background = makeRounded("#CC283457", "#7aa2f7", 6, 1)
+                        setPadding(dp(6), dp(5), dp(6), dp(5))
+                    }
+                    listOf(
+                        R.string.omarchy_key_k to R.string.omarchy_onboarding_shortcut_help,
+                        R.string.omarchy_key_space to R.string.omarchy_onboarding_shortcut_apps,
+                        R.string.omarchy_key_enter to R.string.omarchy_onboarding_shortcut_terminal,
+                        R.string.omarchy_key_w to R.string.omarchy_onboarding_shortcut_close
+                    ).forEach { (key, action) ->
+                        val row = LinearLayout(activity).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                        }
+                        row.addView(keycap(R.string.omarchy_key_super))
+                        row.addView(TextView(activity).apply {
+                            text = s(R.string.omarchy_onboarding_key_or)
+                            setTextColor(Color.parseColor("#9aa5ce"))
+                        })
+                        row.addView(keycap(R.string.omarchy_key_alt))
+                        row.addView(TextView(activity).apply {
+                            text = s(R.string.omarchy_onboarding_key_plus)
+                            setTextColor(Color.parseColor("#9aa5ce"))
+                        })
+                        row.addView(keycap(key))
+                        row.addView(TextView(activity).apply {
+                            text = s(action)
+                            textSize = 11.5f
+                            setTextColor(Color.parseColor("#c0caf5"))
+                            setPadding(dp(10), 0, 0, 0)
+                        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                        card.addView(row, LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply { bottomMargin = dp(9) })
+                    }
+                    card.addView(Button(activity).apply {
+                        text = s(R.string.omarchy_onboarding_preview_shortcuts)
                         isAllCaps = false
                         textSize = 12.5f
                         setTextColor(Color.parseColor("#7aa2f7"))
@@ -1331,20 +1496,12 @@ object OmarchyX11Overlay {
                             sendCmd("keybindings")
                             closeOnboarding(OnboardingExit.PREVIEW)
                         }
-                    }
-                    card.addView(previewBtn, LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT, dp(38)
+                    }, LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(44)
                     ).apply { bottomMargin = dp(10) })
                 }
                 else -> {
-                    // Step 4: Doubao IME + Essential Permissions
-                    card.addView(TextView(activity).apply {
-                        text = "④ 语音输入与推荐权限"
-                        textSize = 16.5f
-                        setTextColor(Color.parseColor("#7aa2f7"))
-                        setPadding(0, 0, 0, dp(8))
-                    })
-
+                    addTitle(R.string.omarchy_onboarding_permissions_title)
                     val doubaoReady = isDoubaoInstalled()
                     val imeBox = LinearLayout(activity).apply {
                         orientation = LinearLayout.VERTICAL
@@ -1355,19 +1512,18 @@ object OmarchyX11Overlay {
                         ).apply { bottomMargin = dp(10) }
                     }
                     imeBox.addView(TextView(activity).apply {
-                        text = if (doubaoReady) "✓ 已检测到豆包输入法" else "推荐安装：豆包输入法"
+                        text = s(if (doubaoReady) R.string.omarchy_onboarding_ime_installed else R.string.omarchy_onboarding_ime_install)
                         textSize = 13f
                         setTextColor(Color.parseColor(if (doubaoReady) "#9ece6a" else "#7aa2f7"))
                     })
                     imeBox.addView(TextView(activity).apply {
-                        text = if (doubaoReady) "设为默认输入法后，点击手柄话筒即可语音/中文精准上屏。"
-                        else "离线高精度中文语音与顺滑选词，直通 Linux 终端与应用。"
+                        text = s(if (doubaoReady) R.string.omarchy_onboarding_ime_installed_desc else R.string.omarchy_onboarding_ime_install_desc)
                         textSize = 11.5f
                         setTextColor(Color.parseColor("#c0caf5"))
                         setPadding(0, dp(2), 0, dp(6))
                     })
                     imeBox.addView(Button(activity).apply {
-                        text = if (doubaoReady) "切换为默认输入法" else "前往下载豆包输入法"
+                        text = s(if (doubaoReady) R.string.omarchy_onboarding_ime_choose else R.string.omarchy_onboarding_ime_download)
                         isAllCaps = false
                         textSize = 12f
                         setTextColor(Color.parseColor("#1a1b26"))
@@ -1376,10 +1532,9 @@ object OmarchyX11Overlay {
                             if (doubaoReady) openInputMethodPicker()
                             else activity.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DOUBAO_URL)))
                         }
-                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(34)))
+                    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)))
                     card.addView(imeBox)
 
-                    // Quick permission buttons row (Storage + Battery)
                     val permRow = LinearLayout(activity).apply {
                         orientation = LinearLayout.HORIZONTAL
                         layoutParams = LinearLayout.LayoutParams(
@@ -1388,7 +1543,7 @@ object OmarchyX11Overlay {
                     }
                     val filesOk = hasAllFilesPermission()
                     permRow.addView(Button(activity).apply {
-                        text = if (filesOk) "✓ 存储权限已开" else "开启文件存储权限"
+                        text = s(if (filesOk) R.string.omarchy_onboarding_storage_granted else R.string.omarchy_onboarding_storage_grant)
                         isAllCaps = false
                         textSize = 11.5f
                         setTextColor(Color.parseColor(if (filesOk) "#9ece6a" else "#c0caf5"))
@@ -1400,11 +1555,10 @@ object OmarchyX11Overlay {
                                 })
                             }
                         }
-                    }, LinearLayout.LayoutParams(0, dp(36), 1f).apply { marginEnd = dp(6) })
-
+                    }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(6) })
                     val batOk = isBatteryUnrestricted()
                     permRow.addView(Button(activity).apply {
-                        text = if (batOk) "✓ 后台常驻已开" else "关闭电池优化"
+                        text = s(if (batOk) R.string.omarchy_onboarding_battery_granted else R.string.omarchy_onboarding_battery_grant)
                         isAllCaps = false
                         textSize = 11.5f
                         setTextColor(Color.parseColor(if (batOk) "#9ece6a" else "#c0caf5"))
@@ -1414,28 +1568,28 @@ object OmarchyX11Overlay {
                                 data = Uri.parse("package:${activity.packageName}")
                             })
                         }
-                    }, LinearLayout.LayoutParams(0, dp(36), 1f))
+                    }, LinearLayout.LayoutParams(0, dp(48), 1f))
                     card.addView(permRow)
                 }
             }
 
-            // Footer navigation buttons
             val navRow = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.END
+                setPadding(0, dp(6), 0, 0)
             }
             if (step > 0) {
                 navRow.addView(Button(activity).apply {
-                    text = "上一步"
+                    text = s(R.string.omarchy_onboarding_previous)
                     isAllCaps = false
                     textSize = 13f
                     setTextColor(Color.parseColor("#c0caf5"))
                     background = makeRounded("#CC24283b", "#414868", 8, 1)
                     setOnClickListener { showOnboardingStep(step - 1) }
-                }, LinearLayout.LayoutParams(dp(86), dp(38)).apply { marginEnd = dp(8) })
+                }, LinearLayout.LayoutParams(dp(86), dp(44)).apply { marginEnd = dp(8) })
             }
             navRow.addView(Button(activity).apply {
-                text = if (step < 3) "下一步" else "开始使用 Omarchy"
+                text = s(if (step < 3) R.string.omarchy_onboarding_next else R.string.omarchy_onboarding_finish)
                 isAllCaps = false
                 textSize = 13.5f
                 setTextColor(Color.parseColor("#1a1b26"))
@@ -1443,18 +1597,27 @@ object OmarchyX11Overlay {
                 setOnClickListener {
                     if (step < 3) showOnboardingStep(step + 1) else closeOnboarding(OnboardingExit.COMPLETE)
                 }
-            }, LinearLayout.LayoutParams(0, dp(38), 1f))
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
             card.addView(navRow)
 
             val scroll = ScrollView(activity).apply { addView(card) }
             val cardW = min(w - dp(32), dp(390))
             root.addView(scroll, FrameLayout.LayoutParams(
                 cardW, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER
-            ))
+            ).apply { setMargins(0, dp(52), 0, dp(16)) })
             host.addView(root, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
             ))
             onboardingOverlay = root
+            // Begin the quadratic arrow just outside the measured card so it never crosses its copy.
+            scroll.post {
+                if (onboardingOverlay === root && arrowView.showArrow) {
+                    arrowView.fromX = if (step == 0) scroll.x + scroll.width * 0.72f
+                        else if (dockedRight) scroll.x + scroll.width else scroll.x
+                    arrowView.fromY = if (step == 0) scroll.y - dp(6) else scroll.y + scroll.height * 0.5f
+                    arrowView.invalidate()
+                }
+            }
         }
 
         // ==================== Invisible Doubao IME Bridge ====================
@@ -1521,7 +1684,7 @@ object OmarchyX11Overlay {
 
         private fun refreshFullscreenButton() {
             val b = fullscreenBtn ?: return
-            b.text = if (fullscreenActive) "⛶ 退出" else "⛶ 全屏"
+            b.text = if (fullscreenActive) s(R.string.omarchy_overlay_exit_fullscreen) else s(R.string.omarchy_overlay_enter_fullscreen)
             b.setTextColor(Color.parseColor(if (fullscreenActive) "#1a1b26" else "#c0caf5"))
             b.background = makeRounded(if (fullscreenActive) "#7aa2f7" else "#CC24283b", "#7aa2f7", 6, 1)
         }
@@ -1618,11 +1781,12 @@ object OmarchyX11Overlay {
                 wb.layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply {
                     setMargins(dp(1), 0, dp(2), 0)
                 }
+                wb.contentDescription = s(R.string.omarchy_overlay_workspace, ws)
                 wb.setPadding(0, 0, 0, 0)
                 bar.addView(wb)
             }
 
-            val bFull = makeBarBtn(if (fullscreenActive) "⛶ 退出" else "⛶ 全屏", fullscreenActive) {
+            val bFull = makeBarBtn(if (fullscreenActive) s(R.string.omarchy_overlay_exit_fullscreen) else s(R.string.omarchy_overlay_enter_fullscreen), fullscreenActive) {
                 fullscreenActive = !fullscreenActive
                 refreshFullscreenButton()
                 sendCmd("fullscreen")
@@ -1639,6 +1803,7 @@ object OmarchyX11Overlay {
             bar.addView(dragSpacer, LinearLayout.LayoutParams(0, dp(28), 1f))
 
             val alphaBar = SeekBar(activity).apply {
+                contentDescription = s(R.string.omarchy_overlay_keyboard_opacity)
                 max = 75
                 progress = ((oskAlpha - 0.20f) * 100f).roundToInt()
                 layoutParams = LinearLayout.LayoutParams(dp(100), dp(24)).apply {
@@ -1657,7 +1822,8 @@ object OmarchyX11Overlay {
             }
             bar.addView(alphaBar)
 
-            val bClose = makeBarBtn("✕", false) { hideOsk() }.apply {
+            val bClose = makeBarBtn(s(R.string.omarchy_overlay_dismiss_symbol), false) { hideOsk() }.apply {
+                contentDescription = s(R.string.omarchy_overlay_keyboard_hide)
                 layoutParams = LinearLayout.LayoutParams(dp(30), dp(28)).apply {
                     setMargins(dp(2), 0, 0, 0)
                 }
@@ -1667,12 +1833,12 @@ object OmarchyX11Overlay {
             root.addView(bar)
 
             val rows = arrayOf(
-                arrayOf(Triple("Esc","Escape",1.1f), Triple("Tab","Tab",1.1f), Triple("Super","MOD:super",1.4f), Triple("Ctrl","MOD:ctrl",1.2f), Triple("Alt","MOD:alt",1.1f), Triple("←","Left",1.0f), Triple("↓","Down",1.0f), Triple("↑","Up",1.0f), Triple("→","Right",1.0f), Triple("⌫","BackSpace",1.4f)),
+                arrayOf(Triple(s(R.string.omarchy_key_esc),"Escape",1.1f), Triple(s(R.string.omarchy_key_tab),"Tab",1.1f), Triple(s(R.string.omarchy_key_super),"MOD:super",1.4f), Triple(s(R.string.omarchy_key_ctrl),"MOD:ctrl",1.2f), Triple(s(R.string.omarchy_key_alt),"MOD:alt",1.1f), Triple("←","Left",1.0f), Triple("↓","Down",1.0f), Triple("↑","Up",1.0f), Triple("→","Right",1.0f), Triple("⌫","BackSpace",1.4f)),
                 arrayOf(Triple("1","1",1f), Triple("2","2",1f), Triple("3","3",1f), Triple("4","4",1f), Triple("5","5",1f), Triple("6","6",1f), Triple("7","7",1f), Triple("8","8",1f), Triple("9","9",1f), Triple("0","0",1f), Triple("-","minus",1f), Triple("=","equal",1f)),
                 arrayOf(Triple("q","q",1f), Triple("w","w",1f), Triple("e","e",1f), Triple("r","r",1f), Triple("t","t",1f), Triple("y","y",1f), Triple("u","u",1f), Triple("i","i",1f), Triple("o","o",1f), Triple("p","p",1f), Triple("[","bracketleft",1f), Triple("]","bracketright",1f)),
                 arrayOf(Triple("a","a",1f), Triple("s","s",1f), Triple("d","d",1f), Triple("f","f",1f), Triple("g","g",1f), Triple("h","h",1f), Triple("j","j",1f), Triple("k","k",1f), Triple("l","l",1f), Triple(";","semicolon",1f), Triple("'","apostrophe",1f), Triple("⏎","Return",1.5f)),
-                arrayOf(Triple("⇧","MOD:shift",1.4f), Triple("z","z",1f), Triple("x","x",1f), Triple("c","c",1f), Triple("v","v",1f), Triple("b","b",1f), Triple("n","n",1f), Triple("m","m",1f), Triple(",","comma",1f), Triple(".","period",1f), Triple("/","slash",1f), Triple("中","CMD:ime",1.2f)),
-                arrayOf(Triple("应用","CMD:apps",1.3f), Triple("菜单","CMD:menu",1.3f), Triple("Space","space",3.4f), Triple("终端","CMD:terminal",1.3f), Triple("关窗","CMD:kill",1.3f))
+                arrayOf(Triple("⇧","MOD:shift",1.4f), Triple("z","z",1f), Triple("x","x",1f), Triple("c","c",1f), Triple("v","v",1f), Triple("b","b",1f), Triple("n","n",1f), Triple("m","m",1f), Triple(",","comma",1f), Triple(".","period",1f), Triple("/","slash",1f), Triple(s(R.string.omarchy_overlay_ime_key),"CMD:ime",1.2f)),
+                arrayOf(Triple(s(R.string.omarchy_overlay_apps_key),"CMD:apps",1.3f), Triple(s(R.string.omarchy_overlay_menu_key),"CMD:menu",1.3f), Triple(s(R.string.omarchy_key_space),"space",3.4f), Triple(s(R.string.omarchy_overlay_terminal_key),"CMD:terminal",1.3f), Triple(s(R.string.omarchy_overlay_close_key),"CMD:kill",1.3f))
             )
 
             val keyH = dp((36f * 0.70f).roundToInt())

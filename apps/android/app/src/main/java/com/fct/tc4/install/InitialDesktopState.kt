@@ -2,6 +2,7 @@
 package com.fct.tc4.install
 
 import android.content.Context
+import com.fct.tc4.R
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
@@ -39,9 +40,9 @@ object InitialDesktopState {
             if (phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.IMPORTING, SetupPhase.VERIFYING, SetupPhase.INSTALLING)) phase = SetupPhase.PAUSED
             if (phase == SetupPhase.COMPLETE && !File(context.dataDir, "omarchy").isDirectory) phase = SetupPhase.IDLE
             mutable.value = DesktopSetupState(phase, image, json.optLong("downloaded").coerceIn(0, image.bytes),
-                if (phase == SetupPhase.PAUSED) "此前任务已中断，进度已保留，可继续。" else json.optString("message"),
+                if (phase == SetupPhase.PAUSED) context.getString(R.string.omarchy_setup_interrupted) else json.optString("message"),
                 importUri = json.optString("importUri").takeIf { it.startsWith("content://") && it.length <= 16 * 1024 })
-        } catch (_: Exception) { mutable.value = DesktopSetupState(message = "此前任务信息不可用，请重新选择镜像。") }
+        } catch (_: Exception) { mutable.value = DesktopSetupState(message = context.getString(R.string.omarchy_setup_state_unavailable)) }
     }
     @Synchronized fun update(context: Context, next: DesktopSetupState, persist: Boolean = true) {
         mutable.value = next

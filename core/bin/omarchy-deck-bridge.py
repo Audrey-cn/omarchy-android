@@ -4,7 +4,7 @@ Omarchy Deck Bridge (Linux-side receiver for OmarchyDeck.apk)
 Listens on TCP 127.0.0.1:18901 for newline-delimited JSON commands:
   - {"type": "key", "key": "...", "super": bool, "ctrl": bool, "alt": bool, "shift": bool}
   - {"type": "text", "text": "中文/英文语音识别文本"} -> Copies to Wayland clipboard & pastes into focused window
-  - {"type": "cmd", "cmd": "apps|menu|terminal|kill|fullscreen|ime|phone_toggle"}
+  - {"type": "cmd", "cmd": "apps|menu|terminal|kill|fullscreen|ime|phone_toggle|scale_<preset>"}
 Works in BOTH Root (chroot) and Non-Root (proot) modes.
 """
 import os
@@ -13,10 +13,14 @@ import json
 import time
 import socket
 import subprocess
+import tempfile
 
 CMD_PORT = 18901
 STATE_FILE = "/root/.local/state/omarchy/deck-orientation"
 QUEUE_DIR = "/tmp/omarchy-browser-queue"
+# JSON numeric scalar plus the two-decimal text consumed by the panel/theme engine.
+SCALE_JSON_FILE = "/root/.config/omarchy/display_scale.json"
+SCALE_FILE = "/root/.config/omarchy/display-scale"
 
 
 def get_swaysock():
@@ -138,6 +142,26 @@ def toggle_phone_orientation():
     run_bg(f"swaymsg 'output X11-1 scale {scale}'")
 
 
+def apply_scale(scale):
+    subprocess.run(
+        ["swaymsg", "output", "X11-1", "scale", scale], env=wl_env(),
+        check=True, timeout=3, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    saved = f"{float(scale):.2f}"
+    for path in (SCALE_JSON_FILE, SCALE_FILE):
+        directory = os.path.dirname(path)
+        os.makedirs(directory, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".display-scale-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                stream.write(saved)
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+
 def handle_cmd(msg):
     action = msg.get("cmd", "")
     if action == "phone_toggle":
@@ -147,6 +171,11 @@ def handle_cmd(msg):
         os.makedirs(QUEUE_DIR, exist_ok=True)
         with open(f"{QUEUE_DIR}/ime_{int(time.time()*1000)}.json", "w") as f:
             json.dump({"action": "toggle_android_ime"}, f)
+        return
+    if action.startswith("scale_"):
+        scale = action.split("_", 1)[1]
+        if scale in {"0.85", "1.0", "1.25", "1.5", "1.75", "2.0"}:
+            apply_scale(scale)
         return
     if action.startswith("ws_"):
         ws = action.split("_", 1)[1]
