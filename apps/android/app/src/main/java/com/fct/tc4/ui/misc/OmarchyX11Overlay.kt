@@ -1159,7 +1159,7 @@ object OmarchyX11Overlay {
 
             when (step) {
                 0 -> {
-                    // Step 1: Point to top-right Monitor icon (default 1.5x scale)
+                    // Step 1: Describe the guest's Monitor icon without guessing its position.
                     card.addView(TextView(activity).apply {
                         text = "① 屏幕缩放与显示（默认 1.5x）"
                         textSize = 16.5f
@@ -1167,17 +1167,12 @@ object OmarchyX11Overlay {
                         setPadding(0, 0, 0, dp(6))
                     })
                     card.addView(TextView(activity).apply {
-                        text = "已针对手机和平板预设 1.5 倍清晰缩放。\n随时点击右上角状态栏的「显示器图标」，即可按个人习惯自由调节 0.85x ~ 2.0x 缩放比例。"
+                        text = "已针对手机和平板预设 1.5 倍清晰缩放。\n随时点击桌面顶部状态栏的「显示器图标」，即可按个人习惯自由调节 0.85x ~ 2.0x 缩放比例。"
                         textSize = 13f
                         setTextColor(Color.parseColor("#c0caf5"))
                         setPadding(0, 0, 0, dp(14))
                     })
-                    arrowView.showArrow = true
-                    arrowView.targetX = w - dp(48).toFloat()
-                    arrowView.targetY = dp(16).toFloat()
-                    arrowView.fromX = w * 0.62f
-                    arrowView.fromY = h * 0.36f
-                    arrowView.ringRadius = dp(22).toFloat()
+                    arrowView.showArrow = false
                 }
                 1 -> {
                     // Step 2: Point to Edge Floating Handle
