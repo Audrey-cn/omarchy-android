@@ -85,7 +85,11 @@ android {
             matchingFallbacks += listOf("debug")
         }
         release {
+            isDebuggable = false
             isMinifyEnabled = false
+            // Preserve upgrades from earlier stable-test debug APKs. Untrusted
+            // builds keep the existing temporary debug-key signing behavior.
+            signingConfig = stableTestSigning ?: signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

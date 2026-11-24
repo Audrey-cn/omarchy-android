@@ -18,7 +18,7 @@ class WebappFallbackTests(unittest.TestCase):
         self.commands.mkdir()
         self.receipt = Path(self.temp.name) / "launch.json"
 
-    def invoke(self, url=None, *, firefox=True, wrapper=True):
+    def invoke(self, url=None, *, firefox=True, wrapper=True, mode=None):
         for executable in self.commands.iterdir():
             executable.unlink()
         names = ["omarchy-browser"]
@@ -37,6 +37,8 @@ class WebappFallbackTests(unittest.TestCase):
             executable.chmod(0o755)
         self.receipt.unlink(missing_ok=True)
         args = ["/bin/bash", str(LAUNCHER)]
+        if mode is not None:
+            args.append(mode)
         if url is not None:
             args.append(url)
         result = subprocess.run(
@@ -58,6 +60,8 @@ class WebappFallbackTests(unittest.TestCase):
             "https://www.douyin.com/video/123",
             "https://www.iqiyi.com/v_123.html",
             "https://v.qq.com/x/cover/123.html",
+            "https://www.youku.com/v_show/id_123.html",
+            "https://www.twitch.tv/videos/123",
         ]:
             with self.subTest(url=url):
                 self.assertEqual(self.invoke(url), ["omarchy-firefox", url])
@@ -68,7 +72,14 @@ class WebappFallbackTests(unittest.TestCase):
 
     def test_packaged_wrapper_does_not_imply_firefox_is_installed(self):
         url = "https://www.bilibili.com/video/BV123"
-        self.assertEqual(self.invoke(url, firefox=False), ["omarchy-browser", "--app=" + url])
+        self.assertEqual(self.invoke(url, firefox=False), ["omarchy-browser", url])
+
+    def test_explicit_app_and_tab_modes_override_site_default(self):
+        video = "https://www.bilibili.com/video/BV123?one=1&two=2"
+        tool = "https://chat.deepseek.com/"
+        self.assertEqual(self.invoke(video, mode="--app"), ["omarchy-browser", "--app=" + video])
+        self.assertEqual(self.invoke(tool, mode="--tab"), ["omarchy-firefox", tool])
+        self.assertEqual(self.invoke(tool, mode="--tab", firefox=False), ["omarchy-browser", tool])
 
     def test_unrelated_hosts_keep_webapp_mode(self):
         for url in [

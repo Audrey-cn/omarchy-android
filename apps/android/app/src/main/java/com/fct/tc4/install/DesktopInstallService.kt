@@ -34,12 +34,15 @@ class DesktopInstallService : Service() {
     private val worker = Executors.newSingleThreadExecutor()
     private val pause = AtomicBoolean(false)
     private val cancel = AtomicBoolean(false)
+    private val foregroundTimedOut = AtomicBoolean(false)
     private val controlLock = Any()
     private var installing = false
+    private var foregroundShown = false
     private var latestStartId = 0
     private val workQueue = InitialDesktopWorkQueue(worker, InitialDesktopState.running, controlLock) {
         installing = false
         stopForeground(STOP_FOREGROUND_REMOVE)
+        foregroundShown = false
         stopSelf(latestStartId)
     }
     override fun onBind(intent: Intent?): IBinder? = null
@@ -52,6 +55,10 @@ class DesktopInstallService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = synchronized(controlLock) {
         // Keep the new id and acceptance atomic with worker idle/stopSelf finalization.
         latestStartId = startId
+        if (foregroundTimedOut.get()) {
+            stopSelf()
+            return@synchronized START_NOT_STICKY
+        }
         if (intent?.action in listOf(PAUSE, CANCEL)) {
             if (installing) return@synchronized START_NOT_STICKY
             pause.set(true)
@@ -69,12 +76,16 @@ class DesktopInstallService : Service() {
             val imageId = intent.getStringExtra(IMAGE_ID)
             val localUri = intent.getStringExtra(IMPORT_URI)?.let(Uri::parse)
             val requestedState = InitialDesktopState.state.value
-            workQueue.start({
+            val accepted = workQueue.start({
                 pause.set(false)
                 cancel.set(false)
                 installing = false
                 showForeground(InitialDesktopState.state.value)
             }) { performInstall(imageId, localUri, requestedState) }
+            // A timed-out instance's read can still be unwinding. A replacement
+            // instance rejected by the shared running fence must stop promptly
+            // instead of missing startForeground's startup deadline.
+            if (!accepted && !foregroundShown) stopSelf(startId)
             START_NOT_STICKY
         }
     }
@@ -82,6 +93,7 @@ class DesktopInstallService : Service() {
         val notice = notification(state)
         if (Build.VERSION.SDK_INT >= 29) startForeground(NOTICE, notice, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         else startForeground(NOTICE, notice)
+        foregroundShown = true
     }
     private fun cancellingState() = InitialDesktopState.state.value.copy(
         phase = SetupPhase.VERIFYING, message = getString(R.string.omarchy_setup_cleaning_cache), bytesPerSecond = 0)
@@ -93,6 +105,7 @@ class DesktopInstallService : Service() {
         catch (error: Exception) { Log.e("InitialDesktop", "Cancellation state could not be saved: ${error.javaClass.simpleName}") }
     }
     private fun performInstall(imageId: String?, localUri: Uri?, requestedState: DesktopSetupState) {
+        if (foregroundTimedOut.get()) return
         try { runInstall(imageId, localUri, requestedState) }
         catch (error: Exception) {
             Log.e("InitialDesktop", "Initial installation stopped: ${error.javaClass.simpleName}")
@@ -159,9 +172,13 @@ class DesktopInstallService : Service() {
             val speed = ((count - offset).coerceAtLeast(0) * 1000 / elapsed)
             val state = DesktopSetupState(if (offline) SetupPhase.IMPORTING else SetupPhase.DOWNLOADING,
                 spec, count, if (count == spec.bytes) getString(R.string.omarchy_setup_verifying_image) else if (offline) getString(R.string.omarchy_setup_reading_local) else downloadSource, speed, importUri?.toString())
-            InitialDesktopState.update(this, state)
-            val now = SystemClock.elapsedRealtime()
-            if (now - lastNotice > 1000) { notify(state); lastNotice = now }
+            synchronized(controlLock) {
+                if (!foregroundTimedOut.get()) {
+                    InitialDesktopState.update(this, state)
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastNotice > 1000) { notify(state); lastNotice = now }
+                }
+            }
         }
         publish(DesktopSetupState(if (offline) SetupPhase.IMPORTING else SetupPhase.DOWNLOADING, spec, offset, importUri = importUri?.toString()))
         val archive = if (offline) imported ?: imports.importImage(spec, {
@@ -223,7 +240,13 @@ class DesktopInstallService : Service() {
             message = getString(R.string.omarchy_setup_cleanup_failed))
             else DesktopSetupState(message = getString(R.string.omarchy_setup_cancelled)))
     }
-    private fun publish(state: DesktopSetupState) { InitialDesktopState.update(this, state); notify(state) }
+    private fun publish(state: DesktopSetupState) = synchronized(controlLock) {
+        // A blocked read can finish after onTimeout stopped the foreground service.
+        // Preserve its PAUSED checkpoint instead of advertising an active transfer.
+        if (foregroundTimedOut.get() && state.phase !in setOf(SetupPhase.COMPLETE, SetupPhase.FAILED)) return@synchronized
+        InitialDesktopState.update(this, state)
+        if (!foregroundTimedOut.get()) notify(state)
+    }
     private fun notify(state: DesktopSetupState) { getSystemService(NotificationManager::class.java).notify(NOTICE, notification(state)) }
     private fun notification(state: DesktopSetupState): Notification {
         val open = PendingIntent.getActivity(this, 1, Intent(this, DesktopSetupActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -239,6 +262,30 @@ class DesktopInstallService : Service() {
             builder.addAction(Notification.Action.Builder(null, getString(R.string.omarchy_setup_pause_download), pauseIntent).build())
         }
         return builder.build()
+    }
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        // Android 15+ grants only a few seconds here. Signal the worker and save
+        // the latest checkpoint; never wait for its socket/read/extraction.
+        pause.set(true)
+        foregroundTimedOut.set(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        // Transfer checkpoints already persist regularly; load() maps an active
+        // interrupted phase to PAUSED. Flush this pause off Main so a slow fsync
+        // or in-flight state write cannot consume Android's stop grace period.
+        Thread({
+            try {
+                synchronized(controlLock) {
+                    val state = InitialDesktopState.state.value
+                    if (state.phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.IMPORTING, SetupPhase.VERIFYING, SetupPhase.INSTALLING)) {
+                        InitialDesktopState.update(this, state.copy(phase = SetupPhase.PAUSED,
+                            message = getString(R.string.omarchy_setup_paused), bytesPerSecond = 0))
+                    }
+                }
+            } catch (error: Exception) {
+                Log.e("InitialDesktop", "Timeout checkpoint could not be saved: ${error.javaClass.simpleName}")
+            }
+        }, "InitialDesktop-timeout-checkpoint").apply { isDaemon = true; start() }
     }
     override fun onDestroy() { pause.set(true); worker.shutdown(); super.onDestroy() }
 }

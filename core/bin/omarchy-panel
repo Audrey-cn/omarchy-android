@@ -69,7 +69,8 @@ def load_theme():
     p = "/root/.config/omarchy/current/theme/colors.toml"
     if os.path.exists(p):
         try:
-            txt = open(p, encoding="utf-8", errors="ignore").read()
+            with open(p, encoding="utf-8", errors="ignore") as stream:
+                txt = stream.read()
             m1 = re.search(r'^\s*background\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
             m2 = re.search(r'^\s*foreground\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
             m3 = re.search(r'^\s*accent\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
@@ -522,14 +523,8 @@ class OmarchyPanel(Gtk.Window):
         os.makedirs(os.path.dirname(MODIFIER_CFG), exist_ok=True)
         with open(MODIFIER_CFG, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2)
-        # Sync Sway $mod for non-root proot fallback too
-        sway_mod = "Mod1" if cfg["mode"] == "alt" else "Mod4"
-        for p in ("/root/.config/sway/config", "/tmp/omarchy-sway.conf"):
-            if os.path.exists(p):
-                txt = open(p, encoding="utf-8").read()
-                txt = re.sub(r"^set \$mod .*$", f"set $mod {sway_mod}", txt, flags=re.M)
-                open(p, "w", encoding="utf-8").write(txt)
-        launch_bg("swaymsg reload")
+        # The theme engine owns the complete Sway config and reloads it cleanly.
+        subprocess.run(["/usr/local/bin/omarchy-theme-engine.py", "restore"], check=True)
 
     def build_keyboard(self):
         self.set_size_request(480, -1)

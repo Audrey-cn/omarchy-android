@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+"""Recover this guest's Sway desktop after its Android Xserver was restarted."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import time
+
+sys.dont_write_bytecode = True
+from omarchy_session import uid
+
+PROC = Path("/proc")
+RECOVERY_SECONDS = 15
+
+
+def scoped_processes(environment):
+    """Use the same UID and mount-namespace boundary as omarchy_session."""
+    current = PROC / str(os.getpid())
+    owner, namespace = uid(current), os.readlink(current / "ns/mnt")
+    processes = {}
+    for entry in PROC.iterdir():
+        if not entry.name.isdecimal() or entry == current:
+            continue
+        try:
+            if uid(entry) != owner or os.readlink(entry / "ns/mnt") != namespace:
+                continue
+            if re.search(r"^State:\s+[ZX]", (entry / "status").read_text(), re.M):
+                continue
+            variables = dict(item.split("=", 1) for item in (entry / "environ").read_text().split("\0") if "=" in item)
+            if (variables.get("DISPLAY") != environment["DISPLAY"] or
+                    variables.get("XDG_RUNTIME_DIR") != environment["XDG_RUNTIME_DIR"]):
+                continue
+            processes[int(entry.name)] = ((entry / "comm").read_text().strip(),
+                (entry / "cmdline").read_text().strip("\0").split("\0"), variables)
+        except (OSError, ValueError, UnicodeError):
+            continue
+    return processes
+
+
+def unix_listening(path):
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(0.2)
+            connection.connect(str(path))
+        return True
+    except OSError:
+        return False
+
+
+def deck_listening():
+    try:
+        with socket.create_connection(("127.0.0.1", 18901), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def wayland_peer(path):
+    # Android blocks /proc/net. Linux SO_PEERCRED proves which process owns
+    # the live listener without reading global socket tables or deleting locks.
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(0.2)
+            connection.connect(str(path))
+            credentials = connection.getsockopt(socket.SOL_SOCKET,
+                getattr(socket, "SO_PEERCRED", 17), struct.calcsize("3i"))
+            return struct.unpack("3i", credentials)[0]
+    except OSError:
+        return None
+
+
+def owned_wayland(pid, runtime):
+    for path in sorted(runtime.glob("wayland-*")):
+        if re.fullmatch(r"wayland-\d+", path.name) and wayland_peer(path) == pid:
+            return path.name
+    return None
+
+
+def canonical_wayland(runtime, name):
+    """Keep existing parent shells and launchers using wayland-1 operational."""
+    actual, canonical = runtime / name, runtime / "wayland-1"
+    if name == "wayland-1" or canonical.resolve() == actual.resolve():
+        return "wayland-1"
+    if unix_listening(canonical):
+        raise RuntimeError("Refusing to replace a live unrelated Wayland listener")
+    with open(runtime / "wayland-1.lock", "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("Canonical Wayland socket is locked by another compositor") from error
+        if canonical.is_symlink() or canonical.is_socket():
+            canonical.unlink()
+        elif canonical.exists():
+            raise RuntimeError("Canonical Wayland path is not a socket")
+        canonical.symlink_to(name)
+    return "wayland-1"
+
+
+def session(environment):
+    processes = scoped_processes(environment)
+    runtime = Path(environment["XDG_RUNTIME_DIR"])
+    found = []
+    for path in runtime.glob("sway-ipc.*.sock"):
+        match = re.fullmatch(r"sway-ipc\.\d+\.(\d+)\.sock", path.name)
+        process = processes.get(int(match[1])) if match else None
+        if not process or process[0] != "sway":
+            continue
+        try:
+            version = subprocess.check_output(["swaymsg", "-s", str(path), "-t", "get_version"],
+                env=environment, stderr=subprocess.DEVNULL, text=True, timeout=0.5)
+            if not isinstance(json.loads(version), dict):
+                continue
+            wayland = owned_wayland(int(match[1]), runtime)
+            if wayland:
+                found.append((str(path), wayland))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    if len(found) > 1:
+        raise RuntimeError("More than one Sway desktop belongs to this guest; refusing ambiguous recovery")
+    return found[0] if found else None
+
+
+def spawn(argv, environment, log):
+    with open(Path(environment["XDG_RUNTIME_DIR"]) / log, "ab") as stream:
+        return subprocess.Popen(argv, env=environment, stdin=subprocess.DEVNULL,
+            stdout=stream, stderr=stream, start_new_session=True)
+
+
+def stop_scoped(pid, environment, deadline):
+    if pid in scoped_processes(environment):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+    until = min(deadline, time.monotonic() + 1)
+    while pid in scoped_processes(environment):
+        if time.monotonic() >= until:
+            raise RuntimeError(f"Guest desktop client {pid} did not exit")
+        time.sleep(0.05)
+
+
+def recover(environment, deadline=None):
+    deadline = time.monotonic() + RECOVERY_SECONDS if deadline is None else deadline
+    environment = {**environment, "WLR_BACKENDS": "x11", "WLR_RENDERER": "pixman",
+        "WLR_NO_HARDWARE_CURSORS": "1", "QT_IM_MODULE": "fcitx", "XMODIFIERS": "@im=fcitx"}
+    environment.setdefault("DISPLAY", ":0")
+    environment.setdefault("XDG_RUNTIME_DIR", "/tmp")
+    environment.setdefault("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/omarchy-dbus.sock")
+    # Audio and D-Bus survive an Xserver restart. Never replace their sockets or
+    # processes. Missing D-Bus is an explicit failure instead of a second bus.
+    address = environment["DBUS_SESSION_BUS_ADDRESS"]
+    if not address.startswith("unix:path=") or not unix_listening(address[len("unix:path="):]):
+        raise RuntimeError("Guest D-Bus is unavailable; desktop recovery left audio and bus state untouched")
+    active = session(environment)
+    restarted = active is None
+    if restarted:
+        if any(value[0] == "sway" for value in scoped_processes(environment).values()):
+            raise RuntimeError("A guest Sway process is still alive without usable IPC; refusing a duplicate compositor")
+        environment.pop("SWAYSOCK", None)
+        compositor = spawn(["/usr/local/bin/sway", "-c", "/root/.config/sway/config"], environment, "sway.log")
+        while active is None:
+            if compositor.poll() is not None:
+                raise RuntimeError("Sway exited during X11 recovery; inspect /tmp/sway.log")
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Timed out waiting for Sway IPC and its Wayland listener")
+            time.sleep(0.1)
+            active = session(environment)
+    environment["SWAYSOCK"], environment["WAYLAND_DISPLAY"] = active
+    environment["WAYLAND_DISPLAY"] = canonical_wayland(Path(environment["XDG_RUNTIME_DIR"]), active[1])
+    processes = scoped_processes(environment)
+    for pid, (name, _argv, variables) in processes.items():
+        stale = variables.get("SWAYSOCK") not in (None, active[0])
+        if name in {"mako", "waybar", "swaybg"} and (restarted or stale):
+            stop_scoped(pid, environment, deadline)
+    processes = scoped_processes(environment)
+    if restarted or not any(value[0] == "fcitx5" for value in processes.values()):
+        spawn(["fcitx5", "-d", "--replace"], environment, "fcitx5.log")
+    if not any(value[0] == "mako" for value in processes.values()):
+        spawn(["mako"], environment, "mako.log")
+    decks = {pid: value for pid, value in processes.items()
+        if "/usr/local/bin/omarchy-deck-bridge.py" in value[1]}
+    for pid, (_name, _argv, variables) in decks.items():
+        if variables.get("SWAYSOCK") not in (None, active[0]):
+            stop_scoped(pid, environment, deadline)
+    # The original boot bridge resolves Sway per command and survives X11 loss.
+    # Preserve its listener; restart only an absent bridge or a stale binding.
+    if not deck_listening():
+        for pid in decks:
+            stop_scoped(pid, environment, deadline)
+        spawn(["python3", "/usr/local/bin/omarchy-deck-bridge.py"], environment, "deck-bridge.log")
+    elif not decks:
+        raise RuntimeError("Deck port is occupied by an unrecognized process; refusing to replace it")
+    if restarted:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("Desktop recovery timed out before theme restoration")
+        subprocess.run(["/usr/local/bin/omarchy-theme-engine.py", "restore"], env=environment,
+            check=True, timeout=remaining, stdout=subprocess.DEVNULL)
+    if session(environment) is None:
+        raise RuntimeError("Sway desktop disappeared before recovery completed")
+
+
+def main():
+    deadline = time.monotonic() + RECOVERY_SECONDS
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    try:
+        with open(runtime / ".omarchy-x11-recovery.lock", "a") as lock:
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("Another guest desktop recovery is still running")
+                    time.sleep(0.1)
+            recover(dict(os.environ), deadline)
+        print("Omarchy X11 desktop ready")
+        return 0
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        print(f"Omarchy X11 recovery failed: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

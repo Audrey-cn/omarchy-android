@@ -46,16 +46,16 @@ jobs:
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "build-tools;36.0.0" "cmake;3.22.1" "ndk;27.2.12479018" >/dev/null || true
-      - name: Assemble Debug and isolated acceptance APKs
+      - name: Assemble Release and isolated acceptance APKs
         env:
           OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD: ${{ github.repository == 'Audrey-cn/omarchy-android' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.OMARCHY_ANDROID_TEST_KEYSTORE_PASSWORD || '' }}
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug assembleDebugAndroidTest assembleAcceptance --no-daemon
+          ./gradlew testDebugUnitTest assembleRelease assembleDebugAndroidTest assembleAcceptance --no-daemon
       - name: Verify online installer layout, native libraries, certificate and version
         run: |
-          python3 ../../scripts/android-build.py verify --delivery online-installer --apk app/build/outputs/apk/debug/app-debug.apk --metadata "$OMARCHY_ANDROID_BUILD_METADATA" --build-tools "$ANDROID_SDK_ROOT/build-tools/36.0.0"
-          cp "$OMARCHY_ANDROID_BUILD_METADATA" app/build/outputs/apk/debug/build-metadata.json
+          python3 ../../scripts/android-build.py verify --delivery online-installer --require-non-debuggable --apk app/build/outputs/apk/release/app-release.apk --metadata "$OMARCHY_ANDROID_BUILD_METADATA" --build-tools "$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          cp "$OMARCHY_ANDROID_BUILD_METADATA" app/build/outputs/apk/release/build-metadata.json
       - name: Verify isolated acceptance package, certificate and version
         run: |
           python3 - "$OMARCHY_ANDROID_BUILD_METADATA" "$RUNNER_TEMP/omarchy-android-acceptance-metadata.json" <<'PY'
@@ -79,8 +79,8 @@ jobs:
         with:
           name: OmarchyAndroid-apk${{ steps.android-build.outputs.artifact_suffix }}
           path: |
-            apps/android/app/build/outputs/apk/debug/app-debug.apk
-            apps/android/app/build/outputs/apk/debug/build-metadata.json
+            apps/android/app/build/outputs/apk/release/app-release.apk
+            apps/android/app/build/outputs/apk/release/build-metadata.json
           if-no-files-found: error
       - name: Upload isolated device acceptance APK
         uses: actions/upload-artifact@v4

@@ -25,6 +25,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.ViewGroup
 import androidx.activity.addCallback
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
@@ -43,6 +44,7 @@ import com.fct.tc4.ui.page.ContainerInstallFragment
 import com.fct.tc4.ui.page.ContainerMainFragment
 import com.fct.tc4.ui.page.ContainerManageFragment
 import com.fct.tc4.ui.misc.Global
+import com.fct.tc4.ui.misc.LauncherShortcutStore
 import com.fct.tc4.ui.misc.shouldReturnToX11
 import com.fct.tc4.ui.page.TerminalFragment
 import com.fct.tc4.ui.page.ContainerManageViewModel
@@ -63,7 +65,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         binding = Tc4ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         // Phone management UI stays in crisp Portrait (tablets sw>=600dp remain free; X11 desktop is independent)
@@ -400,8 +405,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun onShortcutLaunch(intent: Intent) {
-        val code = intent.getStringExtra("shortcut_code") ?: return
-        val command = intent.getStringExtra("shortcut_command") ?: return
+        val shortcut = LauncherShortcutStore.resolve(this, intent.getStringExtra(LauncherShortcutStore.EXTRA_ID))
+        if (shortcut == null) {
+            Snackbar.make(binding.root, R.string.tc4_shortcut_invalid, Snackbar.LENGTH_LONG).show()
+            if (viewModel.screen.value is MainViewModel.Screen.Init) onNormalLaunch()
+            return
+        }
+        val code = shortcut.code
+        val command = shortcut.command
 
         // 检查容器是否存在
         if (code !in Global.installedContainers) {

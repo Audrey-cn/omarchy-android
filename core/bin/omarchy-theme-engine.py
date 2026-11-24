@@ -10,6 +10,7 @@ import os
 import sys
 import glob
 import json
+import re
 import subprocess
 
 OMARCHY_PATH = "/root/.local/share/omarchy"
@@ -66,6 +67,45 @@ def list_themes():
     themes = sorted(os.listdir(f"{OMARCHY_PATH}/themes"))
     return [t for t in themes if os.path.isdir(f"{OMARCHY_PATH}/themes/{t}")]
 
+def restore_theme():
+    """Restore the user's selection; Tokyo Night is the first-boot default."""
+    theme_name = "tokyo-night"
+    bg_file = None
+    try:
+        with open(f"{STATE_DIR}/theme.name", encoding="utf-8") as stream:
+            saved = stream.read().strip()
+        if saved and os.path.isdir(f"{OMARCHY_PATH}/themes/{saved}"):
+            theme_name = saved
+        with open(f"{STATE_DIR}/background.path", encoding="utf-8") as stream:
+            bg_file = stream.read().strip() or None
+    except OSError:
+        pass
+    return apply_theme(theme_name, bg_file)
+
+def render_keybindings(mode, exec_term, exec_apps, exec_menu, exec_keys):
+    """Render each active modifier from one complete binding list."""
+    bindings = [
+        ("Return", f"exec {exec_term}"),
+        ("space", f"exec {exec_apps}"),
+        ("d", "exec /usr/local/bin/omarchy-dock toggle"),
+        ("k", f"exec {exec_keys}"),
+        ("w", "kill"), ("q", "kill"), ("j", "layout toggle split"),
+        ("t", "floating toggle"), ("f", "fullscreen toggle"),
+        ("Tab", "workspace next"), ("Shift+Tab", "workspace prev"),
+    ]
+    for key, direction in (("Left", "left"), ("Down", "down"), ("Up", "up"), ("Right", "right")):
+        bindings.extend(((key, f"focus {direction}"), (f"Shift+{key}", f"move {direction}")))
+    for number in range(1, 6):
+        bindings.extend(((str(number), f"workspace number {number}"),
+                         (f"Shift+{number}", f"move container to workspace number {number}")))
+    modifiers = ("$mod", "$alt") if mode == "super+alt" else ("$mod",)
+    lines = [f"bindsym {modifier}+{key} {action}" for modifier in modifiers for key, action in bindings]
+    menu_key = "$mod+Shift+space" if mode == "alt" else "$mod+$alt+space"
+    lines.append(f"bindsym {menu_key} exec {exec_menu}")
+    if mode == "super":
+        lines.append("bindsym $alt+Tab focus right")
+    return "\n".join(lines) + "\n"
+
 def apply_theme(theme_name, bg_file=None):
     tpath = f"{OMARCHY_PATH}/themes/{theme_name}"
     if not os.path.isdir(tpath):
@@ -77,6 +117,7 @@ def apply_theme(theme_name, bg_file=None):
     os.makedirs("/root/.config/fuzzel", exist_ok=True)
     os.makedirs("/root/.config/mako", exist_ok=True)
     os.makedirs("/root/.config/sway", exist_ok=True)
+    os.makedirs("/root/.config/omarchy/current/theme", exist_ok=True)
 
     colors = parse_toml(f"{tpath}/colors.toml")
     bg = colors.get("background", "#1a1b26")
@@ -86,6 +127,14 @@ def apply_theme(theme_name, bg_file=None):
     sel_bg = colors.get("selection_background", accent)
     sel_fg = colors.get("selection_foreground", cursor)
     c = [colors.get(f"color{i}", fg) for i in range(16)]
+
+    # One published palette is consumed by both the GTK panel and app grid.
+    palette = {**colors, "background": bg, "foreground": fg, "accent": accent,
+               **{f"color{i}": value for i, value in enumerate(c)}}
+    for palette_path in (f"{THEME_DIR}/colors.toml", "/root/.config/omarchy/current/theme/colors.toml"):
+        with open(palette_path, "w", encoding="utf-8") as stream:
+            for key, value in palette.items():
+                stream.write(f"{key} = {json.dumps(value)}\n")
 
     with open(f"{STATE_DIR}/theme.name", "w") as f:
         f.write(theme_name)
@@ -501,45 +550,15 @@ default-timeout=4000
     mod_mode = default_mod_mode
     try:
         if os.path.exists("/root/.config/omarchy/modifier.json"):
-            mcfg = json.load(open("/root/.config/omarchy/modifier.json", "r", encoding="utf-8"))
+            with open("/root/.config/omarchy/modifier.json", encoding="utf-8") as stream:
+                mcfg = json.load(stream)
             if mcfg.get("mode") in ("super", "alt", "super+alt"):
                 mod_mode = mcfg["mode"]
     except Exception:
         pass
 
     primary_mod = "Mod1" if mod_mode == "alt" else "Mod4"
-    alt_mirror_block = ""
-    if mod_mode == "super+alt":
-        alt_mirror_block = f"""
-# Dual-modifier Alt mirror (for non-root Android external keyboards)
-bindsym $alt+Return exec {exec_term}
-bindsym $alt+space exec {exec_apps}
-bindsym $alt+d exec /usr/local/bin/omarchy-dock toggle
-bindsym $alt+k exec {exec_keys}
-bindsym $alt+w kill
-bindsym $alt+q kill
-bindsym $alt+j layout toggle split
-bindsym $alt+t floating toggle
-bindsym $alt+f fullscreen toggle
-bindsym $alt+Left focus left
-bindsym $alt+Down focus down
-bindsym $alt+Up focus up
-bindsym $alt+Right focus right
-bindsym $alt+Shift+Left move left
-bindsym $alt+Shift+Down move down
-bindsym $alt+Shift+Up move up
-bindsym $alt+Shift+Right move right
-bindsym $alt+1 workspace number 1
-bindsym $alt+2 workspace number 2
-bindsym $alt+3 workspace number 3
-bindsym $alt+4 workspace number 4
-bindsym $alt+5 workspace number 5
-bindsym $alt+Shift+1 move container to workspace number 1
-bindsym $alt+Shift+2 move container to workspace number 2
-bindsym $alt+Shift+3 move container to workspace number 3
-bindsym $alt+Shift+4 move container to workspace number 4
-bindsym $alt+Shift+5 move container to workspace number 5
-"""
+    keybindings = render_keybindings(mod_mode, exec_term, exec_apps, exec_menu, exec_keys)
 
     sway_cfg = f"""set $mod {primary_mod}
 set $alt Mod1
@@ -561,42 +580,7 @@ client.urgent           {c[1]}    {c[1]}    {bg}    {c[1]}    {c[1]}
 floating_modifier $mod normal
 
 # Official Omarchy Keybindings
-bindsym $mod+Return exec {exec_term}
-bindsym $mod+space exec {exec_apps}
-bindsym $mod+d exec /usr/local/bin/omarchy-dock toggle
-bindsym $mod+$alt+space exec {exec_menu}
-bindsym $mod+k exec {exec_keys}
-bindsym $mod+w kill
-bindsym $mod+q kill
-bindsym $mod+j layout toggle split
-bindsym $mod+t floating toggle
-bindsym $mod+f fullscreen toggle
-
-bindsym $mod+Left focus left
-bindsym $mod+Down focus down
-bindsym $mod+Up focus up
-bindsym $mod+Right focus right
-bindsym $alt+Tab focus right
-
-bindsym $mod+Shift+Left move left
-bindsym $mod+Shift+Down move down
-bindsym $mod+Shift+Up move up
-bindsym $mod+Shift+Right move right
-
-bindsym $mod+1 workspace number 1
-bindsym $mod+2 workspace number 2
-bindsym $mod+3 workspace number 3
-bindsym $mod+4 workspace number 4
-bindsym $mod+5 workspace number 5
-bindsym $mod+Tab workspace next
-bindsym $mod+Shift+Tab workspace prev
-
-bindsym $mod+Shift+1 move container to workspace number 1
-bindsym $mod+Shift+2 move container to workspace number 2
-bindsym $mod+Shift+3 move container to workspace number 3
-bindsym $mod+Shift+4 move container to workspace number 4
-bindsym $mod+Shift+5 move container to workspace number 5
-{alt_mirror_block}"""
+{keybindings}"""
     with open("/root/.config/sway/config", "w") as f:
         f.write(sway_cfg)
     with open("/tmp/omarchy-sway.conf", "w") as f:
@@ -615,10 +599,9 @@ bindsym $mod+Shift+5 move container to workspace number 5
             subprocess.run(["convert", chosen_bg, out_png], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     env = wl_env()
-    # Reload Sway border colors & output scaling
-    subprocess.run(["swaymsg", f"client.focused {accent} {c[0]} {fg} {c[6]} {accent}"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["swaymsg", f"client.focused_inactive {c[8]} {bg} {fg} {c[8]} {c[8]}"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["swaymsg", f"client.unfocused {c[8]} {bg} {c[8]} {c[8]} {c[8]}"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # A full reload discards old bindings when changing modifier modes.
+    subprocess.run(["swaymsg", "reload"], check=True, env=env,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     # Restart swaybg on Wayland
     sys.dont_write_bytecode = True
@@ -642,7 +625,9 @@ if __name__ == "__main__":
             print(t)
     elif cmd == "set" and len(sys.argv) >= 3:
         bg = sys.argv[3] if len(sys.argv) >= 4 else None
-        apply_theme(sys.argv[2], bg)
+        sys.exit(0 if apply_theme(sys.argv[2], bg) else 1)
+    elif cmd == "restore":
+        sys.exit(0 if restore_theme() else 1)
     elif cmd == "next-bg":
         tname = "tokyo-night"
         if os.path.exists(f"{STATE_DIR}/theme.name"):

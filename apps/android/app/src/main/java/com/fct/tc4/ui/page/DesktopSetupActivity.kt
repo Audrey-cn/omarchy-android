@@ -32,7 +32,10 @@ import com.fct.tc4.R
 import com.fct.tc4.install.*
 import com.fct.tc4.ui.main.MainActivity
 import com.fct.tc4.ui.misc.Global
+import com.fct.tc4.ui.misc.LauncherShortcutStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -49,6 +52,7 @@ class DesktopSetupActivity : AppCompatActivity() {
     private lateinit var refresh: Button
     private var images = emptyList<ImageSpec>()
     private var pendingId: String? = null
+    private var catalogJob: Job? = null
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { startTransfer(pendingId) }
     private val pickLocal = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val image = selected()
@@ -266,20 +270,31 @@ class DesktopSetupActivity : AppCompatActivity() {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) { render(InitialDesktopState.state.value) }
         }
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { InitialDesktopState.state.collect { render(it) } } }
-        loadImages(false)
+        // Show the bundled/cache catalog before starting a quiet network refresh.
+        loadImages(false, refreshAfterLoad = true)
     }
-    private fun loadImages(network: Boolean) {
+    private fun loadImages(network: Boolean, quiet: Boolean = false, refreshAfterLoad: Boolean = false) {
+        catalogJob?.cancel()
         refresh.isEnabled = false
-        lifecycleScope.launch {
+        catalogJob = lifecycleScope.launch {
             try {
                 val available = withContext(Dispatchers.IO) { if (network) InitialImageRepository.refresh(this@DesktopSetupActivity) else InitialImageRepository.available(this@DesktopSetupActivity) }
                 val code = packageManager.getPackageInfo(packageName, 0).versionCode
                 val pending = InitialDesktopState.state.value.image
+                val selectedId = selected()?.id
                 images = (listOfNotNull(pending) + available).distinctBy { it.id }.filter { InitialImageCatalog.compatible(it, code) }
                 versions.adapter = ArrayAdapter(this@DesktopSetupActivity, android.R.layout.simple_spinner_dropdown_item, images.map { it.name })
-                if (images.isEmpty()) status.setText(R.string.omarchy_setup_no_images)
-            } catch (_: Exception) { status.setText(R.string.omarchy_setup_catalog_unavailable) }
-            finally { refresh.isEnabled = !InitialDesktopState.running.get(); render(InitialDesktopState.state.value) }
+                images.indexOfFirst { it.id == selectedId }.takeIf { it >= 0 }?.let { versions.setSelection(it) }
+                render(InitialDesktopState.state.value)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (!quiet && !InitialDesktopState.running.get()) status.setText(R.string.omarchy_setup_catalog_unavailable)
+            } finally { refresh.isEnabled = !InitialDesktopState.running.get() }
+            if (refreshAfterLoad) {
+                catalogJob = null
+                loadImages(true, quiet = true)
+            }
         }
     }
     private fun selected() = images.getOrNull(versions.selectedItemPosition)
@@ -321,9 +336,18 @@ class DesktopSetupActivity : AppCompatActivity() {
     }
     private fun openDesktop() {
         Global.autoLaunch = "omarchy"
-        startActivity(Intent(this, MainActivity::class.java).setAction(MainActivity.ACTION_SHORTCUT)
-            .putExtra("shortcut_code", "omarchy").putExtra("shortcut_command", ""))
-        finish()
+        lifecycleScope.launch {
+            // MainActivity may already be on its management screen (singleTask).
+            // Use the same private capability as a pinned shortcut to navigate it.
+            val id = withContext(Dispatchers.IO) { LauncherShortcutStore.save(this@DesktopSetupActivity, "omarchy", "") }
+            if (id == null) {
+                status.setText(R.string.tc4_shortcut_save_failed)
+                return@launch
+            }
+            startActivity(Intent(this@DesktopSetupActivity, MainActivity::class.java).setAction(MainActivity.ACTION_SHORTCUT)
+                .putExtra(LauncherShortcutStore.EXTRA_ID, id))
+            finish()
+        }
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 }

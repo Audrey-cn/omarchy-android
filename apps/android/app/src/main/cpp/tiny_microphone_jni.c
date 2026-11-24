@@ -135,12 +135,13 @@ typedef struct {
     /* ---- socket ---- */
     int            sock_fd;
     pthread_t      sock_thread;
+    bool           thread_started; /* JNI calls are serialized by the Kotlin supervisor. */
 
     /* ---- AAudio (owned by capture callback context) ---- */
     AAudioStream  *stream;
 } state_t;
 
-static state_t g;
+static state_t g = { .sock_fd = -1 };
 
 /* ================================================================= */
 /*  Socket helpers (NDK)                                             */
@@ -423,6 +424,8 @@ Java_com_fct_tc4_TinyMicrophone_nativeStart(JNIEnv *env, jclass cls,
 {
     (void)cls;
 
+    /* Never overwrite a pthread/stream that has not yet been joined. */
+    if (g.thread_started) return JNI_FALSE;
     const char *path = (*env)->GetStringUTFChars(env, socketPath, NULL);
     if (!path) return JNI_FALSE;
 
@@ -448,8 +451,10 @@ Java_com_fct_tc4_TinyMicrophone_nativeStart(JNIEnv *env, jclass cls,
     }
     (*env)->ReleaseStringUTFChars(env, socketPath, path);
 
-    if (g.sock_fd < 0)
+    if (g.sock_fd < 0) {
+        atomic_store_explicit(&g.running, false, memory_order_release);
         return JNI_FALSE;
+    }
 
     /* Launch socket writer (which also manages AAudio capture) */
     if (pthread_create(&g.sock_thread, NULL,
@@ -457,10 +462,19 @@ Java_com_fct_tc4_TinyMicrophone_nativeStart(JNIEnv *env, jclass cls,
         LOGE("pthread_create(sock_thread) failed");
         close(g.sock_fd);
         g.sock_fd = -1;
+        atomic_store_explicit(&g.running, false, memory_order_release);
         return JNI_FALSE;
     }
 
+    g.thread_started = true;
     return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fct_tc4_TinyMicrophone_nativeIsRunning(JNIEnv *env, jclass cls)
+{
+    (void)env; (void)cls;
+    return atomic_load_explicit(&g.running, memory_order_acquire) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
@@ -478,7 +492,10 @@ close(g.sock_fd);
 g.sock_fd = -1;
 }
 
-pthread_join(g.sock_thread, NULL);
+if (g.thread_started) {
+    pthread_join(g.sock_thread, NULL);
+    g.thread_started = false;
+}
 
 LOGI("nativeStop complete");
 }

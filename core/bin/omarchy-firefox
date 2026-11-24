@@ -5,4 +5,4 @@ set -euo pipefail
 export MOZ_ENABLE_WAYLAND=1 GDK_BACKEND=wayland
 PROFILE="${HOME:-/root}/.local/share/omarchy-firefox/profile"
 mkdir -p "$PROFILE"
-exec /usr/bin/firefox --no-remote --profile "$PROFILE" "$@"
+exec /usr/bin/firefox --profile "$PROFILE" "$@"

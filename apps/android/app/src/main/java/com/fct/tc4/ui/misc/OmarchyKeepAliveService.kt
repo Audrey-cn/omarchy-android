@@ -6,12 +6,15 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import com.fct.tc4.R
+import com.termux.x11.CmdEntryPointService
 import com.termux.x11.MainActivity
 
 /** Keeps the active container visible to Android while its desktop is in the background. */
@@ -19,6 +22,15 @@ class OmarchyKeepAliveService : Service() {
     companion object {
         private const val CHANNEL = "omarchy-desktop-session"
         private const val NOTICE = 2402
+    }
+
+    private var xserverBound = false
+    private val xserverConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {}
+        override fun onServiceDisconnected(name: ComponentName?) {}
+        // CmdEntryPointService deliberately supplies no binder. Keep the binding
+        // until onDestroy: it exists to protect the separate :xserver process.
+        override fun onNullBinding(name: ComponentName?) {}
     }
 
     override fun onCreate() {
@@ -55,6 +67,15 @@ class OmarchyKeepAliveService : Service() {
         } catch (error: RuntimeException) {
             Log.w("OmarchyKeepAlive", "Background residency unavailable", error)
             stopSelf()
+            return
+        }
+        try {
+            xserverBound = bindService(
+                Intent(this, CmdEntryPointService::class.java),
+                xserverConnection, BIND_AUTO_CREATE or BIND_IMPORTANT
+            )
+        } catch (error: RuntimeException) {
+            Log.w("OmarchyKeepAlive", "X server priority binding unavailable", error)
         }
     }
 
@@ -71,6 +92,11 @@ class OmarchyKeepAliveService : Service() {
     }
 
     override fun onDestroy() {
+        if (xserverBound) {
+            xserverBound = false
+            try { unbindService(xserverConnection) }
+            catch (error: RuntimeException) { Log.w("OmarchyKeepAlive", "X server unbind failed", error) }
+        }
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }

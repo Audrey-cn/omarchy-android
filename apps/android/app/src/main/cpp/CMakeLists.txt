@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.18.1)
 project("tiny_jni")
 
+# NDK r27 and lower need explicit alignment for 16 KB page-size devices.
+add_link_options("-Wl,-z,max-page-size=16384" "-Wl,-z,common-page-size=16384")
+
 find_library(aaudio-lib aaudio)
 
 # ── TinyAudio (speaker / playback) ────────────────────────────────

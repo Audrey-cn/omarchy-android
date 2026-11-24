@@ -20,10 +20,13 @@ package com.fct.tc4.ui.page
 import android.app.Application
 import android.app.ActivityManager
 import android.content.Intent
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.system.Os
 import android.system.OsConstants
 import android.util.Log
 import com.termux.x11.CmdEntryPointService
+import com.offsec.nhterm.backend.TerminalSession
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -43,6 +46,7 @@ import com.fct.tc4.ui.misc.UpdateResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
@@ -55,6 +59,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.net.BindException
 import java.net.DatagramSocket
@@ -83,7 +89,10 @@ class ContainerMainViewModel(
     /** 是否启动过 X server（避免未启动时就发送 ACTION_STOP 导致创建 :xserver 进程） */
     private var xserverStarted = false
     private var exited = false
-    private val initializationJob: Job
+    private var explicitExitCompleted = false
+    private var ownedSession: TerminalSession? = null
+    private var initializationJob: Job? = null
+    private val xserverMutex = Mutex()
 
     private lateinit var config: Map<String, Any>
 
@@ -133,7 +142,7 @@ class ContainerMainViewModel(
                 withContext(Dispatchers.IO) {
                     launchContainer()
                 }
-                launchCompleted = _errorMessage.value == null
+                launchCompleted = _errorMessage.value == null && !exited
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -141,8 +150,7 @@ class ContainerMainViewModel(
                 _errorMessage.value = getApplication<Application>().getString(R.string.omarchy_container_start_failed)
             } finally {
                 if (!launchCompleted) {
-                    Global.x11SessionActive = false
-                    stopKeepAliveService()
+                    stopRuntime()
                 }
             }
             _isInitialized.value = true
@@ -171,22 +179,15 @@ class ContainerMainViewModel(
     }
 
     fun exitContainer() {
-        if (exited) return
-        exited = true
-        Global.x11SessionActive = false
-        initializationJob.cancel()
-        Global.onSessionSignal9 = null // 主动退出，不触发 signal 9 跳转
-        killXServer()
-        stopKeepAliveService()
-        TinyAudio.stop()
-        TinyMicrophone.stop()
-        TinyIpp.stop()
-        TinyStorage.stop()
+        if (explicitExitCompleted) return
+        explicitExitCompleted = true
+        stopRuntime()
+        initializationJob?.cancel()
         if (!::config.isInitialized) return
-        val pid = Global.terminalSession?.pid ?: 0
-        if (pid > 0) {
-            Os.kill(-pid, OsConstants.SIGQUIT)
-        }
+        // Startup failure already stopped runtime resources. Explicit Exit must
+        // still reset its host shell, but may never replace a newer VM's shell.
+        val session = ownedSession ?: return
+        if (Global.terminalSession !== session) return
         Global.newSession()
         Global.setupEnvironment()
         Global.sendCommand("rm ${getApplication<Application>().filesDir}/boot_${code}.sh")
@@ -203,8 +204,11 @@ class ContainerMainViewModel(
 
     @Suppress("UNCHECKED_CAST")
     fun enterGui() {
+        if (exited || !::config.isInitialized) return
         Global.userRequestedManagementPage = false
         viewModelScope.launch {
+            initializationJob?.join()
+            if (exited) return@launch
             val features = config["feature"] as? List<Map<String, Any>> ?: emptyList()
             for (feature in features) {
                 val type = feature["type"] as? String ?: continue
@@ -222,6 +226,9 @@ class ContainerMainViewModel(
                         _navigationEvents.tryEmit(GuiNavigationEvent.OpenAvnc(link, adaptToScreenSize, scaleRatio, useUnixSocket))
                     }
                     "x11" -> {
+                        val args = feature["args"] as? List<String> ?: continue
+                        val command = feature["command"] as? String ?: continue
+                        if (!ensureXServer(args, command)) return@launch
                         _navigationEvents.tryEmit(GuiNavigationEvent.OpenX11)
                     }
                 }
@@ -241,12 +248,17 @@ class ContainerMainViewModel(
             return false
         }
         Global.terminalSession?.finishIfRunning()
-        Global.newSession(onFinished = { exitCode ->
+        ownedSession = Global.newSession(onFinished = { exitCode ->
             // An exited VM can receive its old shell's callback after a new session starts.
             if (exited) return@newSession
-            Global.x11SessionActive = false
-            if (exitCode == -9) {
-                Global.onSessionSignal9?.invoke()
+            if (Global.terminalSession !== ownedSession) return@newSession
+            viewModelScope.launch(Dispatchers.Main.immediate) {
+                if (exited) return@launch
+                if (Global.terminalSession !== ownedSession) return@launch
+                val onSignal9 = Global.onSessionSignal9.takeIf { exitCode == -9 }
+                stopRuntime(app.getString(R.string.omarchy_container_start_failed))
+                initializationJob?.cancel()
+                onSignal9?.invoke()
             }
         })
         Global.onSessionSignal9 = {
@@ -311,7 +323,9 @@ class ContainerMainViewModel(
     private suspend fun sendStartupCommand(command: String) = withContext(Dispatchers.Main) {
         // Exit/reset also runs on Main. Never dispatch an old startup command
         // into the fresh host shell after exitContainer replaces Global's session.
-        if (exited) throw CancellationException("Container exited")
+        if (exited || ownedSession == null || Global.terminalSession !== ownedSession) {
+            throw CancellationException("Container session was replaced or exited")
+        }
         Global.sendCommand(command)
     }
 
@@ -375,84 +389,141 @@ class ContainerMainViewModel(
                     if (!Global.autoLaunchGui) continue
                     val args = feature["args"] as? List<String> ?: continue
                     val command = feature["command"] as? String ?: continue
-                    if (!launchXServer(args)) continue
-                    if (!waitForFile("${getApplication<Application>().filesDir}/tmp/.X11-unix/X${extractDisplay(args)}")) {
-                        continue
-                    }
-                    sendStartupCommand(command)
+                    if (!ensureXServer(args, command)) return
                     _navigationEvents.tryEmit(GuiNavigationEvent.OpenX11)
                 }
             }
         }
     }
 
-    private suspend fun launchXServer(xserverArgs: List<String>): Boolean = withContext(Dispatchers.Main) {
-        currentCoroutineContext().ensureActive()
-        if (exited) return@withContext false
-        if (xserverStarted) return@withContext true
-        val app = getApplication<Application>()
-        val socket = File(app.filesDir, "tmp/.X11-unix/X${extractDisplay(xserverArgs)}")
-        // CmdEntryPointService starts a new native main() on EVERY ACTION_START.
-        // A ViewModel recreation must stop a surviving :xserver before starting
-        // again; a leftover socket must never satisfy the readiness wait early.
-        if (isXServerProcessAlive()) {
+    /** One owner covers initial launch and a return after Android killed the X server. */
+    private suspend fun ensureXServer(xserverArgs: List<String>, guestCommand: String): Boolean = withContext(Dispatchers.Main) {
+        xserverMutex.withLock {
+            currentCoroutineContext().ensureActive()
+            if (exited) return@withLock false
+            val app = getApplication<Application>()
+            val socket = File(app.filesDir, "tmp/.X11-unix/X${extractDisplay(xserverArgs)}")
+            if (xserverStarted && isXSocketReady(socket)) return@withLock !exited
+            val restarting = xserverStarted
+            xserverStarted = false
+            // ACTION_STOP kills the process, while BIND_AUTO_CREATE may create
+            // a fresh idle service immediately. Wait for the OLD PIDs only.
+            val previousPids = xserverProcesses().map { it.pid }.toSet()
+            if (previousPids.isNotEmpty()) {
+                try {
+                    app.startService(Intent(app, CmdEntryPointService::class.java).apply {
+                        action = CmdEntryPointService.ACTION_STOP
+                    })
+                } catch (error: RuntimeException) {
+                    Log.e(TAG, "Previous X server could not be stopped", error)
+                    stopRuntime(app.getString(R.string.omarchy_xserver_restart_failed))
+                    return@withLock false
+                }
+                val stopped = withTimeoutOrNull(2_000L) {
+                    while (xserverProcesses().any { it.pid in previousPids }) delay(50)
+                    true
+                } ?: false
+                if (!stopped) {
+                    Log.e(TAG, "Previous X server did not stop; refusing duplicate native startup")
+                    stopRuntime(app.getString(R.string.omarchy_xserver_restart_failed))
+                    return@withLock false
+                }
+            }
+            currentCoroutineContext().ensureActive()
+            if (exited) return@withLock false
+            if (socket.exists() && !socket.delete()) {
+                Log.e(TAG, "Cannot remove stale X server socket: $socket")
+                stopRuntime(app.getString(R.string.omarchy_xserver_restart_failed))
+                return@withLock false
+            }
+            val envKeys = arrayOf(
+                "TMPDIR", "XKB_CONFIG_ROOT",
+                "TERMUX_X11_DEBUG", "TERMUX_X11_OVERRIDE_PACKAGE"
+            )
+            val envVals = arrayOf(
+                "${app.filesDir.absolutePath}/tmp",
+                "${app.dataDir.absolutePath}/$code/usr/share/X11/xkb",
+                "1",
+                app.packageName
+            )
             try {
                 app.startService(Intent(app, CmdEntryPointService::class.java).apply {
-                    action = CmdEntryPointService.ACTION_STOP
+                    action = CmdEntryPointService.ACTION_START
+                    putExtra(CmdEntryPointService.EXTRA_ARGS, xserverArgs.toTypedArray())
+                    putExtra(CmdEntryPointService.EXTRA_ENV_KEYS, envKeys)
+                    putExtra(CmdEntryPointService.EXTRA_ENV_VALUES, envVals)
                 })
             } catch (error: RuntimeException) {
-                Log.e(TAG, "Previous X server could not be stopped", error)
-                _errorMessage.value = app.getString(R.string.omarchy_xserver_restart_failed)
-                return@withContext false
+                Log.e(TAG, "X server service could not be started", error)
+                stopRuntime(app.getString(R.string.omarchy_xserver_restart_failed))
+                return@withLock false
             }
-            delay(350)
-            val stopped = withTimeoutOrNull(1500) {
-                while (isXServerProcessAlive()) delay(50)
-                true
+            xserverStarted = true
+            val ready = withTimeoutOrNull(15_000L) {
+                while (!exited && !isXSocketReady(socket)) delay(100)
+                !exited
             } ?: false
-            if (!stopped) {
-                Log.e(TAG, "Previous X server did not stop; refusing duplicate native startup")
-                _errorMessage.value = app.getString(R.string.omarchy_xserver_restart_failed)
-                return@withContext false
+            if (!ready && !exited) {
+                Log.e(TAG, "X server socket did not become ready: $socket")
+                stopRuntime(app.getString(R.string.omarchy_xserver_restart_failed))
             }
+            if (!ready) return@withLock false
+            // Starting only the Android listener cannot revive an X11-backed
+            // compositor that exited when the old listener died.
+            if (!startGuestDisplay(guestCommand, restarting)) {
+                if (!exited) stopRuntime(app.getString(R.string.omarchy_xserver_restart_failed))
+                return@withLock false
+            }
+            !exited
         }
-        currentCoroutineContext().ensureActive()
-        if (exited) return@withContext false
-        if (socket.exists() && !socket.delete()) {
-            Log.e(TAG, "Cannot remove stale X server socket: $socket")
-            _errorMessage.value = app.getString(R.string.omarchy_xserver_restart_failed)
-            return@withContext false
-        }
-        val envKeys = arrayOf(
-            "TMPDIR", "XKB_CONFIG_ROOT",
-            "TERMUX_X11_DEBUG", "TERMUX_X11_OVERRIDE_PACKAGE"
-        )
-        val envVals = arrayOf(
-            "${app.filesDir.absolutePath}/tmp",
-            "${app.dataDir.absolutePath}/$code/usr/share/X11/xkb",
-            "1",
-            app.packageName
-        )
-        try {
-            app.startService(Intent(app, CmdEntryPointService::class.java).apply {
-                action = CmdEntryPointService.ACTION_START
-                putExtra(CmdEntryPointService.EXTRA_ARGS, xserverArgs.toTypedArray())
-                putExtra(CmdEntryPointService.EXTRA_ENV_KEYS, envKeys)
-                putExtra(CmdEntryPointService.EXTRA_ENV_VALUES, envVals)
-            })
-        } catch (error: RuntimeException) {
-            Log.e(TAG, "X server service could not be started", error)
-            _errorMessage.value = app.getString(R.string.omarchy_xserver_restart_failed)
-            return@withContext false
-        }
-        xserverStarted = true
-        true
     }
 
-    private fun isXServerProcessAlive(): Boolean {
+    private suspend fun startGuestDisplay(command: String, restarting: Boolean): Boolean {
+        if (!restarting || code != "omarchy") {
+            sendStartupCommand(command)
+            return true
+        }
+        val app = getApplication<Application>()
+        val completion = File(app.filesDir, "tmp/.omarchy-x11-recovery-${java.util.UUID.randomUUID()}")
+        // /tmp is the guest bind of filesDir/tmp. Never replay a legacy startup
+        // block on recovery: it can duplicate audio, D-Bus and deck daemons.
+        sendStartupCommand("( if [ -x /usr/local/bin/omarchy-recover-x11 ]; then " +
+            "/usr/local/bin/omarchy-recover-x11 >/tmp/x11-recovery.log 2>&1; result=\$?; " +
+            "else result=127; fi; printf '%s\\n' \"\$result\" > /tmp/${completion.name}; ) &")
+        return try {
+            val status = withTimeoutOrNull(30_000L) {
+                while (!exited) {
+                    val result = withContext(Dispatchers.IO) {
+                        try { if (completion.isFile) completion.readText().trim().toIntOrNull() else null }
+                        catch (_: java.io.IOException) { null }
+                    }
+                    if (result != null) return@withTimeoutOrNull result
+                    delay(100)
+                }
+                null
+            }
+            if (status != 0) Log.e(TAG, "Guest display recovery failed (status=$status); see /tmp/x11-recovery.log")
+            status == 0 && !exited
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) { completion.delete() }
+        }
+    }
+
+    private fun xserverProcesses(): List<ActivityManager.RunningAppProcessInfo> {
         val app = getApplication<Application>()
         return app.getSystemService(ActivityManager::class.java).runningAppProcesses
-            ?.any { it.processName == "${app.packageName}:xserver" } == true
+            .orEmpty().filter { it.processName == "${app.packageName}:xserver" }
+    }
+
+    /** A stale filesystem entry is not evidence of a listening X server. */
+    private suspend fun isXSocketReady(socket: File): Boolean = withContext(Dispatchers.IO) {
+        if (!socket.exists() || xserverProcesses().isEmpty()) return@withContext false
+        try {
+            LocalSocket().use { client ->
+                client.connect(LocalSocketAddress(socket.absolutePath, LocalSocketAddress.Namespace.FILESYSTEM))
+            }
+            true
+        } catch (_: java.io.IOException) { false }
     }
 
     private fun startKeepAliveService() {
@@ -470,7 +541,7 @@ class ContainerMainViewModel(
     }
 
     private fun killXServer() {
-        if (xserverStarted) {
+        if (xserverStarted || xserverProcesses().isNotEmpty()) {
             xserverStarted = false
             // ACTION_START can still be queued before :xserver appears in the
             // process list. Queue STOP too so an immediate exit cannot orphan it.
@@ -489,13 +560,48 @@ class ContainerMainViewModel(
         }
     }
 
-    override fun onCleared() {
+    /** Main-thread terminal state shared by startup failure, shell exit and explicit exit. */
+    private fun stopRuntime(message: String? = null): Boolean {
+        if (exited) return false
         exited = true
+        if (message != null) _errorMessage.value = message
+        _isInitialized.value = true
+        if (ownedSession == null || Global.terminalSession !== ownedSession) return false
         Global.x11SessionActive = false
-        initializationJob.cancel()
-        Global.onSessionSignal9 = null // 防止回调泄漏
-        killXServer()
-        stopKeepAliveService()
+        Global.onSessionSignal9 = null
+        // Try every owner even if an individual bridge's teardown fails.
+        val cleanup: List<Pair<String, () -> Unit>> = listOf(
+            "keepalive" to { stopKeepAliveService() },
+            "X server" to { killXServer() },
+            "audio" to { TinyAudio.stop() },
+            "microphone" to { TinyMicrophone.stop() },
+            "printing" to { TinyIpp.stop() },
+            "storage" to { TinyStorage.stop() },
+            "container shell" to {
+                val session = ownedSession
+                val pid = session?.pid ?: 0
+                // Preserve process-group termination for PRoot descendants;
+                // finishIfRunning alone may terminate only the terminal PID.
+                if (pid > 0) {
+                    try { Os.kill(-pid, OsConstants.SIGQUIT) }
+                    catch (error: android.system.ErrnoException) {
+                        if (error.errno != OsConstants.ESRCH) Log.w(TAG, "Container process group stop failed", error)
+                    }
+                }
+                session?.finishIfRunning()
+            }
+        )
+        for ((owner, stop) in cleanup) {
+            try { stop() }
+            catch (error: Exception) { Log.w(TAG, "$owner cleanup failed", error) }
+            catch (error: LinkageError) { Log.w(TAG, "$owner cleanup unavailable", error) }
+        }
+        return true
+    }
+
+    override fun onCleared() {
+        stopRuntime()
+        initializationJob?.cancel()
         super.onCleared()
     }
 

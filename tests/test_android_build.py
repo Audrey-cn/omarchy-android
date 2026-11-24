@@ -175,7 +175,7 @@ class AndroidBuildTests(unittest.TestCase):
         self.git("commit", "-qm", "native runtime")
         return manifest
 
-    def apk_fixture(self, native=False):
+    def apk_fixture(self, native=False, debuggable=False):
         if native:
             self.native_fixture()
         env = self.trusted_env()
@@ -193,7 +193,8 @@ class AndroidBuildTests(unittest.TestCase):
         apksigner.chmod(0o755)
         aapt = tools / "aapt"
         aapt.write_text("#!/bin/sh\nprintf \"package: name='com.omarchy.android' versionCode='"
-                        + str(metadata["versionCode"]) + "' versionName='" + metadata["versionName"] + "'\\n\"\n")
+                        + str(metadata["versionCode"]) + "' versionName='" + metadata["versionName"] + "'\\n\"\n"
+                        + ("printf 'application-debuggable\\n'\n" if debuggable else ""))
         aapt.chmod(0o755)
         apk = self.root / "fixture.apk"
         self.write_apk(apk)
@@ -220,10 +221,12 @@ class AndroidBuildTests(unittest.TestCase):
 
     def test_apk_certificate_and_versions_must_match_prepared_metadata(self):
         apk, metadata_path, args = self.apk_fixture()
+        args += ("--require-non-debuggable",)
         result = self.run_script(*args)
         self.assertEqual(result.returncode, 0, result.stderr)
         verified = json.loads(metadata_path.read_text())
         self.assertEqual(verified["certificateSha256"], "ab" * 32)
+        self.assertFalse(verified["debuggable"])
         self.assertFalse(verified["upgradeable"])
         self.assertEqual(verified["managedFileCount"], 2)
         verified.update(signingMode="stable-test", expectedCertificateSha256="ab" * 32)
@@ -238,6 +241,24 @@ class AndroidBuildTests(unittest.TestCase):
         self.assertNotEqual(mismatch.returncode, 0)
         self.assertIn("certificate", mismatch.stderr)
         self.assertFalse(json.loads(metadata_path.read_text())["upgradeable"])
+
+    def test_release_verification_rejects_debuggable_apk_and_clears_success_receipt(self):
+        apk, metadata_path, args = self.apk_fixture(debuggable=True)
+        metadata = json.loads(metadata_path.read_text())
+        metadata.update(signingMode="stable-test", expectedCertificateSha256="ab" * 32)
+        metadata_path.write_text(json.dumps(metadata))
+        debug = self.run_script(*args)
+        self.assertEqual(debug.returncode, 0, debug.stderr)
+        debug_receipt = json.loads(metadata_path.read_text())
+        self.assertIn("debuggable", debug_receipt)
+        self.assertTrue(debug_receipt["debuggable"])
+        rejected = self.run_script(*args, "--require-non-debuggable")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("debuggable", rejected.stderr)
+        failed = json.loads(metadata_path.read_text())
+        self.assertFalse(failed["upgradeable"])
+        for key in ("debuggable", "certificateSha256", "delivery", "managedFileCount"):
+            self.assertNotIn(key, failed)
 
     def test_online_installer_verifies_catalog_native_and_excludes_guest_payload(self):
         apk, metadata_path, args = self.apk_fixture(native=True)

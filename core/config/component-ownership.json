@@ -226,6 +226,7 @@
     "core/bin/omarchy-playwright-tool.cjs",
     "core/bin/omarchy-playwright128",
     "core/bin/omarchy-playwright128-check.cjs",
+    "core/bin/omarchy-recover-x11",
     "core/bin/omarchy-repair-hermes-onboarding",
     "core/bin/omarchy-repair-hermes-pty",
     "core/bin/omarchy-restore-x11-keyboard",

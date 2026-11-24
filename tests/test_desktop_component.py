@@ -183,6 +183,7 @@ class DesktopComponent(unittest.TestCase):
         )
         manifest = json.loads(files["manifest.json"])
         self.assertEqual(manifest["files"][command], updater.digest(files[command]))
+        self.assertIn("fcitx5-config-qt", manifest["depends"].split(", "))
         for dependency in ("pulseaudio", "pulseaudio-utils"):
             self.assertIn(dependency, manifest["depends"].split(", "))
         data = subprocess.check_output(["ar", "p", self.archive, "data.tar.gz"])
@@ -220,6 +221,17 @@ class DesktopComponent(unittest.TestCase):
             self.assertEqual(archive.getmember("./" + builder.PREFIX + command).mode, 0o755)
         self.install()
         launcher = updater.LAUNCH / "omarchy-dock"
+        self.assertTrue(launcher.is_symlink())
+        self.assertEqual(launcher.readlink(), updater.PRIVATE / command)
+        self.assertEqual(launcher.read_bytes(), files[command])
+
+    def test_x11_recovery_package_and_launcher_activation(self):
+        files = package_files(self.archive)
+        command = "bin/omarchy-recover-x11"
+        self.assertIn(command, files.keys())
+        self.assertEqual(files[command], (REPO / "core" / command).read_bytes())
+        self.install()
+        launcher = updater.LAUNCH / "omarchy-recover-x11"
         self.assertTrue(launcher.is_symlink())
         self.assertEqual(launcher.readlink(), updater.PRIVATE / command)
         self.assertEqual(launcher.read_bytes(), files[command])

@@ -420,11 +420,11 @@ def verify_managed_payload(apk, source_sha):
     return dict(managedSourceSha=source_sha, managedFileCount=len(expected), managedPayloadBytes=payload_bytes)
 
 
-def verify(apk, metadata_path, build_tools, repo, delivery):
+def verify(apk, metadata_path, build_tools, repo, delivery, require_non_debuggable=False):
     metadata = json.loads(metadata_path.read_text())
     # Clear any old success receipt before a retry, including a failed retry.
     metadata["upgradeable"] = False
-    for key in ("delivery", "catalogSha256", "certificateSha256", "managedSourceSha", "managedFileCount", "managedPayloadBytes",
+    for key in ("delivery", "debuggable", "catalogSha256", "certificateSha256", "managedSourceSha", "managedFileCount", "managedPayloadBytes",
                 "nativeRuntimeId", "nativeLibraryCount", "nativeLibraries"):
         metadata.pop(key, None)
     write_metadata(metadata_path, metadata)
@@ -441,6 +441,9 @@ def verify(apk, metadata_path, build_tools, repo, delivery):
     package = re.search(r"^package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", badging, re.M)
     if not package or package.groups() != (metadata["packageName"], str(metadata["versionCode"]), metadata["versionName"]):
         raise ValueError("APK package/version does not match prepared source metadata")
+    debuggable = bool(re.search(r"^application-debuggable(?:[:\s]|$)", badging, re.M))
+    if require_non_debuggable and debuggable:
+        raise ValueError("Release APK must not be debuggable")
     if delivery is None:
         catalog = repo / "apps/android/app/src/main/assets/initial-images.json"
         delivery = "online-installer" if catalog.exists() else "managed"
@@ -451,7 +454,8 @@ def verify(apk, metadata_path, build_tools, repo, delivery):
     else:
         metadata.update(verify_managed_payload(apk, metadata["sourceSha"]))
     metadata.update(verify_native_runtime(apk, repo, metadata))
-    metadata.update(delivery=delivery, certificateSha256=fingerprint, upgradeable=metadata["signingMode"] == "stable-test")
+    metadata.update(delivery=delivery, debuggable=debuggable, certificateSha256=fingerprint,
+                    upgradeable=metadata["signingMode"] == "stable-test")
     write_metadata(metadata_path, metadata)
     print(f"Verified APK {metadata['versionName']} ({metadata['signingMode']})")
 
@@ -470,6 +474,8 @@ def main():
     check = commands.add_parser("verify")
     check.add_argument("--delivery", choices=("managed", "online-installer"),
                        help="Defaults to online-installer in checkouts with an image catalog")
+    check.add_argument("--require-non-debuggable", action="store_true",
+                       help="Reject APKs with android:debuggable enabled (release delivery)")
     check.add_argument("--apk", type=Path, required=True)
     check.add_argument("--metadata", type=Path, required=True)
     check.add_argument("--build-tools", type=Path, required=True)
@@ -484,7 +490,8 @@ def main():
         elif args.action == "generate-keystore":
             generate_keystore(args.output_dir.absolute(), args.openssl)
         else:
-            verify(args.apk, args.metadata, args.build_tools, args.repo.resolve(), args.delivery)
+            verify(args.apk, args.metadata, args.build_tools, args.repo.resolve(), args.delivery,
+                   args.require_non_debuggable)
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, tarfile.TarError) as error:
         # Do not print arbitrary tool output, key bytes, passwords or encoded secrets.
         print(f"Android build preparation failed: {error}", file=sys.stderr)

@@ -25,6 +25,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import com.fct.tc4.databinding.Tc4ActivityLicenseBinding
+import com.fct.tc4.R
 
 class LicenseActivity : AppCompatActivity() {
 
@@ -46,7 +47,7 @@ class LicenseActivity : AppCompatActivity() {
         binding.licenseText.text = try {
             assets.open("gpl_v3.txt").bufferedReader().use { it.readText() }
         } catch (_: Exception) {
-            "GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007\n\n无法加载完整许可证文本。"
+            getString(R.string.tc4_license_fallback)
         }
     }
 }

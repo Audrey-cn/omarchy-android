@@ -46,7 +46,8 @@ export AR="$ndk_bin/llvm-ar"
 export RANLIB="$ndk_bin/llvm-ranlib"
 export STRIP="$ndk_bin/llvm-strip"
 export CFLAGS='-O2 -fPIC'
-export LDFLAGS=''
+page_size_ldflags=(-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384)
+export LDFLAGS="${page_size_ldflags[*]}"
 export PYTHON=python3
 unset PROOT_UNBUNDLE_LOADER PROOT_WITH_LIBANDROID_SHMEM
 "$CC" --version > "$artifact_dir/compiler-version.txt"
@@ -60,7 +61,7 @@ sha256sum "$experiment_dir/build-android.sh" "$experiment_dir/build-probe.sh" \
 env -u CC -u CFLAGS -u LDFLAGS /usr/bin/cc -std=gnu11 -O2 -Wall -Wextra -Werror \
   "$experiment_dir/procfd-probe.c" -o "$work_dir/probe-linux"
 "$work_dir/probe-linux" > "$artifact_dir/probe-linux-control.txt"
-bash "$experiment_dir/build-probe.sh" "$artifact_dir/procfd-probe-android-arm64"
+bash "$experiment_dir/build-probe.sh" "$artifact_dir/procfd-probe-android-arm64" "${page_size_ldflags[@]}"
 
 mkdir "$work_dir/talloc" "$work_dir/proot-control"
 tar -xzf "$work_dir/talloc.tar.gz" -C "$work_dir/talloc" --strip-components=1
@@ -120,7 +121,7 @@ cp "$experiment_dir/talloc-cross-answers.txt" "$work_dir/talloc/cross-answers.tx
 )
 "$CC" -std=gnu11 -Wall -Wextra -Werror -I"$prefix/include" \
   "$experiment_dir/talloc-link-smoke.c" -L"$prefix/lib" -ltalloc \
-  -Wl,--no-undefined -o "$artifact_dir/talloc-link-smoke-android-arm64"
+  -Wl,--no-undefined "${page_size_ldflags[@]}" -o "$artifact_dir/talloc-link-smoke-android-arm64"
 
 # GNUmakefile uses -m32 to build its ARM loader. NDK requires a separate driver.
 cat > "$work_dir/ndk-cc" <<'WRAPPER'
@@ -143,7 +144,8 @@ for variant in control patched; do
   mkdir -p "$artifact_dir/$variant"
   env CPPFLAGS="-I$prefix/include -DARG_MAX=131072" \
     CFLAGS='-O2 -fPIC -pthread' \
-    LDFLAGS="-L$prefix/lib -pthread" \
+    LDFLAGS="-L$prefix/lib -pthread $LDFLAGS" \
+    LOADER_LDFLAGS="$LDFLAGS" "LOADER_LDFLAGS-m32=$LDFLAGS" \
     make -C "$variant_dir/src" -j2 V=1 \
       CC="$work_dir/ndk-cc" STRIP="$STRIP" \
       OBJCOPY="$ndk_bin/llvm-objcopy" OBJDUMP="$ndk_bin/llvm-objdump" \

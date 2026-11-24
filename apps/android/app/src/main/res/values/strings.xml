@@ -183,6 +183,8 @@
     <!-- ==================== Launcher Shortcut ==================== -->
     <string name="tc4_shortcut_dialog_title">Launcher Shortcut Generator</string>
     <string name="tc4_shortcut_pin_unsupported">Current launcher does not support pinning shortcuts</string>
+    <string name="tc4_shortcut_invalid">This shortcut is invalid. Please recreate it in Omarchy Android.</string>
+    <string name="tc4_shortcut_save_failed">Could not save the shortcut. Please try again.</string>
 
     <!-- ==================== Desktop File Picker ==================== -->
     <string name="tc4_desktop_picker_title">Select .desktop File</string>
@@ -214,6 +216,7 @@
 
     <!-- ==================== License Page ==================== -->
     <string name="tc4_license_title">GNU General Public License v3.0</string>
+    <string name="tc4_license_fallback">GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007\n\nUnable to load the full license text.</string>
     <string name="tc4_license_description">Omarchy Android is open source under GPLv3 (built with Tiny Container, Termux:X11, PRoot, Sway &amp; Omarchy)</string>
 
     <!-- ==================== Open Source Libs Page ==================== -->

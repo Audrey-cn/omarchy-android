@@ -182,6 +182,8 @@
 
     <!-- ==================== Launcher Shortcut ==================== -->
     <string name="tc4_shortcut_dialog_title">启动器捷径生成器</string>
+    <string name="tc4_shortcut_invalid">此捷径无效，请在 Omarchy Android 中重新创建。</string>
+    <string name="tc4_shortcut_save_failed">无法保存捷径，请重试。</string>
     <string name="tc4_shortcut_pin_unsupported">当前桌面不支持固定快捷方式</string>
 
     <!-- ==================== Desktop File Picker ==================== -->
@@ -214,6 +216,7 @@
 
     <!-- ==================== License Page ==================== -->
     <string name="tc4_license_title">GNU General Public License v3.0</string>
+    <string name="tc4_license_fallback">GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007\n\n无法加载完整许可证文本。</string>
     <string name="tc4_license_description">Omarchy Android 基于 GPLv3 许可证开源（致谢 Tiny Container / Termux:X11 / PRoot / Sway / Omarchy）</string>
 
     <!-- ==================== Open Source Libs Page ==================== -->

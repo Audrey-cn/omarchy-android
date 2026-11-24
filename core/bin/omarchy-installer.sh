@@ -46,6 +46,21 @@ install_webapp_desktop() {
         return 1
     fi
     local url="$2"
+    if [[ "$url" == *$'\n'* || "$url" == *$'\r'* ]]; then
+        echo "网页地址不能含换行" >&2
+        return 1
+    fi
+    local exec_url
+    # Desktop Entry quoting has two layers: argument quoting, then string
+    # backslash escaping. Percent signs are literal field-code escapes.
+    exec_url=$(python3 - "$url" <<'PY'
+import sys
+value = sys.argv[1].replace('%', '%%')
+for character in ('\\', '"', '`', '$'):
+    value = value.replace(character, '\\' + character)
+print('"' + value.replace('\\', '\\\\') + '"')
+PY
+)
     local icon_name="$3"
     local icon_src="$OMARCHY_PATH/applications/icons/${icon_name}.png"
     local icon_dest="$ICON_DIR/${icon_name}.png"
@@ -62,7 +77,7 @@ install_webapp_desktop() {
 Version=1.0
 Name=$name
 Comment=$name (Omarchy App)
-Exec=/usr/local/bin/omarchy-chromium --app=$url
+Exec=/usr/local/bin/omarchy-launch-webapp $exec_url
 Icon=$icon_dest
 Terminal=false
 Type=Application
@@ -72,7 +87,7 @@ EOF
     echo ""
     echo "✓ $name 已安装完成！"
     echo "  -> 已添加到应用网格 (Super + Space)，正在为你启动窗口..."
-    /usr/local/bin/omarchy-chromium --app="$url" &
+    /usr/local/bin/omarchy-launch-webapp "$url" &
 }
 
 install_nerd_font() {

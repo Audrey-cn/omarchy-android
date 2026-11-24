@@ -2,7 +2,7 @@
 """
 Omarchy Native AppGrid (1:1 visual & UX replica of official basecamp/omarchy AppGrid.qml)
 - 6-column centered icon-on-top, label-below grid (56px icons)
-- Live Omarchy theme colors (reads /root/.config/omarchy/current/theme/colors.toml or waybar.css)
+- Live Omarchy theme colors (reads /root/.config/omarchy/current/theme/colors.toml)
 - Instant search, Arrow key navigation, Enter/Click launch, Esc close
 - Respects official launcher.hides
 """
@@ -48,7 +48,8 @@ def load_theme_colors():
     colors_toml = "/root/.config/omarchy/current/theme/colors.toml"
     if os.path.exists(colors_toml):
         try:
-            txt = open(colors_toml, "r", encoding="utf-8", errors="ignore").read()
+            with open(colors_toml, encoding="utf-8", errors="ignore") as stream:
+                txt = stream.read()
             m_bg = re.search(r'^\s*background\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
             m_fg = re.search(r'^\s*foreground\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
             m_ac = re.search(r'^\s*accent\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
@@ -145,7 +146,45 @@ def load_pixbuf(icon_name, size=56):
     return None
 
 
+def desktop_exec_argv(command):
+    """Decode Desktop Entry escaping, then parse arguments without a shell."""
+    if "\0" in command:
+        raise ValueError("NUL in Desktop Entry Exec")
+    escapes = {"\\": "\\", "s": " ", "n": "\n", "t": "\t", "r": "\r"}
+    command = re.sub(r"\\([\\sntr])", lambda match: escapes[match[1]], command)
+    # shlex retains backslashes before $ and ` in double quotes. Desktop Entry
+    # quoting escapes those characters too; mark them before shlex decoding.
+    prepared = []
+    quote = None
+    index = 0
+    while index < len(command):
+        character = command[index]
+        if character == "\\" and quote != "'" and index + 1 < len(command):
+            following = command[index + 1]
+            prepared.append("\0" + following if quote == '"' and following in "$`" else character + following)
+            index += 2
+            continue
+        if character in "\"'":
+            if quote is None:
+                quote = character
+            elif quote == character:
+                quote = None
+        prepared.append(character)
+        index += 1
+    field_codes = {"%" + code for code in "fFuUdDnNickvm"}
+    # Field codes are separate arguments. Do not strip %f from a URL's %ff
+    # encoding; %% is the Desktop Entry spelling of a literal percent sign.
+    return [argument.replace("\0", "").replace("%%", "%")
+            for argument in shlex.split("".join(prepared)) if argument not in field_codes]
+
+
 def launch_app(app):
+    try:
+        argv = desktop_exec_argv(app["exec"])
+    except ValueError:
+        return
+    if not argv:
+        return
     import sys
     sys.dont_write_bytecode = True
     from omarchy_session import select_sway_socket
@@ -188,23 +227,23 @@ def launch_app(app):
     except Exception:
         pass
 
-    cmd = re.sub(r"%[fFuUdDnNickvm]", "", app["exec"]).strip()
-    if app["terminal"]:
-        full_cmd = ["alacritty", "-e", "/bin/bash", "-lc", cmd]
-    else:
-        full_cmd = ["/bin/bash", "-lc", cmd]
+    full_cmd = ["alacritty", "-e", *argv] if app["terminal"] else argv
     try:
         logf = open("/tmp/omarchy-app-grid.log", "a", encoding="utf-8")
     except Exception:
         logf = subprocess.DEVNULL
-    subprocess.Popen(
-        full_cmd,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=logf,
-        stderr=logf,
-        start_new_session=True,
-    )
+    try:
+        subprocess.Popen(
+            full_cmd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=logf,
+            stderr=logf,
+            start_new_session=True,
+        )
+    finally:
+        if logf != subprocess.DEVNULL:
+            logf.close()
 
 
 class OmarchyAppGrid(Gtk.Window):

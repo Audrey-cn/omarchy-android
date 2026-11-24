@@ -126,10 +126,11 @@ typedef struct {
 
     int           sock_fd;
     pthread_t     sock_thread;
+    bool          thread_started; /* JNI calls are serialized by the Kotlin supervisor. */
     AAudioStream *stream;      /* owned by AAudio's callback context */
 } st_t;
 
-static st_t g;
+static st_t g = { .sock_fd = -1 };
 
 /* ================================================================= */
 /*  Socket helpers                                                   */
@@ -309,6 +310,8 @@ JNIEXPORT jboolean JNICALL
 Java_com_fct_tc4_TinyAudio_nativeStart(JNIEnv *env, jclass cls, jstring sp)
 {
     (void)cls;
+    /* Never overwrite a pthread/stream that has not yet been joined. */
+    if (g.thread_started) return JNI_FALSE;
     const char *p = (*env)->GetStringUTFChars(env, sp, NULL);
     if (!p) return JNI_FALSE;
 
@@ -320,12 +323,25 @@ Java_com_fct_tc4_TinyAudio_nativeStart(JNIEnv *env, jclass cls, jstring sp)
 
     { int fd = connect_unix(p); g.sock_fd = fd; }
     (*env)->ReleaseStringUTFChars(env, sp, p);
-    if (g.sock_fd < 0) return JNI_FALSE;
+    if (g.sock_fd < 0) {
+        atomic_store_explicit(&g.running, false, memory_order_release);
+        return JNI_FALSE;
+    }
 
     if (pthread_create(&g.sock_thread, NULL, sock_func, NULL)) {
-        close(g.sock_fd); g.sock_fd = -1; return JNI_FALSE;
+        close(g.sock_fd); g.sock_fd = -1;
+        atomic_store_explicit(&g.running, false, memory_order_release);
+        return JNI_FALSE;
     }
+    g.thread_started = true;
     return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_fct_tc4_TinyAudio_nativeIsRunning(JNIEnv *env, jclass cls)
+{
+    (void)env; (void)cls;
+    return atomic_load_explicit(&g.running, memory_order_acquire) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
@@ -334,5 +350,8 @@ Java_com_fct_tc4_TinyAudio_nativeStop(JNIEnv *env, jclass cls)
     (void)env; (void)cls;
     atomic_store_explicit(&g.running, false, memory_order_release);
     if (g.sock_fd >= 0) { shutdown(g.sock_fd, SHUT_RDWR); close(g.sock_fd); g.sock_fd = -1; }
-    pthread_join(g.sock_thread, NULL);
+    if (g.thread_started) {
+        pthread_join(g.sock_thread, NULL);
+        g.thread_started = false;
+    }
 }

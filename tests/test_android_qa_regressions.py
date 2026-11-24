@@ -117,11 +117,14 @@ fun main() {
         fragment = (JAVA_ROOT / 'ui/page/ContainerMainFragment.kt').read_text()
         vm = (JAVA_ROOT / 'ui/page/ContainerMainViewModel.kt').read_text()
         self.assertIn('Global.x11SessionActive = true', fragment)
+        cleanup = vm.split('private fun stopRuntime(', 1)[1].split('override fun onCleared()', 1)[0]
+        self.assertIn('Global.x11SessionActive = false', cleanup)
         for block in [vm.split('fun exitContainer()', 1)[1].split('fun enterGui()', 1)[0],
                       vm.split('override fun onCleared()', 1)[1],
                       vm.split('Global.newSession(onFinished = { exitCode ->', 1)[1].split('Global.setupEnvironment()', 1)[0],
-                      vm.split('if (!setupEnvironment())', 1)[1].split('startKeepAliveService()', 1)[0],
                       vm.split('if (!launchCompleted) {', 1)[1].split('_isInitialized.value = true', 1)[0]]:
+            self.assertIn('stopRuntime(', block)
+        for block in [vm.split('if (!setupEnvironment())', 1)[1].split('startKeepAliveService()', 1)[0]]:
             self.assertIn('Global.x11SessionActive = false', block)
 
     def test_initial_management_navigation_does_not_restart_a_live_container(self):
@@ -137,7 +140,8 @@ fun main() {
     def test_late_shell_exit_callback_cannot_clear_a_new_desktop_session(self):
         vm = (JAVA_ROOT / 'ui/page/ContainerMainViewModel.kt').read_text()
         callback = vm.split('Global.newSession(onFinished = { exitCode ->', 1)[1].split('Global.setupEnvironment()', 1)[0]
-        self.assertLess(callback.index('if (exited) return@newSession'), callback.index('Global.x11SessionActive = false'))
+        self.assertLess(callback.index('if (exited) return@newSession'), callback.index('stopRuntime('))
+        self.assertLess(callback.index('Global.terminalSession !== ownedSession'), callback.index('stopRuntime('))
 
 
 if __name__ == '__main__':

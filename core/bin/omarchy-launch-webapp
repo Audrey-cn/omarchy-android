@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Prefer Mozilla's codec-enabled browser for Bilibili video WebApps.
+# Video sites need normal browser navigation; tools default to an app window.
 set -euo pipefail
+mode=auto
+case "${1:-}" in
+    --app|--tab) mode="${1#--}"; shift ;;
+esac
 url="${1:-}"
 [[ -n "$url" ]] || exit 0
 
 # Match the URL's host, never a domain mentioned in its path, query or userinfo.
 shopt -s nocasematch
-if [[ "$url" =~ ^https?:// ]]; then
+if [[ "$mode" == auto && "$url" =~ ^https?:// ]]; then
     authority="${url#*://}"
     authority="${authority%%[/?#]*}"
     host="${authority##*@}"
@@ -14,14 +18,18 @@ if [[ "$url" =~ ^https?:// ]]; then
     host="${host%.}"
     case "$host" in
         bilibili.com|*.bilibili.com|douyin.com|*.douyin.com|iqiyi.com|*.iqiyi.com|v.qq.com|*.v.qq.com|youku.com|*.youku.com|twitch.tv|*.twitch.tv)
-            # The wrapper is shipped even before Mozilla Firefox is installed.
-            if command -v firefox >/dev/null 2>&1; then
-                if command -v omarchy-firefox >/dev/null 2>&1; then
-                    exec omarchy-firefox "$url"
-                fi
-                exec firefox "$url"
-            fi
+            mode=tab
             ;;
     esac
+fi
+if [[ "$mode" == tab ]]; then
+    # The wrapper is shipped even before Mozilla Firefox is installed.
+    if command -v firefox >/dev/null 2>&1; then
+        if command -v omarchy-firefox >/dev/null 2>&1; then
+            exec omarchy-firefox "$url"
+        fi
+        exec firefox "$url"
+    fi
+    exec omarchy-browser "$url"
 fi
 exec omarchy-browser --app="$url"

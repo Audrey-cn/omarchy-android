@@ -47,7 +47,7 @@ feature:
       done
       export WAYLAND_DISPLAY=wayland-1
       setsid fcitx5 -d --replace >/tmp/fcitx5.log 2>&1 &
-      /usr/local/bin/omarchy-theme-engine.py set tokyo-night >/tmp/theme.log 2>&1 &
+      /usr/local/bin/omarchy-theme-engine.py restore >/tmp/theme.log 2>&1 &
       setsid mako >/dev/null 2>&1 &
       setsid python3 /usr/local/bin/omarchy-deck-bridge.py >/tmp/deck-bridge.log 2>&1 &
     enabled: true

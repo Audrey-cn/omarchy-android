@@ -35,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.fct.tc4.R
+import com.fct.tc4.ui.main.MainActivity
 import com.fct.tc4.databinding.Tc4DialogLauncherShortcutBinding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
@@ -156,13 +157,12 @@ class LauncherShortcutDialogFragment : DialogFragment() {
 
     private suspend fun createDesktopShortcut(name: String, code: String, command: String, iconPath: String?) {
         val context = requireContext()
-        val intent = android.content.Intent("com.fct.tc4.action.SHORTCUT").apply {
-            putExtra("shortcut_code", code)
-            putExtra("shortcut_command", command)
-            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val manager = context.getSystemService(android.content.pm.ShortcutManager::class.java)
+            if (!manager.isRequestPinShortcutSupported) {
+                Snackbar.make(binding.root, R.string.tc4_shortcut_pin_unsupported, Snackbar.LENGTH_SHORT).show()
+                return
+            }
             val icon = iconPath?.takeIf { File(it).isFile }?.let { path ->
                 val bitmap = if (path.lowercase().endsWith(".svg")) {
                     withContext(Dispatchers.IO) {
@@ -190,23 +190,24 @@ class LauncherShortcutDialogFragment : DialogFragment() {
                 bitmap?.let { Icon.createWithBitmap(it) }
             } ?: Icon.createWithResource(context, R.drawable.icon_placeholder)
 
-            @Suppress("DEPRECATION")
-            val info = android.content.pm.ShortcutInfo.Builder(context, "tc4_sc_${code}_${System.currentTimeMillis()}")
+            val shortcutId = withContext(Dispatchers.IO) { LauncherShortcutStore.save(context, code, command) }
+            if (shortcutId == null) {
+                Snackbar.make(binding.root, R.string.tc4_shortcut_save_failed, Snackbar.LENGTH_LONG).show()
+                return
+            }
+            val intent = android.content.Intent(context, MainActivity::class.java).apply {
+                action = MainActivity.ACTION_SHORTCUT
+                putExtra(LauncherShortcutStore.EXTRA_ID, shortcutId)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            val info = android.content.pm.ShortcutInfo.Builder(context, shortcutId)
                 .setShortLabel(name)
                 .setLongLabel(name)
                 .setIcon(icon)
                 .setIntent(intent)
                 .build()
 
-            val manager = context.getSystemService(android.content.pm.ShortcutManager::class.java)
-            if (manager.isRequestPinShortcutSupported) {
-                @Suppress("DEPRECATION")
-                manager.requestPinShortcut(info, null)
-            } else {
-                binding.root?.let {
-                    Snackbar.make(it, R.string.tc4_shortcut_pin_unsupported, Snackbar.LENGTH_SHORT).show()
-                }
-            }
+            manager.requestPinShortcut(info, null)
         }
     }
 

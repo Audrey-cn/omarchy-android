@@ -17,94 +17,100 @@
 
 package com.fct.tc4
 
+import android.util.Log
 import com.fct.tc4.ui.misc.Global
 import java.io.File
 
-/**
- * TinyMicrophone – captures audio from the device microphone via AAudio
- * and sends PCM over a Unix domain socket to the Linux-side PipeWire
- * virtual microphone module.
- *
- * Uses NDK for all Unix-socket operations and AAudio capture.
- *
- * Usage:
- *   TinyMicrophone.start()   // connect & stream  (retries for 60 s)
- *   TinyMicrophone.stop()    // stop capture & disconnect
- */
+/** Owns one native stream and reconnects until explicitly stopped. */
 object TinyMicrophone {
+    private const val TAG = "TinyMicrophone"
+    private const val INITIAL_RETRY_MS = 250L
+    private const val MAX_RETRY_MS = 5_000L
+    private const val HEALTH_CHECK_MS = 250L
 
-    @Volatile
-    private var running = false
-
+    @Volatile private var running = false
+    @Volatile private var generation = 0L
     private var workerThread: Thread? = null
+    // Accessed only by the supervisor, including across worker replacement.
+    private var libraryLoaded = false
 
-    /* ---------- native methods ---------- */
-    @JvmStatic
-    private external fun nativeStart(socketPath: String): Boolean
+    @JvmStatic private external fun nativeStart(socketPath: String): Boolean
+    @JvmStatic private external fun nativeIsRunning(): Boolean
+    @JvmStatic private external fun nativeStop()
 
-    @JvmStatic
-    private external fun nativeStop()
-
-    /* ---------- public API ---------- */
-
-    /**
-     * Start microphone forwarding.
-     *
-     * Connects to [cacheDir]/tmp/.tiny.mic and begins sending
-     * PCM at 48000 Hz mono via AAudio capture.
-     *
-     * Retries every 2 seconds for up to 60 seconds if the initial
-     * connection fails.
-     */
     @Synchronized
     fun start() {
         if (running) return
         running = true
+        generation++
+        // A stopped worker retains ownership until its nativeStop/join finishes.
+        if (workerThread == null) startWorker()
+    }
 
+    @Synchronized
+    fun stop() {
+        if (!running) return
+        running = false
+        generation++
+        workerThread?.interrupt()
+        // JNI shutdown/join belongs to the worker, never the Android UI thread.
+    }
+
+    private fun startWorker() {
         val socketPath = File(Global.appContext.filesDir, "tmp/.tiny.mic").absolutePath
-
-        workerThread = Thread({
-            var success = false
-            val deadline = System.currentTimeMillis() + 60_000L
-
-            while (running && !success && System.currentTimeMillis() < deadline) {
-                try {
-                    success = nativeStart(socketPath)
-                } catch (_: Exception) {
-                    // nativeStart may throw if JNI not loaded
-                }
-                if (!success && running) {
-                    try {
-                        Thread.sleep(2000)
-                    } catch (_: InterruptedException) {
-                        break
-                    }
-                }
-            }
-
-            if (!success) {
-                android.util.Log.e("TinyMicrophone", "Failed to connect within 60 s")
-            }
-        }, "TinyMic-start").apply {
+        workerThread = Thread({ supervise(socketPath) }, "TinyMic-supervisor").apply {
             isDaemon = true
             start()
         }
     }
 
-    /**
-     * Stop microphone forwarding. Closes AAudio capture and socket.
-     */
-    @Synchronized
-    fun stop() {
-        if (!running) return
-        running = false
-        workerThread?.interrupt()
-        workerThread = null
-        nativeStop()
-    }
+    private fun isCurrent(session: Long) = running && generation == session
 
-    /* ---------- JNI load ---------- */
-    init {
-        System.loadLibrary("tiny_microphone_jni")
+    private fun supervise(socketPath: String) {
+        var retryMs = INITIAL_RETRY_MS
+        try {
+            while (running) {
+                val session = generation
+                val startedAt = System.nanoTime()
+                var nativeAttempted = false
+                try {
+                    if (!libraryLoaded) {
+                        System.loadLibrary("tiny_microphone_jni")
+                        libraryLoaded = true
+                    }
+                    if (!isCurrent(session)) continue
+                    nativeAttempted = true
+                    if (nativeStart(socketPath)) {
+                        // nativeStart returns after creating its pthread. Observe
+                        // that thread so an EOF/device error can reconnect later.
+                        while (isCurrent(session) && nativeIsRunning()) Thread.sleep(HEALTH_CHECK_MS)
+                    }
+                } catch (error: InterruptedException) {
+                    // stop() wakes both health polling and retry backoff.
+                } catch (error: Exception) {
+                    Log.w(TAG, "Native stream attempt failed", error)
+                } catch (error: LinkageError) {
+                    Log.w(TAG, "Native stream library unavailable", error)
+                } finally {
+                    if (nativeAttempted) {
+                        try { nativeStop() }
+                        catch (error: Exception) { Log.w(TAG, "Native stream cleanup failed", error) }
+                        catch (error: LinkageError) { Log.w(TAG, "Native stream cleanup unavailable", error) }
+                    }
+                }
+                if (!running) break
+                if (!isCurrent(session)) { retryMs = INITIAL_RETRY_MS; continue }
+                if (System.nanoTime() - startedAt >= 5_000_000_000L) retryMs = INITIAL_RETRY_MS
+                try { Thread.sleep(retryMs) }
+                catch (error: InterruptedException) { /* Recheck ownership before another attempt. */ }
+                retryMs = (retryMs * 2).coerceAtMost(MAX_RETRY_MS)
+            }
+        } finally {
+            synchronized(this) {
+                workerThread = null
+                // start() may arrive while the old worker is joining its pthread.
+                if (running) startWorker()
+            }
+        }
     }
 }
