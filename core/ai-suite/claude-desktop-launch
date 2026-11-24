@@ -16,4 +16,8 @@ if bash -c "</dev/tcp/127.0.0.1/18888" 2>/dev/null; then
   export http_proxy=http://127.0.0.1:18888 https_proxy=http://127.0.0.1:18888
   PROXY_FLAGS="--proxy-server=http://127.0.0.1:18888 --proxy-bypass-list=127.0.0.1;localhost"
 fi
-exec /usr/bin/claude-desktop --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-gpu-compositing --disable-gpu-sandbox --disable-software-rasterizer --ozone-platform=wayland --enable-wayland-ime --password-store=basic --lang=zh-CN $PROXY_FLAGS "$@"
+EXTRA_FLAGS=""
+if [ -f /root/.config/Claude-3p/configLibrary/_meta.json ] || grep -q '"deploymentMode"[[:space:]]*:[[:space:]]*"3p"' /root/.config/Claude/claude_desktop_config.json 2>/dev/null; then
+  EXTRA_FLAGS="--user-data-dir=/root/.config/Claude-3p"
+fi
+exec /usr/bin/claude-desktop --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-gpu-compositing --disable-gpu-sandbox --disable-software-rasterizer --ozone-platform=wayland --enable-wayland-ime --password-store=basic --lang=zh-CN $EXTRA_FLAGS $PROXY_FLAGS "$@"
