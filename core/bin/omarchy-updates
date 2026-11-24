@@ -442,31 +442,89 @@ def display(rows):
             print(" ", row["detail"])
 
 
+def signal_waybar():
+    subprocess.run(["pkill", "-RTMIN+11", "waybar"], check=False)
+
+
+def _core_summary(rows):
+    """Summarize the two user-facing system paths: Omarchy desktop and Linux APT."""
+    desktop_row = rows.get("desktop") or {}
+    runtime_rows = {k: rows.get(k) or {} for k in RUNTIME_SOURCES}
+    apt_row = rows.get("apt") or {}
+
+    core_keys = ("apt", "desktop", *RUNTIME_SOURCES)
+    missing = [k for k in core_keys if k not in rows]
+    core_states = {rows[k]["state"] for k in core_keys if k in rows}
+
+    interrupted = any(
+        (rows.get(k) or {}).get("state") == "interrupted"
+        for k in ("desktop", *RUNTIME_SOURCES)
+    )
+    desktop_available = any(
+        (rows.get(k) or {}).get("state") == "available"
+        for k in ("desktop", *RUNTIME_SOURCES)
+    )
+    apt_available = apt_row.get("state") == "available"
+    apt_count = (
+        len([l for l in (apt_row.get("detail") or "").splitlines() if l.strip()])
+        if apt_available
+        else 0
+    )
+    return {
+        "missing": missing,
+        "core_states": core_states,
+        "interrupted": interrupted,
+        "desktop_available": desktop_available,
+        "apt_available": apt_available,
+        "apt_count": apt_count,
+        "desktop_row": desktop_row,
+        "runtime_rows": runtime_rows,
+        "apt_row": apt_row,
+    }
+
+
 def waybar(rows):
-    states = {row["state"] for row in rows.values()}
-    if {"apt", "apk", "desktop", *RUNTIME_SOURCES, *THIRD_PARTY} - rows.keys():
-        states.add("unknown")
-    available = [name for name, r in rows.items() if r["state"] == "available"]
-    klass = (
-        "has-updates"
-        if available
-        else "needs-check"
-        if not rows or states - {"current", "not-installed"}
-        else "up-to-date"
-    )
-    tooltip = (
-        "\n".join(
-            f"{name}: {r['state']} ({r['checked_at']})" for name, r in rows.items()
-        )
-        or "尚未检查，点击打开更新中心"
-    )
+    info = _core_summary(rows)
+    if info["interrupted"]:
+        klass = "interrupted"
+    elif info["desktop_available"] or info["apt_available"]:
+        klass = "has-updates"
+    elif not rows or info["missing"] or (info["core_states"] - {"current", "not-installed"}):
+        klass = "needs-check"
+    else:
+        klass = "up-to-date"
+
+    lines = []
+    if info["interrupted"]:
+        lines.append("上次桌面更新未完成 · 点击修复")
+    elif klass == "needs-check":
+        lines.append("点击检查 Omarchy 桌面与系统更新")
+    else:
+        d_row = info["desktop_row"]
+        if info["desktop_available"]:
+            avail = d_row.get("available_version") or "新版本"
+            lines.append(f"Omarchy 桌面环境: 可更新 ({avail})")
+        else:
+            ver = d_row.get("installed_version")
+            lines.append(f"Omarchy 桌面环境: 已最新{f' (v{ver})' if ver else ''}")
+        if info["apt_available"]:
+            lines.append(f"Linux 系统软件包: {info['apt_count']} 项可更新")
+        else:
+            lines.append("Linux 系统软件包: 已最新")
+    tooltip = "\n".join(lines) or "点击打开更新中心"
     print(
         json.dumps(
             dict(
-                text={"has-updates": "", "needs-check": "?", "up-to-date": ""}[klass],
+                text={
+                    "has-updates": "󰚰",
+                    "needs-check": "󰚰",
+                    "interrupted": "",
+                    "up-to-date": "",
+                }[klass],
                 tooltip=tooltip,
                 **{"class": klass},
-            )
+            ),
+            ensure_ascii=False,
         )
     )
 
@@ -507,73 +565,113 @@ def apt_upgrade():
             raise
 
 
-def menu():
-    rows = cached()
-    display(rows)
-    if not rows:
-        print("尚无检查记录")
-    print(
-        "1 检查各来源   2 升级 APT 软件包   3 安装项目桌面更新   4 恢复桌面组件\n"
-        "5 重装已验证 Hermes Desktop   6 APT 独立清理   7 图形栈   8 浏览器配套   9 更新 CC Switch   10 本机组件清单   11 恢复 Hermes Desktop   回车退出"
-    )
-    choice = input("选择 > ").strip()
-    if choice == "1":
-        rows = refresh()
-        display(rows)
-        return int(any(r["state"] == "failed" for r in rows.values()))
-    if choice == "2":
-        apt_upgrade()
-    elif choice == "3":
-        result = desktop()
-        display({"desktop": result})
-        if result["state"] != "available":
-            print("只有确认可用且兼容的组件可在此安装")
-            return int(result["state"] != "current")
-        if input("安装此版本？ [y/N] ").strip().lower() != "y":
-            return 0
+def apply_desktop():
+    print("▶ 正在检查 Omarchy 桌面环境更新...")
+    d = checked("项目桌面组件 Release", desktop)
+    updated = False
+    if d["state"] == "interrupted":
+        print("! 检测到上次桌面更新中断，请先执行「恢复上次桌面更新」")
+        return 1
+    if d["state"] == "available" and d.get("available_version"):
+        ver = d["available_version"]
+        print(f"▶ 正在安装 Omarchy 桌面环境 v{ver}...")
         subprocess.run(
             [
                 BIN / "omarchy-component-update",
                 "install",
                 "desktop",
                 "--version",
-                result["available_version"],
+                ver,
             ],
             check=True,
         )
+        updated = True
+    else:
+        ver = d.get("installed_version") or "当前版本"
+        print(f"✓ Omarchy 桌面本体已是最新 ({ver})")
+
+    for kind, label in RUNTIME_SOURCES.items():
+        r = checked(label, lambda kind=kind: runtime(kind))
+        if r["state"] == "available":
+            print(f"▶ 正在更新 {label}...")
+            subprocess.run(
+                [BIN / "omarchy-runtime-update", "install", kind],
+                check=True,
+            )
+            updated = True
+
+    if updated:
+        theme_engine = BIN / "omarchy-theme-engine.py"
+        if theme_engine.exists():
+            print("▶ 正在重载桌面配置与顶栏...")
+            subprocess.run([str(theme_engine), "restore"], check=False)
+    print("▶ 正在刷新更新状态...")
+    refresh()
+    signal_waybar()
+    print("✓ Omarchy 桌面环境更新完成")
+    return 0
+
+
+def apply_target(target):
+    rc = 0
+    if target in ("desktop", "all"):
+        rc = apply_desktop() or rc
+    if target in ("apt", "all"):
+        print("▶ 正在升级 Linux 系统软件包 (APT)...")
+        apt_upgrade()
+        print("▶ 正在刷新更新状态...")
+        refresh()
+        signal_waybar()
+        print("✓ Linux 系统软件包升级完成")
+    return rc
+
+
+def menu():
+    rows = cached()
+    info = _core_summary(rows)
+    if not rows:
+        print("尚无检查记录")
+    else:
+        for key in ("desktop", *RUNTIME_SOURCES, "apt"):
+            if key in rows:
+                display({key: rows[key]})
+    print(
+        "\n1 检查更新   2 升级 Linux 系统软件包 (APT)   3 更新 Omarchy 桌面环境\n"
+        "4 恢复上次桌面更新   5 清理冗余软件包 (APT autoremove)   6 本机组件清单   回车退出"
+    )
+    choice = input("选择 > ").strip()
+    if choice == "1":
+        rows = refresh()
+        signal_waybar()
+        for key in ("desktop", *RUNTIME_SOURCES, "apt"):
+            if key in rows:
+                display({key: rows[key]})
+        return int(any(rows[k]["state"] == "failed" for k in ("desktop", "apt") if k in rows))
+    if choice == "2":
+        apt_upgrade()
+        refresh()
+        signal_waybar()
+    elif choice == "3":
+        return apply_desktop()
     elif choice == "4":
         subprocess.run([BIN / "omarchy-component-update", "recover"], check=True)
+        refresh()
+        signal_waybar()
     elif choice == "5":
-        subprocess.run([BIN / "omarchy-install-hermes"], check=True)
-    elif choice == "6":
         subprocess.run(["apt-get", "autoremove"], check=True)
-    elif choice == "11":
-        subprocess.run([BIN / "omarchy-install-hermes", "recover"], check=True)
-    elif choice == "10":
+    elif choice == "6":
         subprocess.run(
             [BIN / "omarchy-component-update", "inventory", "--json"], check=True
         )
-    elif choice == "9":
-        install_cc()
-    elif choice in ("7", "8"):
-        action = input("1 检查   2 安装   3 恢复 > ").strip()
-        if action in ("1", "2", "3"):
-            subprocess.run(
-                [
-                    BIN / "omarchy-runtime-update",
-                    {"1": "check", "2": "install", "3": "recover"}[action],
-                    "graphics" if choice == "7" else "browser",
-                ],
-                check=True,
-            )
     return 0
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "action", choices=["status", "check", "waybar", "menu", "sources"]
+        "action", choices=["status", "check", "waybar", "menu", "sources", "apply"]
     )
+    parser.add_argument("target", nargs="?", choices=["desktop", "apt", "all"])
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     if args.action == "sources":
@@ -590,7 +688,11 @@ def main():
         return 0
     if args.action == "menu":
         return menu()
+    if args.action == "apply":
+        return apply_target(args.target or "all")
     rows = refresh() if args.action == "check" else cached()
+    if args.action == "check":
+        signal_waybar()
     if args.action == "waybar":
         waybar(rows)
     elif args.json:

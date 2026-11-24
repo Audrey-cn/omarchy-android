@@ -104,7 +104,11 @@ def run_in_terminal(title, shell_cmd):
 def handle_special_route(route):
     if route == "update":
         kill_wofi()
-        run_in_terminal("更新中心", "/usr/local/bin/omarchy-updates menu")
+        subprocess.Popen(
+            ["/usr/local/bin/omarchy-panel", "update"],
+            env={**wl_env(), "GDK_BACKEND": "wayland"},
+            start_new_session=True,
+        )
         return True
     if route == "install.browser.chromium-agent":
         kill_wofi()
@@ -297,7 +301,11 @@ def execute_item_action(key, item, zh_label):
         run_in_terminal(f"移除 (Remove): {zh_label}", cmd)
         return
     if key.startswith("update."):
-        run_in_terminal("更新中心", "/usr/local/bin/omarchy-updates menu")
+        subprocess.Popen(
+            ["/usr/local/bin/omarchy-panel", "update"],
+            env={**wl_env(), "GDK_BACKEND": "wayland"},
+            start_new_session=True,
+        )
         return
 
     # 6. Learn / WebApps / Manual

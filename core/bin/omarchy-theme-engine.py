@@ -267,7 +267,7 @@ white   = "{c[15]}"
             "return-type": "json",
             "interval": 1800,
             "signal": 11,
-            "on-click": "/usr/local/bin/omarchy-menu-ui update"
+            "on-click": "GDK_BACKEND=wayland /usr/local/bin/omarchy-panel update"
         },
         "tray": {
             "icon-size": 15,
@@ -379,6 +379,18 @@ white   = "{c[15]}"
 #custom-bluetooth,
 #custom-agents {{
   color: @accent;
+}}
+
+#custom-update.needs-check {{
+  color: alpha(@foreground, 0.45);
+}}
+
+#custom-update.has-updates {{
+  color: @accent;
+}}
+
+#custom-update.interrupted {{
+  color: #e0af68;
 }}
 
 #clock {{

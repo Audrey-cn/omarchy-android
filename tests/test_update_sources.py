@@ -88,7 +88,43 @@ class UpdateSourcesTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             updates["waybar"]({"apt": updates["record"]("apt", "current")})
-        self.assertEqual(json.loads(output.getvalue())["class"], "needs-check")
+        payload = json.loads(output.getvalue())
+        self.assertEqual(payload["class"], "needs-check")
+        self.assertEqual(payload["text"], "󰚰")
+        self.assertNotEqual(payload["text"], "?")
+
+    def test_waybar_core_paths_states_and_icons(self):
+        base = {
+            "apt": updates["record"]("apt", "current"),
+            "desktop": updates["record"]("desktop", "current", installed="1.0.9"),
+            "graphics": updates["record"]("graphics", "not-installed"),
+            "browser": updates["record"]("browser", "not-installed"),
+        }
+        # All current -> hidden icon
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            updates["waybar"](base)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["class"], "up-to-date")
+        self.assertEqual(payload["text"], "")
+
+        # Interrupted desktop -> amber warning icon
+        interrupted = dict(base, desktop=updates["record"]("desktop", "interrupted"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            updates["waybar"](interrupted)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["class"], "interrupted")
+        self.assertEqual(payload["text"], "")
+
+        # Available update -> accented update icon
+        avail = dict(base, apt=updates["record"]("apt", "available", detail="foo/noble 1.0"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            updates["waybar"](avail)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["class"], "has-updates")
+        self.assertEqual(payload["text"], "󰚰")
 
     def test_apt_failure_stops_upgrade(self):
         menu = updates["menu"]

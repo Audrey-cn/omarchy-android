@@ -20,6 +20,8 @@ import fcntl
 import socket
 import struct
 import subprocess
+import threading
+from datetime import datetime, timezone
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -123,7 +125,7 @@ class OmarchyPanel(Gtk.Window):
         else:
             GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
             GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, 0)
-            if mode != "calendar":
+            if mode not in ("calendar", "update"):
                 GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
                 GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, 8)
 
@@ -205,6 +207,42 @@ class OmarchyPanel(Gtk.Window):
             font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
             font-size: 11px;
         }}
+        .update-card {{
+            background-color: alpha({fg}, 0.06);
+            border: 1px solid alpha({fg}, 0.14);
+            border-radius: 8px;
+            padding: 10px 12px;
+        }}
+        .update-card-warn {{
+            background-color: alpha(#e0af68, 0.14);
+            border: 1px solid #e0af68;
+            border-radius: 8px;
+            padding: 10px 12px;
+        }}
+        .update-card-title {{
+            color: {fg};
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 13px;
+            font-weight: bold;
+        }}
+        .update-primary {{
+            background-color: alpha({accent}, 0.24);
+            color: {fg};
+            border: 1px solid {accent};
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 12px;
+            font-weight: bold;
+        }}
+        .update-primary:hover {{
+            background-color: alpha({accent}, 0.38);
+        }}
+        expander title {{
+            color: alpha({fg}, 0.68);
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 11px;
+        }}
         calendar {{
             background-color: {bg};
             color: {fg};
@@ -253,6 +291,8 @@ class OmarchyPanel(Gtk.Window):
             self.build_power()
         elif mode == "agents":
             self.build_agents()
+        elif mode == "update":
+            self.build_update()
         else:
             self.add_title("Omarchy 面板")
 
@@ -690,6 +730,296 @@ class OmarchyPanel(Gtk.Window):
         self.add_btn("󰚩  打开 Claude Desktop", lambda _: (launch_bg("/usr/local/bin/claude-desktop-launch"), Gtk.main_quit()))
         self.add_btn("󰚩  打开 Hermes Desktop", lambda _: (launch_bg("/usr/local/bin/hermes-desktop-launch"), Gtk.main_quit()))
 
+    def _run_update_terminal(self, title, cmd):
+        script = (
+            f"clear; echo '=== {title} ==='; echo ''; {cmd}; "
+            "rc=$?; echo ''; "
+            "if [ $rc -eq 0 ]; then echo '✓ 操作已完成'; else echo \"! 操作结束 (退出码: $rc)\"; fi; "
+            "read -n 1 -s -r -p '按任意键关闭窗口...'"
+        )
+        launch_bg(f"alacritty -e bash -c {json.dumps(script)}")
+        Gtk.main_quit()
+
+    def _load_update_rows(self):
+        try:
+            out = subprocess.check_output(
+                ["/usr/local/bin/omarchy-updates", "status", "--json"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=5,
+            )
+            data = json.loads(out)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _fmt_checked_at(self, rows):
+        stamps = []
+        for k in ("desktop", "apt"):
+            ts = (rows.get(k) or {}).get("checked_at")
+            if ts:
+                try:
+                    stamps.append(datetime.fromisoformat(ts.replace("Z", "+00:00")))
+                except Exception:
+                    pass
+        if not stamps:
+            return "尚未检查"
+        latest = max(stamps)
+        delta = int((datetime.now(timezone.utc) - latest).total_seconds())
+        if delta < 60:
+            return "刚刚"
+        if delta < 3600:
+            return f"{delta // 60} 分钟前"
+        if delta < 86400:
+            return f"{delta // 3600} 小时前"
+        return f"{delta // 86400} 天前"
+
+    def _render_update_state(self, rows):
+        d = rows.get("desktop") or {}
+        g = rows.get("graphics") or {}
+        b = rows.get("browser") or {}
+        a = rows.get("apt") or {}
+
+        self.upd_time_lbl.set_text(f"上次检查：{self._fmt_checked_at(rows)}")
+
+        # Interrupted recovery banner
+        interrupted = any(r.get("state") == "interrupted" for r in (d, g, b))
+        self.upd_warn_box.set_visible(interrupted)
+
+        # Path 1: Omarchy Desktop
+        d_ver = d.get("installed_version")
+        d_avail = d.get("available_version")
+        d_state = d.get("state") or "unknown"
+        rt_avail = any(r.get("state") == "available" for r in (g, b))
+        desktop_has_upd = (d_state == "available") or rt_avail
+
+        ver_txt = f"  v{d_ver}" if d_ver else ""
+        self.upd_desk_title.set_text(f"Omarchy 桌面环境{ver_txt}")
+        if d_state == "interrupted":
+            self.upd_desk_status.set_text("更新中断 · 需恢复")
+            self._set_badge_class(self.upd_desk_status, "warn-text")
+        elif d_state == "available":
+            self.upd_desk_status.set_text(f"可更新至 v{d_avail}" if d_avail else "有可用更新")
+            self._set_badge_class(self.upd_desk_status, "warn-text")
+        elif rt_avail:
+            self.upd_desk_status.set_text("配套组件可更新")
+            self._set_badge_class(self.upd_desk_status, "warn-text")
+        elif d_state == "current":
+            self.upd_desk_status.set_text("已最新")
+            self._set_badge_class(self.upd_desk_status, "ok-text")
+        elif d_state == "failed":
+            self.upd_desk_status.set_text("检查失败")
+            self._set_badge_class(self.upd_desk_status, "warn-text")
+        else:
+            self.upd_desk_status.set_text("未检查")
+            self._set_badge_class(self.upd_desk_status, "panel-dim")
+        self.upd_desk_btn.set_visible(desktop_has_upd and not interrupted)
+
+        # Path 2: Linux APT Packages
+        a_state = a.get("state") or "unknown"
+        apt_lines = [l for l in (a.get("detail") or "").splitlines() if l.strip()]
+        apt_has_upd = a_state == "available"
+        if apt_has_upd:
+            self.upd_apt_status.set_text(f"{len(apt_lines)} 项可更新")
+            self._set_badge_class(self.upd_apt_status, "warn-text")
+        elif a_state == "current":
+            self.upd_apt_status.set_text("已最新")
+            self._set_badge_class(self.upd_apt_status, "ok-text")
+        elif a_state == "failed":
+            self.upd_apt_status.set_text("检查失败")
+            self._set_badge_class(self.upd_apt_status, "warn-text")
+        else:
+            self.upd_apt_status.set_text("未检查")
+            self._set_badge_class(self.upd_apt_status, "panel-dim")
+        self.upd_apt_btn.set_visible(apt_has_upd)
+
+        # Primary 1-click button
+        total_paths = int(desktop_has_upd and not interrupted) + int(apt_has_upd)
+        self.upd_all_btn.set_visible(total_paths > 0)
+        if total_paths > 0:
+            self.upd_all_btn.set_label(
+                f"󰚰  一键更新全部 ({total_paths} 项)" if total_paths > 1 else "󰚰  一键更新可用项"
+            )
+
+    def _set_badge_class(self, widget, cls):
+        ctx = widget.get_style_context()
+        for c in ("ok-text", "warn-text", "panel-dim"):
+            ctx.remove_class(c)
+        ctx.add_class(cls)
+
+    def _trigger_update_check(self, _btn=None):
+        if getattr(self, "_upd_checking", False):
+            return
+        self._upd_checking = True
+        self.upd_check_btn.set_sensitive(False)
+        self.upd_check_btn.set_label("检查中...")
+        self.upd_time_lbl.set_text("正在检查桌面与系统更新...")
+
+        def worker():
+            subprocess.run(
+                ["/usr/local/bin/omarchy-updates", "check"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            rows = self._load_update_rows()
+            GLib.idle_add(self._on_update_check_done, rows)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_check_done(self, rows):
+        self._upd_checking = False
+        self.upd_check_btn.set_sensitive(True)
+        self.upd_check_btn.set_label("󰑐  检查更新")
+        self._render_update_state(rows)
+        return False
+
+    def build_update(self):
+        self.set_size_request(410, -1)
+
+        # Header row
+        hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title = Gtk.Label(label="󰚰  更新中心", xalign=0)
+        title.get_style_context().add_class("panel-title")
+        hdr.pack_start(title, True, True, 0)
+        self.upd_check_btn = Gtk.Button(label="󰑐  检查更新")
+        self.upd_check_btn.get_style_context().add_class("panel-btn")
+        self.upd_check_btn.connect("clicked", self._trigger_update_check)
+        hdr.pack_end(self.upd_check_btn, False, False, 0)
+        self.box.pack_start(hdr, False, False, 0)
+
+        self.upd_time_lbl = Gtk.Label(label="上次检查：读取中...", xalign=0)
+        self.upd_time_lbl.get_style_context().add_class("panel-dim")
+        self.box.pack_start(self.upd_time_lbl, False, False, 0)
+
+        # Conditional recovery banner
+        self.upd_warn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.upd_warn_box.get_style_context().add_class("update-card-warn")
+        warn_lbl = Gtk.Label(label="  上次桌面更新未完成，建议先恢复", xalign=0)
+        warn_lbl.get_style_context().add_class("warn-text")
+        self.upd_warn_box.pack_start(warn_lbl, True, True, 0)
+        rec_btn = Gtk.Button(label="一键恢复")
+        rec_btn.get_style_context().add_class("panel-btn")
+        rec_btn.connect(
+            "clicked",
+            lambda _: self._run_update_terminal(
+                "恢复上次桌面更新",
+                "/usr/local/bin/omarchy-component-update recover && /usr/local/bin/omarchy-updates check",
+            ),
+        )
+        self.upd_warn_box.pack_end(rec_btn, False, False, 0)
+        self.box.pack_start(self.upd_warn_box, False, False, 0)
+
+        # Card 1: Omarchy Desktop
+        c1 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        c1.get_style_context().add_class("update-card")
+        c1_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.upd_desk_title = Gtk.Label(label="Omarchy 桌面环境", xalign=0)
+        self.upd_desk_title.get_style_context().add_class("update-card-title")
+        c1_top.pack_start(self.upd_desk_title, True, True, 0)
+        self.upd_desk_status = Gtk.Label(label="未检查", xalign=1)
+        c1_top.pack_end(self.upd_desk_status, False, False, 0)
+        c1.pack_start(c1_top, False, False, 0)
+        c1_bot = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        c1_sub = Gtk.Label(label="界面、顶栏、控制面板与配套组件", xalign=0)
+        c1_sub.get_style_context().add_class("panel-dim")
+        c1_bot.pack_start(c1_sub, True, True, 0)
+        self.upd_desk_btn = Gtk.Button(label="更新")
+        self.upd_desk_btn.get_style_context().add_class("panel-btn")
+        self.upd_desk_btn.connect(
+            "clicked",
+            lambda _: self._run_update_terminal(
+                "更新 Omarchy 桌面环境", "/usr/local/bin/omarchy-updates apply desktop"
+            ),
+        )
+        c1_bot.pack_end(self.upd_desk_btn, False, False, 0)
+        c1.pack_start(c1_bot, False, False, 0)
+        self.box.pack_start(c1, False, False, 0)
+
+        # Card 2: Linux System Packages (APT)
+        c2 = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        c2.get_style_context().add_class("update-card")
+        c2_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        c2_title = Gtk.Label(label="Linux 系统软件包", xalign=0)
+        c2_title.get_style_context().add_class("update-card-title")
+        c2_top.pack_start(c2_title, True, True, 0)
+        self.upd_apt_status = Gtk.Label(label="未检查", xalign=1)
+        c2_top.pack_end(self.upd_apt_status, False, False, 0)
+        c2.pack_start(c2_top, False, False, 0)
+        c2_bot = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        c2_sub = Gtk.Label(label="Ubuntu 基础库与已配置软件源 (APT)", xalign=0)
+        c2_sub.get_style_context().add_class("panel-dim")
+        c2_bot.pack_start(c2_sub, True, True, 0)
+        self.upd_apt_btn = Gtk.Button(label="更新")
+        self.upd_apt_btn.get_style_context().add_class("panel-btn")
+        self.upd_apt_btn.connect(
+            "clicked",
+            lambda _: self._run_update_terminal(
+                "升级 Linux 系统软件包", "/usr/local/bin/omarchy-updates apply apt"
+            ),
+        )
+        c2_bot.pack_end(self.upd_apt_btn, False, False, 0)
+        c2.pack_start(c2_bot, False, False, 0)
+        self.box.pack_start(c2, False, False, 0)
+
+        # Primary 1-click button
+        self.upd_all_btn = Gtk.Button(label="󰚰  一键更新全部")
+        self.upd_all_btn.get_style_context().add_class("update-primary")
+        self.upd_all_btn.connect(
+            "clicked",
+            lambda _: self._run_update_terminal(
+                "一键更新全部", "/usr/local/bin/omarchy-updates apply all"
+            ),
+        )
+        self.box.pack_start(self.upd_all_btn, False, False, 0)
+
+        # Collapsed Advanced Maintenance section
+        exp = Gtk.Expander(label="高级维护与故障修复")
+        exp.set_expanded(False)
+        adv_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        adv_box.set_margin_top(6)
+        for lbl, t_title, cmd in [
+            (
+                "󰜉  恢复上次桌面更新",
+                "恢复上次桌面更新",
+                "/usr/local/bin/omarchy-component-update recover && /usr/local/bin/omarchy-updates check",
+            ),
+            (
+                "󰃢  清理冗余软件包 (APT autoremove)",
+                "清理冗余软件包",
+                "apt-get autoremove -y",
+            ),
+            (
+                "󰋼  查看本机桌面组件清单",
+                "本机桌面组件清单",
+                "/usr/local/bin/omarchy-component-update inventory --json",
+            ),
+        ]:
+            b = Gtk.Button(label=lbl)
+            b.set_alignment(0, 0.5)
+            b.get_style_context().add_class("panel-btn")
+            b.connect("clicked", lambda _w, tt=t_title, cc=cmd: self._run_update_terminal(tt, cc))
+            adv_box.pack_start(b, False, False, 0)
+        exp.add(adv_box)
+        self.box.pack_start(exp, False, False, 0)
+
+        # Populate from cache and auto-check if missing or stale
+        for child in self.upd_warn_box.get_children():
+            child.show_all()
+        for w in (self.upd_warn_box, self.upd_desk_btn, self.upd_apt_btn, self.upd_all_btn):
+            w.set_no_show_all(True)
+        rows = self._load_update_rows()
+        self._render_update_state(rows)
+        needs_auto = (
+            not rows
+            or any(
+                (rows.get(k) or {}).get("state") in (None, "stale", "unknown")
+                for k in ("desktop", "apt")
+            )
+        )
+        if needs_auto:
+            GLib.idle_add(self._trigger_update_check)
+
     def on_key(self, _w, ev):
         if ev.keyval == Gdk.KEY_Escape:
             Gtk.main_quit()
@@ -719,7 +1049,7 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    app_id = "omarchy-panel-center" if mode == "calendar" else "omarchy-panel-right"
+    app_id = "omarchy-panel-center" if mode in ("calendar", "update") else "omarchy-panel-right"
     GLib.set_prgname(app_id)
     win = OmarchyPanel(mode)
     try:
