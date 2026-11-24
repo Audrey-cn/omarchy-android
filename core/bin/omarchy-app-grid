@@ -116,26 +116,44 @@ def load_desktop_apps():
                 "id": app_id,
                 "name": name.strip(),
                 "exec": exec_cmd.strip(),
+                "try_exec": ent.get("TryExec", "").strip(),
                 "icon": icon.strip(),
                 "terminal": terminal,
                 "search": f"{name} {app_id} {keywords}".lower(),
             }
-    # Hide raw vendor entries when Omarchy's PRoot/Wayland wrapper entry is installed.
-    wrapped_vendors = {
-        "cc-switch": "omarchy-android-cc-switch",
-        "CC-Switch": "omarchy-android-cc-switch",
-        "CC Switch": "omarchy-android-cc-switch",
-        "chatgpt": "omarchy-android-chatgpt",
-        "ChatGPT": "omarchy-android-chatgpt",
-        "claude-desktop": "omarchy-android-claude",
-        "Claude": "omarchy-android-claude",
-        "hermes-desktop": "omarchy-android-hermes",
-        "Hermes": "omarchy-android-hermes",
-        "code": "omarchy-android-code",
-    }
-    for vendor_id, wrapper_id in wrapped_vendors.items():
-        if wrapper_id in seen and vendor_id in seen:
-            del seen[vendor_id]
+    # Universally hide raw vendor .desktop entries whenever an omarchy-android-* PRoot/Wayland
+    # wrapper exists for the same binary or app name (covers Claude, ChatGPT, CC Switch, Hermes, VS Code, etc.).
+    def _norm(val):
+        val = val.lower().replace("(omarchy)", "")
+        return "".join(ch for ch in val if ch.isalnum())
+
+    wrapped_bins = set()
+    wrapped_names = set()
+    for wid, info in seen.items():
+        if wid.startswith("omarchy-android-"):
+            slug = wid[len("omarchy-android-"):]
+            if slug:
+                wrapped_names.add(_norm(slug))
+            wrapped_names.add(_norm(info["name"]))
+            if info.get("try_exec"):
+                wrapped_bins.add(os.path.basename(info["try_exec"]).lower())
+
+    if wrapped_bins or wrapped_names:
+        for aid in list(seen.keys()):
+            if aid.startswith("omarchy-android-"):
+                continue
+            info = seen[aid]
+            try:
+                first_tok = shlex.split(info["exec"])[0]
+            except Exception:
+                first_tok = info["exec"].split()[0] if info["exec"].split() else ""
+            exec_bin = os.path.basename(first_tok).lower()
+            if (
+                (exec_bin and exec_bin in wrapped_bins)
+                or _norm(info["name"]) in wrapped_names
+                or _norm(aid) in wrapped_names
+            ):
+                del seen[aid]
     return sorted(seen.values(), key=lambda x: x["name"].lower())
 
 

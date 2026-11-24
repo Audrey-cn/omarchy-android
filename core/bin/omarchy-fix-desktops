@@ -85,8 +85,20 @@ VENDOR_DESKTOPS = {
 }
 
 
-def resolve_icon(slug, candidates=()):
-    for desktop_path in VENDOR_DESKTOPS.get(slug, ()):
+def resolve_icon(slug, candidates=(), executable=""):
+    scan_paths = list(VENDOR_DESKTOPS.get(slug, ()))
+    exec_base = os.path.basename(executable).lower() if executable else ""
+    vendor_dir = Path("/usr/share/applications")
+    if exec_base and vendor_dir.is_dir():
+        for entry in sorted(vendor_dir.glob("*.desktop")):
+            if str(entry) not in scan_paths:
+                try:
+                    txt = entry.read_text(errors="ignore")
+                except OSError:
+                    continue
+                if exec_base in txt.lower():
+                    scan_paths.append(str(entry))
+    for desktop_path in scan_paths:
         path = Path(desktop_path)
         if path.is_file():
             try:
@@ -112,7 +124,7 @@ def publish(directory, slug, name, executable, command, icons=()):
         return
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"omarchy-android-{slug}.desktop"
-    icon = resolve_icon(slug, icons)
+    icon = resolve_icon(slug, icons, executable)
     icon_line = f"Icon={icon}\n" if icon else ""
     body = (
         f"[Desktop Entry]\nType=Application\nName={name} (Omarchy)\n"
