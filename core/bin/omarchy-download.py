@@ -39,7 +39,7 @@ def mirror_prefixes(config=MIRROR_CONFIG):
         try:
             data = json.loads(config.read_text())
             mode, custom = data.get("mode", "direct"), data.get("custom_prefix", "")
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
             return ()
         except (OSError, ValueError, AttributeError) as error:
             raise ValueError("Invalid download mirror configuration") from error
