@@ -17,6 +17,7 @@ import math
 import glob
 import json
 import fcntl
+import shlex
 import socket
 import struct
 import subprocess
@@ -734,10 +735,10 @@ class OmarchyPanel(Gtk.Window):
         script = (
             f"clear; echo '=== {title} ==='; echo ''; {cmd}; "
             "rc=$?; echo ''; "
-            "if [ $rc -eq 0 ]; then echo '✓ 操作已完成'; else echo \"! 操作结束 (退出码: $rc)\"; fi; "
+            "if [ \"$rc\" -eq 0 ]; then echo '✓ 操作已完成'; else echo \"! 操作结束 (退出码: $rc)\"; fi; "
             "read -n 1 -s -r -p '按任意键关闭窗口...'"
         )
-        launch_bg(f"alacritty -e bash -c {json.dumps(script)}")
+        launch_bg(f"alacritty -e bash -c {shlex.quote(script)}")
         Gtk.main_quit()
 
     def _load_update_rows(self):
@@ -804,9 +805,12 @@ class OmarchyPanel(Gtk.Window):
         elif rt_avail:
             self.upd_desk_status.set_text("配套组件可更新")
             self._set_badge_class(self.upd_desk_status, "warn-text")
-        elif d_state == "current":
+        elif d_state in ("current", "ahead"):
             self.upd_desk_status.set_text("已最新")
             self._set_badge_class(self.upd_desk_status, "ok-text")
+        elif d_state == "incompatible":
+            self.upd_desk_status.set_text("需升级客户端")
+            self._set_badge_class(self.upd_desk_status, "warn-text")
         elif d_state == "failed":
             self.upd_desk_status.set_text("检查失败")
             self._set_badge_class(self.upd_desk_status, "warn-text")
@@ -992,7 +996,7 @@ class OmarchyPanel(Gtk.Window):
             (
                 "󰋼  查看本机桌面组件清单",
                 "本机桌面组件清单",
-                "/usr/local/bin/omarchy-component-update inventory --json",
+                "/usr/local/bin/omarchy-component-update inventory",
             ),
         ]:
             b = Gtk.Button(label=lbl)

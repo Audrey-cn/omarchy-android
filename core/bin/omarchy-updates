@@ -116,12 +116,21 @@ def apt():
     )
 
 
+def _runtime_env():
+    env = dict(os.environ)
+    env.setdefault("OMARCHY_RUNTIME_KIND", "proot")
+    env.setdefault("OMARCHY_RUNTIME_API", "1")
+    env.setdefault("OMARCHY_APK_VERSION_CODE", "100")
+    return env
+
+
 def component_result(label, args):
     result = subprocess.run(
         args,
         timeout=120,
         capture_output=True,
         text=True,
+        env=_runtime_env(),
         check=False,
     )
     if not result.stdout.strip() and result.returncode:
@@ -583,6 +592,7 @@ def apply_desktop():
                 "--version",
                 ver,
             ],
+            env=_runtime_env(),
             check=True,
         )
         updated = True
@@ -596,6 +606,7 @@ def apply_desktop():
             print(f"▶ 正在更新 {label}...")
             subprocess.run(
                 [BIN / "omarchy-runtime-update", "install", kind],
+                env=_runtime_env(),
                 check=True,
             )
             updated = True
