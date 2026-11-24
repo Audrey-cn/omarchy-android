@@ -399,19 +399,33 @@ class OmarchyPanel(Gtk.Window):
         fbox.pack_start(b_inc, True, True, 0)
         self.box.pack_start(fbox, False, False, 0)
 
-        # Symmetrical R-corner safe margin control for Waybar
-        self.add_row("圆角屏安全边距 (状态栏左右内缩)", dim=True)
-        rbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self.inset_btns = {}
-        for label, px in (("方屏 6px", 6), ("标准圆角 18px", 18), ("大圆角 28px", 28)):
-            rb = Gtk.Button(label=label)
-            rb.connect("clicked", lambda _, p=px: self.apply_bar_inset(p))
-            rbox.pack_start(rb, True, True, 0)
-            self.inset_btns[px] = rb
-        self.box.pack_start(rbox, False, False, 0)
+        # Symmetrical R-corner safe margin slider for Waybar (0-64px)
+        self.inset_title = self.add_row("圆角屏安全边距 (状态栏左右内缩): 30 px", dim=True)
+        sbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.inset_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 64, 2)
+        self.inset_scale.set_draw_value(False)
+        self.inset_scale.set_hexpand(True)
+        self._inset_syncing = False
+        def _on_inset_changed(scale):
+            val = int(round(scale.get_value()))
+            self.inset_title.set_text(f"圆角屏安全边距 (状态栏左右内缩): {val} px")
+        def _on_inset_commit(scale, _event=None):
+            if not self._inset_syncing:
+                self.apply_bar_inset(int(round(scale.get_value())))
+            return False
+        self.inset_scale.connect("value-changed", _on_inset_changed)
+        self.inset_scale.connect("button-release-event", _on_inset_commit)
+        self.inset_scale.connect("key-release-event", _on_inset_commit)
+        b_apply_inset = Gtk.Button(label="应用")
+        b_apply_inset.get_style_context().add_class("om-btn")
+        b_apply_inset.connect("clicked", lambda _: self.apply_bar_inset(int(round(self.inset_scale.get_value()))))
+        sbox.pack_start(self.inset_scale, True, True, 0)
+        sbox.pack_start(b_apply_inset, False, False, 0)
+        self.box.pack_start(sbox, False, False, 0)
         self.refresh_monitor_ui()
 
     def apply_bar_inset(self, px):
+        px = max(0, min(64, int(px)))
         os.makedirs("/root/.config/omarchy", exist_ok=True)
         open("/root/.config/omarchy/bar-inset", "w").write(str(px))
         css_path = "/root/.config/waybar/style.css"
@@ -433,17 +447,16 @@ class OmarchyPanel(Gtk.Window):
             bsc.remove_class("om-btn")
             bsc.remove_class("om-btn-active")
             bsc.add_class("om-btn-active" if abs(sc - self._cur_scale) < 0.015 else "om-btn")
-        cur_inset = 18
+        cur_inset = 30
         try:
             if os.path.exists("/root/.config/omarchy/bar-inset"):
-                cur_inset = int(open("/root/.config/omarchy/bar-inset").read().strip())
+                cur_inset = max(0, min(64, int(open("/root/.config/omarchy/bar-inset").read().strip())))
         except Exception:
             pass
-        for px, rb in self.inset_btns.items():
-            rsc = rb.get_style_context()
-            rsc.remove_class("om-btn")
-            rsc.remove_class("om-btn-active")
-            rsc.add_class("om-btn-active" if px == cur_inset else "om-btn")
+        self._inset_syncing = True
+        self.inset_scale.set_value(cur_inset)
+        self.inset_title.set_text(f"圆角屏安全边距 (状态栏左右内缩): {cur_inset} px")
+        self._inset_syncing = False
 
     def build_network(self):
         self.set_size_request(340, -1)

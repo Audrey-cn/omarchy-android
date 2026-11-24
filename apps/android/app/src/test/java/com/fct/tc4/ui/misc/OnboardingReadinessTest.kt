@@ -139,4 +139,21 @@ class OnboardingReadinessTest {
         assertEquals(completed, completed.after(OnboardingExit.PREVIEW))
         assertEquals(completed, completed.after(OnboardingExit.SKIP))
     }
+
+    @Test fun activityRecreationRestoresTheExactStepAndRejectsStaleInvalidSteps() {
+        val fresh = OnboardingProgress(completed = false, optedOut = false)
+        assertEquals(3, fresh.stepToResume(savedStep = 3, visibleStep = null, manualReplay = false))
+        assertEquals(3, fresh.stepToResume(savedStep = 1, visibleStep = 3, manualReplay = false))
+        assertNull(fresh.stepToResume(savedStep = -1, visibleStep = null, manualReplay = false))
+        assertNull(fresh.stepToResume(savedStep = 4, visibleStep = null, manualReplay = false))
+    }
+
+    @Test fun onlyAnOpenOrExplicitlyReplayedGuideResumesAfterCompletionOrOptOut() {
+        for (progress in listOf(OnboardingProgress(true, false), OnboardingProgress(false, true))) {
+            assertNull(progress.stepToResume(savedStep = 3, visibleStep = null, manualReplay = false))
+            assertEquals(3, progress.stepToResume(savedStep = 3, visibleStep = 3, manualReplay = false))
+            assertEquals(3, progress.stepToResume(savedStep = 3, visibleStep = null, manualReplay = true))
+        }
+    }
+
 }

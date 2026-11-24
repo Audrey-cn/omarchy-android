@@ -16,6 +16,13 @@ OMARCHY_PATH = "/root/.local/share/omarchy"
 STATE_DIR = "/root/.local/state/omarchy/current"
 THEME_DIR = f"{STATE_DIR}/theme"
 
+def load_bar_inset(path="/root/.config/omarchy/bar-inset"):
+    try:
+        with open(path, encoding="utf-8") as stream:
+            return max(0, min(64, int(stream.read().strip())))
+    except (OSError, ValueError):
+        return 30
+
 def get_swaysock():
     import sys
     sys.dont_write_bytecode = True
@@ -264,12 +271,7 @@ white   = "{c[15]}"
     with open("/root/.config/waybar/config.jsonc", "w") as f:
         json.dump(waybar_config, f, indent=2, ensure_ascii=False)
 
-    bar_inset = 18
-    try:
-        if os.path.exists("/root/.config/omarchy/bar-inset"):
-            bar_inset = max(0, min(48, int(open("/root/.config/omarchy/bar-inset").read().strip())))
-    except Exception:
-        pass
+    bar_inset = load_bar_inset()
 
     waybar_css = f"""@define-color background {bg};
 @define-color foreground {fg};
@@ -512,6 +514,7 @@ default-timeout=4000
 # Dual-modifier Alt mirror (for non-root Android external keyboards)
 bindsym $alt+Return exec {exec_term}
 bindsym $alt+space exec {exec_apps}
+bindsym $alt+d exec /usr/local/bin/omarchy-dock toggle
 bindsym $alt+k exec {exec_keys}
 bindsym $alt+w kill
 bindsym $alt+q kill
@@ -560,6 +563,7 @@ floating_modifier $mod normal
 # Official Omarchy Keybindings
 bindsym $mod+Return exec {exec_term}
 bindsym $mod+space exec {exec_apps}
+bindsym $mod+d exec /usr/local/bin/omarchy-dock toggle
 bindsym $mod+$alt+space exec {exec_menu}
 bindsym $mod+k exec {exec_keys}
 bindsym $mod+w kill

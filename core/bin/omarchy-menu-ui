@@ -137,6 +137,7 @@ def handle_special_route(route):
             pass
         binds = [
             f"{mod_label} + Space          →  原生 6 列应用网格 (App Grid)",
+            f"{mod_label} + D              →  切换底部 Dock (Bottom Dock)",
             f"{mod_label} + M              →  Omarchy 中文主菜单 (前往…)",
             f"{mod_label} + I              →  切换中英文拼音输入法 (EN ↔ 拼)",
             f"{mod_label} + Enter          →  打开 Alacritty 终端",

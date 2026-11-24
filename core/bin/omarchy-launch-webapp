@@ -1,6 +1,27 @@
 #!/usr/bin/env bash
-# Default Omarchy WebApp launcher (pinned Chromium in the standalone PRoot app).
+# Prefer Mozilla's codec-enabled browser for Bilibili video WebApps.
 set -euo pipefail
 url="${1:-}"
 [[ -n "$url" ]] || exit 0
-exec /usr/local/bin/omarchy-chromium --app="$url"
+
+# Match the URL's host, never a domain mentioned in its path, query or userinfo.
+shopt -s nocasematch
+if [[ "$url" =~ ^https?:// ]]; then
+    authority="${url#*://}"
+    authority="${authority%%[/?#]*}"
+    host="${authority##*@}"
+    host="${host%%:*}"
+    host="${host%.}"
+    case "$host" in
+        bilibili.com|*.bilibili.com|douyin.com|*.douyin.com|iqiyi.com|*.iqiyi.com|v.qq.com|*.v.qq.com|youku.com|*.youku.com|twitch.tv|*.twitch.tv)
+            # The wrapper is shipped even before Mozilla Firefox is installed.
+            if command -v firefox >/dev/null 2>&1; then
+                if command -v omarchy-firefox >/dev/null 2>&1; then
+                    exec omarchy-firefox "$url"
+                fi
+                exec firefox "$url"
+            fi
+            ;;
+    esac
+fi
+exec omarchy-browser --app="$url"

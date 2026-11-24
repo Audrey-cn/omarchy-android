@@ -92,6 +92,8 @@ object OmarchyX11Overlay {
     private const val DOUBAO_URL = "https://shurufa.doubao.com/"
     private const val ONBOARDING_COMPLETE = "onboarding_v2_done"
     private const val ONBOARDING_OPT_OUT = "onboarding_v2_opted_out"
+    private const val ONBOARDING_RESUME_STEP = "onboarding_resume_step"
+    private const val ONBOARDING_MANUAL_REPLAY = "onboarding_manual_replay"
 
     fun register(app: Application) {
         try {
@@ -114,9 +116,10 @@ object OmarchyX11Overlay {
             override fun onActivityStarted(activity: Activity) {}
             override fun onActivityResumed(activity: Activity) {
                 if (activity is X11Activity) {
+                    Global.userRequestedManagementPage = false
                     val ctrl = controllers.getOrPut(activity) { Controller(activity) }
                     ctrl.attachIfNeeded()
-                    ctrl.refreshOnboardingIfVisible()
+                    ctrl.restoreOnboardingIfInProgress()
                 }
             }
             override fun onActivityPaused(activity: Activity) {}
@@ -507,7 +510,7 @@ object OmarchyX11Overlay {
                 mainHandler.postDelayed(task, delay)
             }
 
-            if (onboardingProgress().shouldShowAutomatically) {
+            if (!restoreOnboardingIfInProgress() && onboardingProgress().shouldShowAutomatically) {
                 waitForOnboardingDesktop()
             }
         }
@@ -1083,12 +1086,15 @@ object OmarchyX11Overlay {
             }
 
             addMenuItem(s(R.string.omarchy_overlay_settings_title), s(R.string.omarchy_overlay_settings_desc)) {
+                Global.userRequestedManagementPage = true
                 try {
                     val intent = Intent(activity, Class.forName("com.fct.tc4.ui.main.MainActivity")).apply {
                         addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                     }
                     activity.startActivity(intent)
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                    Global.userRequestedManagementPage = false
+                }
             }
 
             addMenuItem(s(R.string.omarchy_overlay_shortcuts_title), s(R.string.omarchy_overlay_shortcuts_desc), "#7aa2f7") {
@@ -1154,6 +1160,9 @@ object OmarchyX11Overlay {
         // ==================== Interactive 4-Step Arrow-Guided Onboarding ====================
 
         private fun waitForOnboardingDesktop() {
+            if (restoreOnboardingIfInProgress()) return
+            // An explicitly replayed guide must also survive Activity recreation.
+            prefs.edit().putBoolean(ONBOARDING_MANUAL_REPLAY, !onboardingProgress().shouldShowAutomatically).apply()
             cancelOnboardingProbe()
             hideOnboarding()
             selectedOnboardingScale = null
@@ -1259,9 +1268,18 @@ object OmarchyX11Overlay {
             currentOnboardingStep = null
         }
 
-        fun refreshOnboardingIfVisible() {
-            val step = currentOnboardingStep ?: return
-            if (onboardingOverlay != null && step == 3) showOnboardingStep(step)
+        fun restoreOnboardingIfInProgress(): Boolean {
+            if (!attached || overlayHost == null) return false
+            val step = onboardingProgress().stepToResume(
+                savedStep = prefs.getInt(ONBOARDING_RESUME_STEP, -1),
+                visibleStep = currentOnboardingStep.takeIf { onboardingOverlay != null },
+                manualReplay = prefs.getBoolean(ONBOARDING_MANUAL_REPLAY, false)
+            ) ?: return false
+            // The guide was already ready before Settings opened; don't restart its probe.
+            // Rebuilding the exact step samples storage, battery and microphone live.
+            cancelOnboardingProbe()
+            showOnboardingStep(step)
+            return true
         }
 
         private fun readSavedOnboardingScale(): String? {
@@ -1296,25 +1314,26 @@ object OmarchyX11Overlay {
         )
 
         private fun closeOnboarding(action: OnboardingExit) {
-            val readiness = onboardingReadiness ?: return
-            if (readiness.state != OnboardingReadiness.State.READY) return
-            if (action == OnboardingExit.COMPLETE) readiness.finish()
+            if (onboardingOverlay == null || currentOnboardingStep == null) return
+            if (action == OnboardingExit.COMPLETE) onboardingReadiness?.finish()
             val before = onboardingProgress()
             val after = before.after(action)
-            if (before != after) {
-                val editor = prefs.edit()
-                if (before.completed != after.completed) editor.putBoolean(ONBOARDING_COMPLETE, after.completed)
-                if (before.optedOut != after.optedOut) editor.putBoolean(ONBOARDING_OPT_OUT, after.optedOut)
-                editor.apply()
-            }
+            prefs.edit()
+                .putBoolean(ONBOARDING_COMPLETE, after.completed)
+                .putBoolean(ONBOARDING_OPT_OUT, after.optedOut)
+                .putInt(ONBOARDING_RESUME_STEP, -1)
+                .putBoolean(ONBOARDING_MANUAL_REPLAY, false)
+                .apply()
             cancelOnboardingProbe()
             hideOnboarding()
         }
 
         private fun showOnboardingStep(step: Int) {
+            if (step !in 0..3) return
             val host = overlayHost ?: return
             hideOnboarding()
             currentOnboardingStep = step
+            prefs.edit().putInt(ONBOARDING_RESUME_STEP, step).apply()
 
             val w = host.width.takeIf { it > 0 } ?: activity.resources.displayMetrics.widthPixels
             val h = host.height.takeIf { it > 0 } ?: activity.resources.displayMetrics.heightPixels
@@ -1332,6 +1351,8 @@ object OmarchyX11Overlay {
 
             val card = LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
+                clipToPadding = false
+                clipChildren = false
                 background = makeRounded("#F81a1b26", "#7aa2f7", 16, 1)
                 setPadding(dp(18), dp(if (compact) 8 else 16), dp(18), dp(if (compact) 8 else 16))
                 elevation = dp(20).toFloat()
@@ -1635,7 +1656,9 @@ object OmarchyX11Overlay {
             val navRow = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.END
-                setPadding(0, dp(6), 0, 0)
+                clipToPadding = false
+                clipChildren = false
+                setPadding(dp(2), dp(2), dp(2), dp(2))
             }
             if (step > 0) {
                 navRow.addView(Button(activity).apply {
@@ -1645,7 +1668,7 @@ object OmarchyX11Overlay {
                     setTextColor(Color.parseColor("#c0caf5"))
                     background = makeRounded("#CC24283b", "#414868", 8, 1)
                     setOnClickListener { showOnboardingStep(step - 1) }
-                }, LinearLayout.LayoutParams(dp(86), dp(if (compact) 36 else 44)).apply { marginEnd = dp(8) })
+                }, LinearLayout.LayoutParams(dp(86), dp(if (compact) 40 else 44)).apply { marginEnd = dp(8) })
             }
             navRow.addView(Button(activity).apply {
                 text = s(if (step < 3) R.string.omarchy_onboarding_next else R.string.omarchy_onboarding_finish)
@@ -1656,8 +1679,10 @@ object OmarchyX11Overlay {
                 setOnClickListener {
                     if (step < 3) showOnboardingStep(step + 1) else closeOnboarding(OnboardingExit.COMPLETE)
                 }
-            }, LinearLayout.LayoutParams(0, dp(if (compact) 36 else 44), 1f))
-            card.addView(navRow)
+            }, LinearLayout.LayoutParams(0, dp(if (compact) 40 else 44), 1f))
+            card.addView(navRow, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(4) })
 
             val cardW = min(max(1, w - dp(if (compact) 64 else 32)), dp(if (compact) 600 else 390))
             // Measure the complete content without a height cap. If font size or device

@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""Tokyo Night floating GTK3 dock; Super+D toggles one owned process."""
+
+import fcntl
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+
+PIDFILE = "/tmp/omarchy-dock.pid"
+PINNED_APPS = (
+    ("Apps Grid", "view-app-grid-symbolic", ("/usr/local/bin/omarchy-menu-ui", "apps")),
+    ("Terminal", "utilities-terminal-symbolic", ("alacritty",)),
+    ("Browser", "web-browser-symbolic", ("/usr/local/bin/omarchy-browser",)),
+    ("Files", "system-file-manager-symbolic", ("thunar",)),
+    ("Settings / Menu", "emblem-system-symbolic", ("/usr/local/bin/omarchy-menu-ui",)),
+)
+
+
+def session_env():
+    sys.dont_write_bytecode = True
+    from omarchy_session import select_sway_socket
+    return {
+        **os.environ,
+        "GDK_BACKEND": "wayland",
+        "XDG_RUNTIME_DIR": "/tmp",
+        "WAYLAND_DISPLAY": os.environ.get("WAYLAND_DISPLAY", "wayland-1"),
+        "SWAYSOCK": select_sway_socket(os.environ),
+        "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS", "unix:path=/tmp/omarchy-dbus.sock"),
+        "PULSE_SERVER": os.environ.get("PULSE_SERVER", "unix:/tmp/pulse/native"),
+    }
+
+
+def sway_windows(env):
+    """Return real app windows, including Xwayland and floating containers."""
+    try:
+        raw = subprocess.check_output(
+            ["swaymsg", "-t", "get_tree"], env=env, text=True,
+            stderr=subprocess.DEVNULL, timeout=1,
+        )
+        tree = json.loads(raw)
+        windows = []
+        stack = [tree]
+        while stack:
+            node = stack.pop()
+            stack.extend(reversed(node.get("floating_nodes", [])))
+            stack.extend(reversed(node.get("nodes", [])))
+            app_id = node.get("app_id") or node.get("window_properties", {}).get("class")
+            if node.get("type") == "con" and app_id and isinstance(node.get("id"), int) and app_id != "omarchy-dock":
+                windows.append({
+                    "id": node["id"], "name": node.get("name") or app_id,
+                    "app_id": app_id, "focused": bool(node.get("focused")),
+                })
+        return windows
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
+        return []
+
+
+def run_dock():
+    # Keep process control importable and testable without a graphical session.
+    # Gtk's PyGObject override initializes GDK during import.
+    env = session_env()
+    os.environ.update(env)
+    import gi
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import Gtk, Gdk, GLib, GtkLayerShell
+
+    GLib.set_prgname("omarchy-dock")
+    window = Gtk.Window(title="Omarchy Dock")
+    window.set_decorated(False)
+    window.set_resizable(False)
+    window.set_app_paintable(True)
+    visual = window.get_screen().get_rgba_visual()
+    if visual:
+        window.set_visual(visual)
+    GtkLayerShell.init_for_window(window)
+    GtkLayerShell.set_namespace(window, "omarchy-dock")
+    GtkLayerShell.set_layer(window, GtkLayerShell.Layer.OVERLAY)
+    GtkLayerShell.set_keyboard_mode(window, GtkLayerShell.KeyboardMode.ON_DEMAND)
+    GtkLayerShell.set_anchor(window, GtkLayerShell.Edge.BOTTOM, True)
+    GtkLayerShell.set_margin(window, GtkLayerShell.Edge.BOTTOM, 20)
+    # No exclusive zone: this is an overlay pill, without shrinking tiled apps.
+    GtkLayerShell.set_exclusive_zone(window, 0)
+
+    css = Gtk.CssProvider()
+    css.load_from_data(b"""
+        window { background-color: alpha(#1a1b26, 0.94); color: #c0caf5;
+                 border: 1px solid #7aa2f7; border-radius: 28px; }
+        .dock-box { padding: 9px 12px; }
+        button { background-image: none; background-color: transparent;
+                 color: #c0caf5; border: 1px solid transparent; border-radius: 17px;
+                 box-shadow: none; padding: 8px; min-width: 28px; min-height: 28px; }
+        button:hover, button:focus { background-color: alpha(#7aa2f7, 0.18);
+                                    border-color: #7aa2f7; }
+        button.active { border-bottom-color: #7aa2f7; }
+        separator { background-color: alpha(#7aa2f7, 0.4); margin: 7px 6px; }
+    """)
+    Gtk.StyleContext.add_provider_for_screen(window.get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+    row.get_style_context().add_class("dock-box")
+
+    def close(*_):
+        if Gtk.main_level():
+            Gtk.main_quit()
+        return False
+
+    def launch(command):
+        try:
+            subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+            close()
+        except OSError as error:
+            print(f"omarchy-dock: {error}", file=sys.stderr)
+
+    for label, icon, command in PINNED_APPS:
+        button = Gtk.Button()
+        image = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG)
+        image.set_pixel_size(28)
+        button.add(image)
+        button.set_tooltip_text(label)
+        button.get_accessible().set_name(label)
+        button.connect("clicked", lambda _, args=command: launch(args))
+        row.pack_start(button, False, False, 0)
+
+    separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+    row.pack_start(separator, False, False, 0)
+    active = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+    row.pack_start(active, False, False, 0)
+    scroller = Gtk.ScrolledWindow()
+    scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+    scroller.set_propagate_natural_width(True)
+    scroller.set_propagate_natural_height(True)
+    display = Gdk.Display.get_default()
+    monitor = display.get_primary_monitor() or display.get_monitor(0)
+    max_width = max(240, monitor.get_geometry().width - 48) if monitor else 800
+    scroller.set_max_content_width(max_width)
+    scroller.add(row)
+    window.add(scroller)
+    previous = None
+
+    def refresh():
+        nonlocal previous
+        windows = sway_windows(env)
+        if windows == previous:
+            return True
+        previous = windows
+        for child in active.get_children():
+            child.destroy()
+        for app in windows:
+            button = Gtk.Button(label=app["name"][:18])
+            button.set_tooltip_text(app["name"])
+            if app["focused"]:
+                button.get_style_context().add_class("active")
+            button.connect("clicked", lambda _, cid=app["id"]: launch(["swaymsg", f"[con_id={cid}] focus"]))
+            active.pack_start(button, False, False, 0)
+        active.show_all()
+        separator.set_visible(bool(windows))
+        return True
+
+    window.connect("destroy", close)
+    window.connect("key-press-event", lambda _, event: close() if event.keyval == Gdk.KEY_Escape else False)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, close)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, close)
+    GLib.timeout_add_seconds(2, refresh)
+    window.show_all()
+    refresh()
+    Gtk.main()
+    window.destroy()
+
+
+def toggle(pidfile=PIDFILE):
+    """Stable locks serialize PID publication and lifetime ownership separately."""
+    path = Path(pidfile)
+    # Never unlink lock files: contenders may already hold an open descriptor.
+    with Path(str(path) + ".lock").open("a+") as owner:
+        with Path(str(path) + ".control.lock").open("a+") as control:
+            fcntl.flock(control.fileno(), fcntl.LOCK_EX)
+            try:
+                fcntl.flock(owner.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                # A live owner publishes its PID before releasing the control lock.
+                try:
+                    pid = int(path.read_text().strip())
+                    if pid > 1:
+                        os.kill(pid, signal.SIGTERM)
+                        return 0
+                except (OSError, ValueError):
+                    pass
+                return 1
+            path.write_text(str(os.getpid()))
+        try:
+            run_dock()
+        finally:
+            # Hold control until cleanup AND lifetime unlock finish. A new start
+            # cannot publish a replacement PID that this exit would then remove.
+            with Path(str(path) + ".control.lock").open("a+") as control:
+                fcntl.flock(control.fileno(), fcntl.LOCK_EX)
+                try:
+                    if path.exists() and path.read_text().strip() == str(os.getpid()):
+                        path.unlink()
+                finally:
+                    fcntl.flock(owner.fileno(), fcntl.LOCK_UN)
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 2 or (len(sys.argv) == 2 and sys.argv[1] != "toggle"):
+        raise SystemExit("Usage: omarchy-dock [toggle]")
+    raise SystemExit(toggle())

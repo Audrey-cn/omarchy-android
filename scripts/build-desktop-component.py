@@ -67,7 +67,7 @@ def build(version, output, changes, apk_min=64, runtime_min=1):
     for name in ("LICENSE", "LICENSES.md"):
         files[name] = ((ROOT / name).read_bytes(), 0o644)
     files["ownership.json"] = (ownership, 0o644)
-    deps = "python3, python3-gi, gir1.2-glib-2.0, libgtk-4-1, fcitx5-frontend-gtk4, bash, dpkg, ca-certificates, pulseaudio, pulseaudio-utils"
+    deps = "python3, python3-gi, gir1.2-glib-2.0, gir1.2-gtk-3.0, gir1.2-gtklayershell-0.1, libgtk-4-1, fcitx5-frontend-gtk4, bash, dpkg, ca-certificates, pulseaudio, pulseaudio-utils"
     manifest = dict(
         package=PACKAGE,
         version=version,

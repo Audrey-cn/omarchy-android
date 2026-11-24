@@ -37,6 +37,9 @@ import coil.decode.SvgDecoder
 import java.io.File
 
 object Global {
+    @Volatile var userRequestedManagementPage: Boolean = false
+    @Volatile var x11SessionActive: Boolean = false
+
     /**
      * auto_launch = "xfce"
      * installed_containers = ["xfce", "lxqt", ...]

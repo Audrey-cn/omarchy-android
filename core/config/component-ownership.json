@@ -204,6 +204,7 @@
     "core/bin/omarchy-chromium",
     "core/bin/omarchy-component-update",
     "core/bin/omarchy-deck-bridge.py",
+    "core/bin/omarchy-dock",
     "core/bin/omarchy-firefox",
     "core/bin/omarchy-fix-desktops",
     "core/bin/omarchy-hermes-pty-smoke",

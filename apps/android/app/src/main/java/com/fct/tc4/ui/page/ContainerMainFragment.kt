@@ -36,6 +36,7 @@ import com.fct.tc4.R
 import com.fct.tc4.databinding.Tc4FragmentContainerMainBinding
 import com.fct.tc4.ui.main.MainViewModel
 import com.fct.tc4.ui.misc.ConfirmDialogFragment
+import com.fct.tc4.ui.misc.Global
 import com.fct.tc4.ui.misc.setCurrentItemWithFixedDuration
 import com.google.android.material.snackbar.Snackbar
 import com.gaurav.avnc.ui.vnc.createVncIntent
@@ -152,6 +153,7 @@ class ContainerMainFragment : Fragment() {
                             val intent = Intent(requireContext(), com.termux.x11.MainActivity::class.java)
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                             requireContext().startActivity(intent)
+                            Global.x11SessionActive = true
                         }
                     }
                 }

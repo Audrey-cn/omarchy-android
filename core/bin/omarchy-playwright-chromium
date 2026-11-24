@@ -40,7 +40,9 @@ mkdir -p "$PROFILE"
 # Chromium 128 uses GTK4's input context with Fcitx on Sway.
 export GDK_BACKEND=wayland
 export GTK_IM_MODULE="${GTK_IM_MODULE:-fcitx}"
+export GTK_USE_PORTAL="${GTK_USE_PORTAL:-0}"
+export PULSE_SERVER="${PULSE_SERVER:-unix:/tmp/pulse/native}"
 if [[ "$AGENT" == 1 ]]; then
   set -- --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 "$@"
 fi
-exec "$BROWSER" --no-sandbox --ozone-platform=wayland --gtk-version=4 --user-data-dir="$PROFILE" "$@"
+exec "$BROWSER" --no-sandbox --disable-dev-shm-usage --ozone-platform=wayland --gtk-version=4 --user-data-dir="$PROFILE" "$@"

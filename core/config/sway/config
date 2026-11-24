@@ -20,6 +20,7 @@ floating_modifier $mod normal
 # Official Omarchy Keybindings
 bindsym $mod+Return exec alacritty
 bindsym $mod+space exec /usr/local/bin/omarchy-menu-ui apps
+bindsym $mod+d exec /usr/local/bin/omarchy-dock toggle
 bindsym $mod+$alt+space exec /usr/local/bin/omarchy-menu-ui
 bindsym $mod+k exec /usr/local/bin/omarchy-menu-ui keybindings
 bindsym $mod+w kill

@@ -34,7 +34,7 @@ class OmarchyKeepAliveService : Service() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         }
         val notice = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.terminal_24dp_1f1f1f_fill0_wght400_grad0_opsz24)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(getString(R.string.omarchy_keep_alive_title))
             .setContentText(getString(R.string.omarchy_keep_alive_text))
             .setStyle(Notification.BigTextStyle().bigText(getString(R.string.omarchy_keep_alive_text)))

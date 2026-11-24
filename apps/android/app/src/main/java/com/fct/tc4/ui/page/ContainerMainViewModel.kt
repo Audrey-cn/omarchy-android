@@ -106,6 +106,7 @@ class ContainerMainViewModel(
         initializationJob = viewModelScope.launch {
             val loaded = ConfigManager.load(code)
             if (loaded == null) {
+                Global.x11SessionActive = false
                 _errorMessage.value = getApplication<Application>().getString(R.string.tc4_container_config_lost, code)
                 _isInitialized.value = true
                 return@launch
@@ -113,6 +114,7 @@ class ContainerMainViewModel(
             config = loaded
             _configState.value = config
             if (config["boot_command"] !is String) {
+                Global.x11SessionActive = false
                 _errorMessage.value = getApplication<Application>().getString(R.string.tc4_container_missing_boot_cmd, code)
                 _isInitialized.value = true
                 return@launch
@@ -121,6 +123,7 @@ class ContainerMainViewModel(
             // replace or retire guest files when APK payloads change or disappear.
             // New Linux contents are delivered only through explicit initial install.
             if (!setupEnvironment()) {
+                Global.x11SessionActive = false
                 _isInitialized.value = true
                 return@launch
             }
@@ -137,7 +140,10 @@ class ContainerMainViewModel(
                 Log.e(TAG, "Container startup failed", error)
                 _errorMessage.value = getApplication<Application>().getString(R.string.omarchy_container_start_failed)
             } finally {
-                if (!launchCompleted) stopKeepAliveService()
+                if (!launchCompleted) {
+                    Global.x11SessionActive = false
+                    stopKeepAliveService()
+                }
             }
             _isInitialized.value = true
             if (!launchCompleted) return@launch
@@ -167,6 +173,7 @@ class ContainerMainViewModel(
     fun exitContainer() {
         if (exited) return
         exited = true
+        Global.x11SessionActive = false
         initializationJob.cancel()
         Global.onSessionSignal9 = null // 主动退出，不触发 signal 9 跳转
         killXServer()
@@ -196,6 +203,7 @@ class ContainerMainViewModel(
 
     @Suppress("UNCHECKED_CAST")
     fun enterGui() {
+        Global.userRequestedManagementPage = false
         viewModelScope.launch {
             val features = config["feature"] as? List<Map<String, Any>> ?: emptyList()
             for (feature in features) {
@@ -234,6 +242,9 @@ class ContainerMainViewModel(
         }
         Global.terminalSession?.finishIfRunning()
         Global.newSession(onFinished = { exitCode ->
+            // An exited VM can receive its old shell's callback after a new session starts.
+            if (exited) return@newSession
+            Global.x11SessionActive = false
             if (exitCode == -9) {
                 Global.onSessionSignal9?.invoke()
             }
@@ -480,6 +491,7 @@ class ContainerMainViewModel(
 
     override fun onCleared() {
         exited = true
+        Global.x11SessionActive = false
         initializationJob.cancel()
         Global.onSessionSignal9 = null // 防止回调泄漏
         killXServer()

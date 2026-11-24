@@ -206,6 +206,24 @@ class DesktopComponent(unittest.TestCase):
             with patch.dict(os.environ, {"PULSE_SERVER": "unix:/custom/pulse"}):
                 self.assertEqual(deck.wl_env()["PULSE_SERVER"], "unix:/custom/pulse")
 
+    def test_dock_package_and_launcher_activation(self):
+        files = package_files(self.archive)
+        command = "bin/omarchy-dock"
+        self.assertIn(command, files.keys())
+        self.assertEqual(files[command], (REPO / "core" / command).read_bytes())
+        manifest = json.loads(files["manifest.json"])
+        self.assertEqual(manifest["files"][command], updater.digest(files[command]))
+        for dependency in ("gir1.2-gtk-3.0", "gir1.2-gtklayershell-0.1"):
+            self.assertIn(dependency, manifest["depends"].split(", "))
+        data = subprocess.check_output(["ar", "p", self.archive, "data.tar.gz"])
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            self.assertEqual(archive.getmember("./" + builder.PREFIX + command).mode, 0o755)
+        self.install()
+        launcher = updater.LAUNCH / "omarchy-dock"
+        self.assertTrue(launcher.is_symlink())
+        self.assertEqual(launcher.readlink(), updater.PRIVATE / command)
+        self.assertEqual(launcher.read_bytes(), files[command])
+
     def test_pinned_ci_candidate_uses_same_transaction_offline(self):
         directory = self.archive.parent
         sha = updater.digest((directory / "desktop-component.json").read_bytes())

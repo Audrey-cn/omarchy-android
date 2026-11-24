@@ -227,7 +227,7 @@ class DesktopInstallService : Service() {
     private fun notify(state: DesktopSetupState) { getSystemService(NotificationManager::class.java).notify(NOTICE, notification(state)) }
     private fun notification(state: DesktopSetupState): Notification {
         val open = PendingIntent.getActivity(this, 1, Intent(this, DesktopSetupActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val builder = Notification.Builder(this, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_download)
+        val builder = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(getString(R.string.omarchy_setup_notification_title)).setContentIntent(open).setOnlyAlertOnce(true)
             .setContentText(state.message.ifEmpty { getString(R.string.omarchy_setup_progress_saved) })
             .setOngoing(state.phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.IMPORTING, SetupPhase.VERIFYING, SetupPhase.INSTALLING))

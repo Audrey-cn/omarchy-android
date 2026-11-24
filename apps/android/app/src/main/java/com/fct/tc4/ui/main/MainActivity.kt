@@ -43,6 +43,7 @@ import com.fct.tc4.ui.page.ContainerInstallFragment
 import com.fct.tc4.ui.page.ContainerMainFragment
 import com.fct.tc4.ui.page.ContainerManageFragment
 import com.fct.tc4.ui.misc.Global
+import com.fct.tc4.ui.misc.shouldReturnToX11
 import com.fct.tc4.ui.page.TerminalFragment
 import com.fct.tc4.ui.page.ContainerManageViewModel
 import com.google.android.material.snackbar.Snackbar
@@ -55,6 +56,9 @@ import kotlinx.coroutines.withContext
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: Tc4ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
+    private var pendingImportCount = 0
+    private var pendingShortcutNavigation = false
+    private var desktopForwardScheduled = false
 
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -101,7 +105,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        if (savedInstanceState == null) {
+        if (savedInstanceState == null && !returnToLiveDesktop()) {
             resolveIntentAction(intent)
         }
 
@@ -188,9 +192,45 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        returnToLiveDesktop()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        desktopForwardScheduled = false
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        resolveIntentAction(intent)
+        setIntent(intent)
+        if (!returnToLiveDesktop(intent)) resolveIntentAction(intent)
+    }
+
+    private fun returnToLiveDesktop(launchIntent: Intent? = intent): Boolean {
+        val action = launchIntent?.action
+        val externalEntry = launchIntent?.data != null ||
+            (action != null && action != Intent.ACTION_MAIN)
+        val pendingAction = externalEntry || pendingImportCount > 0 || pendingShortcutNavigation ||
+            MainViewModel.pendingCommandText != null
+        if (!shouldReturnToX11(Global.x11SessionActive, Global.userRequestedManagementPage, pendingAction)) return false
+        if (desktopForwardScheduled) return true
+        return try {
+            desktopForwardScheduled = true
+            startActivity(Intent(this, com.termux.x11.MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            })
+            true
+        } catch (_: RuntimeException) {
+            desktopForwardScheduled = false
+            false
+        }
+    }
+
+    private fun consumeExternalIntent() {
+        // Recents must not keep treating an already handled share/shortcut as pending.
+        setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN))
     }
 
     private fun showFragmentForScreen(screen: MainViewModel.Screen) {
@@ -253,8 +293,14 @@ class MainActivity : AppCompatActivity() {
     private fun resolveIntentAction(intent: Intent?) {
         when (intent?.action) {
             Intent.ACTION_MAIN -> onNormalLaunch()
-            Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> onImportFile(intent)
-            ACTION_SHORTCUT -> onShortcutLaunch(intent)
+            Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> {
+                onImportFile(intent)
+                consumeExternalIntent()
+            }
+            ACTION_SHORTCUT -> {
+                onShortcutLaunch(intent)
+                consumeExternalIntent()
+            }
             else -> onNormalLaunch()
         }
     }
@@ -262,6 +308,14 @@ class MainActivity : AppCompatActivity() {
     private fun onNormalLaunch() {
         // 已完成初始导航，不再重复导航（singleTask 下 onNewIntent 可能再次触发 ACTION_MAIN）
         if (viewModel.screen.value !is MainViewModel.Screen.Init) return
+
+        // A recreated management Activity must never start another container over the
+        // running desktop. An in-flight import is forwarded by its completion handler.
+        if (Global.x11SessionActive) {
+            if (Global.userRequestedManagementPage) viewModel.navigateTo(MainViewModel.Screen.ContainerManage)
+            else returnToLiveDesktop()
+            return
+        }
 
         if (Global.installedContainers.isEmpty()) {
             startActivity(Intent(this, com.fct.tc4.ui.page.DesktopSetupActivity::class.java))
@@ -298,34 +352,35 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            val app = application
-            val publicDir = File(app.filesDir, "public")
-            publicDir.mkdirs()
+        pendingImportCount++
+        lifecycleScope.launch {
+            try {
+                val copiedCount = withContext(Dispatchers.IO) {
+                    val app = application
+                    val publicDir = File(app.filesDir, "public")
+                    publicDir.mkdirs()
 
-            var copiedCount = 0
-            uris.forEach { uri ->
-                try {
-                    val fileName = getFileName(uri) ?: "file_${System.currentTimeMillis()}"
-                    app.contentResolver.openInputStream(uri)?.use { input ->
-                        File(publicDir, fileName).outputStream().use { output ->
-                            input.copyTo(output, bufferSize = 8192)
-                        }
+                    var copied = 0
+                    uris.forEach { uri ->
+                        try {
+                            val fileName = getFileName(uri) ?: "file_${System.currentTimeMillis()}"
+                            app.contentResolver.openInputStream(uri)?.use { input ->
+                                File(publicDir, fileName).outputStream().use { output ->
+                                    input.copyTo(output, bufferSize = 8192)
+                                }
+                            }
+                            copied++
+                        } catch (_: Exception) { }
                     }
-                    copiedCount++
-                } catch (_: Exception) { }
-            }
-
-            withContext(Dispatchers.Main) {
+                    copied
+                }
                 Snackbar.make(binding.root,
                     getString(R.string.tc4_import_file_result, copiedCount, uris.size),
                     Snackbar.LENGTH_SHORT).show()
-            }
-
-            if (viewModel.screen.value is MainViewModel.Screen.Init) {
-                withContext(Dispatchers.Main) {
-                    onNormalLaunch()
-                }
+                if (viewModel.screen.value is MainViewModel.Screen.Init) onNormalLaunch()
+            } finally {
+                pendingImportCount--
+                if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) returnToLiveDesktop()
             }
         }
     }
@@ -369,9 +424,15 @@ class MainActivity : AppCompatActivity() {
             is MainViewModel.Screen.ContainerMain -> {
                 if (screen.code == code) {
                     Global.sendCommand(command)
+                    pendingShortcutNavigation = true
                     lifecycleScope.launch {
-                        delay(32)
-                        (supportFragmentManager.findFragmentByTag("ContainerMain") as? ContainerMainFragment)?.onEnterGui()
+                        try {
+                            delay(32)
+                            (supportFragmentManager.findFragmentByTag("ContainerMain") as? ContainerMainFragment)?.onEnterGui()
+                        } finally {
+                            pendingShortcutNavigation = false
+                            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) returnToLiveDesktop()
+                        }
                     }
                 } else {
                     Snackbar.make(binding.root, R.string.tc4_shortcut_another_running, Snackbar.LENGTH_SHORT).show()

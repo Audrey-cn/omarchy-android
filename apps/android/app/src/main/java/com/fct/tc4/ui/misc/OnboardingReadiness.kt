@@ -22,6 +22,12 @@ internal enum class OnboardingExit { SKIP, PREVIEW, COMPLETE }
 internal data class OnboardingProgress(val completed: Boolean, val optedOut: Boolean) {
     val shouldShowAutomatically: Boolean get() = !completed && !optedOut
 
+    fun stepToResume(savedStep: Int, visibleStep: Int?, manualReplay: Boolean): Int? = when {
+        visibleStep != null && visibleStep in 0..3 -> visibleStep
+        (shouldShowAutomatically || manualReplay) && savedStep in 0..3 -> savedStep
+        else -> null
+    }
+
     fun after(action: OnboardingExit): OnboardingProgress = when (action) {
         OnboardingExit.SKIP -> if (completed) this else copy(optedOut = true)
         OnboardingExit.PREVIEW -> this
