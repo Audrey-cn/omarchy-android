@@ -178,7 +178,7 @@ DESKTOP
     install.ai.claude)
         echo "正在安装官方原生 ARM64 Claude Desktop (.deb)..."
         mkdir -p /usr/share/keyrings
-        curl -fsSL https://downloads.claude.ai/claude-desktop/apt/stable/keyring.gpg -o /usr/share/keyrings/claude-desktop-archive-keyring.asc
+        curl -fsSL https://downloads.claude.ai/claude-desktop/key.asc -o /usr/share/keyrings/claude-desktop-archive-keyring.asc
         echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" > /etc/apt/sources.list.d/claude-desktop.list
         DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any update -qq
         DEBIAN_FRONTEND=noninteractive apt-get install -y claude-desktop
