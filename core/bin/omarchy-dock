@@ -5,18 +5,51 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
 
 PIDFILE = "/tmp/omarchy-dock.pid"
 PINNED_APPS = (
-    ("Apps Grid", "view-app-grid-symbolic", ("/usr/local/bin/omarchy-menu-ui", "apps")),
-    ("Terminal", "utilities-terminal-symbolic", ("alacritty",)),
-    ("Browser", "web-browser-symbolic", ("/usr/local/bin/omarchy-browser",)),
-    ("Files", "system-file-manager-symbolic", ("thunar",)),
-    ("Settings / Menu", "emblem-system-symbolic", ("/usr/local/bin/omarchy-menu-ui",)),
+    ("Apps Grid", "󰀻", ("/usr/local/bin/omarchy-menu-ui", "apps")),
+    ("Terminal", "", ("alacritty",)),
+    ("Browser", "󰈹", ("/usr/local/bin/omarchy-browser",)),
+    ("Files", "󰉋", ("thunar",)),
+    ("Settings / Menu", "󰒓", ("/usr/local/bin/omarchy-menu-ui",)),
 )
+
+
+def load_theme():
+    bg, fg, accent = "#1a1b26", "#c0caf5", "#7aa2f7"
+    p = "/root/.config/omarchy/current/theme/colors.toml"
+    if os.path.exists(p):
+        try:
+            txt = Path(p).read_text(encoding="utf-8", errors="ignore")
+            m1 = re.search(r'^\s*background\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
+            m2 = re.search(r'^\s*foreground\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
+            m3 = re.search(r'^\s*accent\s*=\s*"(#[0-9a-fA-F]{6})"', txt, re.M)
+            if m1: bg = m1.group(1)
+            if m2: fg = m2.group(1)
+            if m3: accent = m3.group(1)
+        except Exception:
+            pass
+    return bg, fg, accent
+
+
+def app_glyph(app_id, name):
+    hay = f"{app_id} {name}".lower()
+    if any(k in hay for k in ("alacritty", "kitty", "foot", "terminal")):
+        return ""
+    if any(k in hay for k in ("firefox", "chromium", "chrome", "omarchy-browser", "bilibili")):
+        return "󰈹"
+    if any(k in hay for k in ("hermes", "claude", "chatgpt", "codex")):
+        return "󰚩"
+    if "cc-switch" in hay:
+        return "󰣆"
+    if any(k in hay for k in ("thunar", "files", "nautilus")):
+        return "󰉋"
+    return "󰖯"
 
 
 def session_env():
@@ -73,34 +106,84 @@ def run_dock():
     window = Gtk.Window(title="Omarchy Dock")
     window.set_decorated(False)
     window.set_resizable(False)
-    window.set_app_paintable(True)
-    visual = window.get_screen().get_rgba_visual()
-    if visual:
-        window.set_visual(visual)
     GtkLayerShell.init_for_window(window)
     GtkLayerShell.set_namespace(window, "omarchy-dock")
     GtkLayerShell.set_layer(window, GtkLayerShell.Layer.OVERLAY)
     GtkLayerShell.set_keyboard_mode(window, GtkLayerShell.KeyboardMode.ON_DEMAND)
     GtkLayerShell.set_anchor(window, GtkLayerShell.Edge.BOTTOM, True)
-    GtkLayerShell.set_margin(window, GtkLayerShell.Edge.BOTTOM, 20)
+    GtkLayerShell.set_margin(window, GtkLayerShell.Edge.BOTTOM, 14)
     # No exclusive zone: this is an overlay pill, without shrinking tiled apps.
     GtkLayerShell.set_exclusive_zone(window, 0)
 
+    settings = Gtk.Settings.get_default()
+    if settings:
+        settings.set_property("gtk-application-prefer-dark-theme", True)
+
+    bg, fg, accent = load_theme()
     css = Gtk.CssProvider()
-    css.load_from_data(b"""
-        window { background-color: alpha(#1a1b26, 0.94); color: #c0caf5;
-                 border: 1px solid #7aa2f7; border-radius: 28px; }
-        .dock-box { padding: 9px 12px; }
-        button { background-image: none; background-color: transparent;
-                 color: #c0caf5; border: 1px solid transparent; border-radius: 17px;
-                 box-shadow: none; padding: 8px; min-width: 28px; min-height: 28px; }
-        button:hover, button:focus { background-color: alpha(#7aa2f7, 0.18);
-                                    border-color: #7aa2f7; }
-        button.active { border-bottom-color: #7aa2f7; }
-        separator { background-color: alpha(#7aa2f7, 0.4); margin: 7px 6px; }
-    """)
+    css.load_from_data(f"""
+        window {{
+            background-color: {bg};
+            color: {fg};
+            border: 2px solid {accent};
+            border-radius: 16px;
+        }}
+        scrolledwindow, viewport {{
+            background-color: {bg};
+            border: none;
+        }}
+        .dock-box {{
+            background-color: {bg};
+            padding: 8px 12px;
+        }}
+        button.dock-pin {{
+            background-image: none;
+            background-color: alpha({fg}, 0.08);
+            color: {fg};
+            border: 1px solid alpha({fg}, 0.14);
+            border-radius: 11px;
+            box-shadow: none;
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 18px;
+            padding: 4px;
+            min-width: 38px;
+            min-height: 36px;
+        }}
+        button.dock-pin:hover, button.dock-pin:focus {{
+            background-color: alpha({accent}, 0.24);
+            color: {accent};
+            border-color: {accent};
+        }}
+        button.dock-win {{
+            background-image: none;
+            background-color: alpha({fg}, 0.07);
+            color: {fg};
+            border: 1px solid alpha({fg}, 0.14);
+            border-radius: 10px;
+            box-shadow: none;
+            font-family: "JetBrainsMono Nerd Font", "Noto Sans CJK SC", sans-serif;
+            font-size: 12px;
+            padding: 4px 10px;
+            min-height: 36px;
+        }}
+        button.dock-win:hover, button.dock-win:focus {{
+            background-color: alpha({accent}, 0.20);
+            border-color: {accent};
+        }}
+        button.dock-win.active {{
+            background-color: alpha({accent}, 0.22);
+            border: 1px solid {accent};
+            color: {fg};
+            font-weight: bold;
+        }}
+        separator {{
+            background-color: alpha({accent}, 0.45);
+            min-width: 1px;
+            margin: 6px 8px;
+        }}
+    """.encode("utf-8"))
     Gtk.StyleContext.add_provider_for_screen(window.get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
     row.get_style_context().add_class("dock-box")
 
     def close(*_):
@@ -117,11 +200,9 @@ def run_dock():
         except OSError as error:
             print(f"omarchy-dock: {error}", file=sys.stderr)
 
-    for label, icon, command in PINNED_APPS:
-        button = Gtk.Button()
-        image = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.DIALOG)
-        image.set_pixel_size(28)
-        button.add(image)
+    for label, glyph, command in PINNED_APPS:
+        button = Gtk.Button(label=glyph)
+        button.get_style_context().add_class("dock-pin")
         button.set_tooltip_text(label)
         button.get_accessible().set_name(label)
         button.connect("clicked", lambda _, args=command: launch(args))
@@ -129,7 +210,7 @@ def run_dock():
 
     separator = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
     row.pack_start(separator, False, False, 0)
-    active = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+    active = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
     row.pack_start(active, False, False, 0)
     scroller = Gtk.ScrolledWindow()
     scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
@@ -152,7 +233,12 @@ def run_dock():
         for child in active.get_children():
             child.destroy()
         for app in windows:
-            button = Gtk.Button(label=app["name"][:18])
+            title = app["name"].strip()
+            if len(title) > 16:
+                title = title[:15] + "…"
+            glyph = app_glyph(app["app_id"], app["name"])
+            button = Gtk.Button(label=f"{glyph}  {title}")
+            button.get_style_context().add_class("dock-win")
             button.set_tooltip_text(app["name"])
             if app["focused"]:
                 button.get_style_context().add_class("active")

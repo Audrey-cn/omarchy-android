@@ -75,6 +75,19 @@ class OmarchyBrowser(Gtk.Window):
         st.set_enable_html5_local_storage(True)
         st.set_enable_html5_database(True)
         st.set_enable_smooth_scrolling(True)
+        for attr, val in (
+            ("set_enable_mediasource", True),
+            ("set_enable_media_stream", True),
+            ("set_enable_webaudio", True),
+            ("set_enable_media_capabilities", True),
+            ("set_enable_encrypted_media", True),
+            ("set_media_playback_requires_user_gesture", False),
+        ):
+            if hasattr(st, attr):
+                try:
+                    getattr(st, attr)(val)
+                except Exception:
+                    pass
         st.set_user_agent(
             "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )

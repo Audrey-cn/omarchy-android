@@ -105,6 +105,7 @@ def handle_key(msg):
 
     if sup:
         if code == "space": run_bg("/usr/local/bin/omarchy-menu-ui apps"); return
+        if code == "d": run_bg("/usr/local/bin/omarchy-dock toggle"); return
         if code == "m": run_bg("/usr/local/bin/omarchy-menu-ui"); return
         if code == "k": run_bg("/usr/local/bin/omarchy-menu-ui keybindings"); return
         if code == "Return": run_bg("alacritty"); return

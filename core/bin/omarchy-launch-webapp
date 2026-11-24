@@ -17,18 +17,22 @@ if [[ "$mode" == auto && "$url" =~ ^https?:// ]]; then
     host="${host%%:*}"
     host="${host%.}"
     case "$host" in
-        bilibili.com|*.bilibili.com|douyin.com|*.douyin.com|iqiyi.com|*.iqiyi.com|v.qq.com|*.v.qq.com|youku.com|*.youku.com|twitch.tv|*.twitch.tv)
+        bilibili.com|*.bilibili.com|douyin.com|*.douyin.com|iqiyi.com|*.iqiyi.com|v.qq.com|*.v.qq.com|youku.com|*.youku.com|twitch.tv|*.twitch.tv|youtube.com|*.youtube.com)
             mode=tab
             ;;
     esac
 fi
 if [[ "$mode" == tab ]]; then
-    # The wrapper is shipped even before Mozilla Firefox is installed.
+    # Video sites need full HTML5 MSE/H.264/AAC and smooth touchpad scrolling.
+    # Prefer Mozilla Firefox, then pre-installed Playwright Chromium, then WebKitGTK.
     if command -v firefox >/dev/null 2>&1; then
         if command -v omarchy-firefox >/dev/null 2>&1; then
             exec omarchy-firefox "$url"
         fi
         exec firefox "$url"
+    fi
+    if command -v omarchy-chromium >/dev/null 2>&1; then
+        exec omarchy-chromium "$url"
     fi
     exec omarchy-browser "$url"
 fi
