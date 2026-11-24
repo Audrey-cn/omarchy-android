@@ -5,6 +5,7 @@ import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
@@ -129,6 +130,7 @@ object OmarchyX11Overlay {
                     ctrl.attachIfNeeded()
                     ctrl.restoreOnboardingIfInProgress()
                     ctrl.onResume()
+                    suppressLegacyX11Notification(activity)
                 }
             }
             override fun onActivityPaused(activity: Activity) {
@@ -140,6 +142,25 @@ object OmarchyX11Overlay {
                 controllers.remove(activity)?.detach()
             }
         })
+    }
+
+    /**
+     * Suppresses upstream Termux:X11's redundant foreground notification ("Pull down to show options")
+     * so only Omarchy's unified desktop session notification (id 2402) and installer notification (id 2401) appear.
+     */
+    private fun suppressLegacyX11Notification(context: Context) {
+        val cancelOnce = Runnable {
+            try {
+                val nm = context.getSystemService(NotificationManager::class.java) ?: return@Runnable
+                for (sbn in nm.activeNotifications) {
+                    if (sbn.packageName == context.packageName && sbn.id != 2401 && sbn.id != 2402) {
+                        nm.cancel(sbn.tag, sbn.id)
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+        cancelOnce.run()
+        Handler(Looper.getMainLooper()).postDelayed(cancelOnce, 350L)
     }
 
     private enum class VectorKind {
