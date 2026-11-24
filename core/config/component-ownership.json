@@ -206,6 +206,7 @@
     "core/bin/omarchy-download.py",
     "core/bin/omarchy-deck-bridge.py",
     "core/bin/omarchy-dock",
+    "core/bin/omarchy-ensure-hermes-venv",
     "core/bin/omarchy-firefox",
     "core/bin/omarchy-fix-desktops",
     "core/bin/omarchy-hermes-pty-smoke",

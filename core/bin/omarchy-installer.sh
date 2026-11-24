@@ -9,6 +9,7 @@ export OMARCHY_PATH="/root/.local/share/omarchy"
 export PATH="/usr/local/bin:$OMARCHY_PATH/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
+export UV_LINK_MODE=copy
 
 KEY="$1"
 LABEL="${2:-$1}"
@@ -16,7 +17,16 @@ APP_DIR="/root/.local/share/applications"
 ICON_DIR="/root/.local/share/icons/hicolor/256x256/apps"
 mkdir -p "$APP_DIR" "$ICON_DIR"
 
+ensure_dns() {
+    # PRoot images can occasionally inherit a dangling systemd-resolved symlink after APT updates.
+    if [[ -L /etc/resolv.conf && ! -e /etc/resolv.conf ]] || [[ ! -s /etc/resolv.conf ]]; then
+        rm -f /etc/resolv.conf 2>/dev/null || true
+        printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf 2>/dev/null || true
+    fi
+}
+
 ensure_apt_updated() {
+    ensure_dns
     if [ -z "$(ls -A /var/lib/apt/lists 2>/dev/null | grep -v '^partial$\|^auxfiles$\|^lock$')" ]; then
         echo "正在更新 APT 软件源索引..."
         DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any update -qq

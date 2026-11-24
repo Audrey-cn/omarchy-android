@@ -237,6 +237,10 @@ jobs:
           ln -s /etc/machine-id /var/lib/dbus/machine-id
           rm -f /etc/resolv.conf
           printf 'nameserver 223.5.5.5\nnameserver 119.29.29.29\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n' > /etc/resolv.conf
+          mkdir -p /etc/profile.d
+          printf '# PRoot cannot reliably emulate uv cache hardlinks during Python installs.\nexport UV_LINK_MODE=copy\n' > /etc/profile.d/omarchy-proot-env.sh
+          chmod 644 /etc/profile.d/omarchy-proot-env.sh
+          grep -qxF 'UV_LINK_MODE=copy' /etc/environment 2>/dev/null || printf 'UV_LINK_MODE=copy\n' >> /etc/environment
           CLEAN
           sudo cp apps/android/container/omarchy.tiny.yaml "$ROOTFS/.tiny.yaml"
 
