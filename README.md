@@ -1,95 +1,114 @@
 <div align="center">
   <img src="docs/assets/omarchy-icon.png" width="100" alt="Omarchy Android logo">
   <h1>Omarchy Android</h1>
-  <p><strong>Your phone. A real Linux desktop.</strong></p>
-  <p>An Omarchy-inspired Ubuntu ARM64 desktop, built for Android touch, keyboards and everyday tinkering.</p>
+  <p><strong>Your phone. A real, opinionated Linux &amp; AI workstation.</strong></p>
+  <p>An Omarchy-inspired Ubuntu 24.04 ARM64 + Sway Wayland desktop, engineered from the ground up for Android touchscreens, keyboards, and native ARM64 AI workflows — <strong>no root required</strong>.</p>
   <p>
     <a href="https://github.com/Audrey-cn/omarchy-android/releases"><img src="https://img.shields.io/github/v/release/Audrey-cn/omarchy-android?include_prereleases&amp;label=Release" alt="Release"></a>
     <a href="apps/android/COPYING"><img src="https://img.shields.io/badge/Android_app-GPL--3.0-blue" alt="Android app license: GPL-3.0"></a>
-    <img src="https://img.shields.io/badge/Android-ARM64-3DDC84?logo=android&amp;logoColor=white" alt="Android ARM64">
+    <img src="https://img.shields.io/badge/Android-ARM64%20(Rootless)-3DDC84?logo=android&amp;logoColor=white" alt="Android ARM64 Rootless">
     <img src="https://img.shields.io/badge/Ubuntu-24.04%20%2B%20Sway-E95420?logo=ubuntu&amp;logoColor=white" alt="Ubuntu 24.04 + Sway">
     <a href="https://github.com/Audrey-cn/omarchy-android/forks"><img src="https://img.shields.io/github/forks/Audrey-cn/omarchy-android?style=flat" alt="Forks"></a>
     <a href="https://github.com/Audrey-cn/omarchy-android/issues"><img src="https://img.shields.io/github/issues/Audrey-cn/omarchy-android" alt="Issues"></a>
   </p>
   <p><strong>English</strong> | <a href="README.zh-CN.md"><strong>简体中文</strong></a></p>
-  <p><a href="https://github.com/Audrey-cn/omarchy-android/releases"><strong>Download APK</strong></a> · <a href="docs/initial-install.md">Installation guide</a> · <a href="CONTRIBUTING.md">Contribute</a></p>
+  <p><a href="https://github.com/Audrey-cn/omarchy-android/releases"><strong>Download Latest APK</strong></a> · <a href="docs/initial-install.md">Installation Guide</a> · <a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="CONTRIBUTING.md">Contribute</a></p>
 </div>
 
-## Real-device showcase
+---
 
-| Sway desktop & edge dock | Transparent floating keyboard |
-| --- | --- |
-| ![Ubuntu desktop with tiled applications and the expanded edge dock](docs/assets/showcase-desktop-dock.png) | ![Linux desktop with the transparent floating keyboard](docs/assets/showcase-floating-keyboard.png) |
-| **One place for your controls** | **Choose, download or import your desktop** |
-| ![Unified settings for display, input and Android permissions](docs/assets/showcase-unified-settings.png) | ![First-run desktop image installer](docs/assets/showcase-setup-installer.png) |
+## Real-Device Showcase
 
-## Why Omarchy Android?
+Every screenshot below was captured directly on real Android phones (Redmi K90 Pro Max · **Android 17 Rootless** & Redmi K20 Pro · **Android ARM64**).
 
-- **Rootless by default.** Install the Android app and set up Ubuntu inside it. X11 and PRoot are included; no separate Termux installation is needed. An optional **Root chroot** route is available for rooted devices.
-- **A real Wayland session.** Sway, Waybar, a native app grid, themes and Linux applications run inside Ubuntu 24.04 ARM64. Sway uses an X11 backend to display through Android's embedded X server.
-- **One gesture away.** An edge handle opens Android input, toggles a transparent floating keyboard, or reveals orientation and settings controls. Move it to either edge at a comfortable height.
-- **Made for touch and keyboards.** Android IME bridging, Chinese input, adjustable scaling and Super/Alt shortcuts make a phone, foldable or tablet usable as a desktop.
-- **Updates at their own pace.** APK, desktop components, graphics/browser runtimes and the initial image have separate release channels. Compatible, same-signature APK updates preserve the existing guest; Ubuntu packages use APT and guest components update explicitly from the desktop.
+| Tokyo Night Breathing Splash &amp; Attribution | 4-Step Interactive High-DPI Onboarding |
+| :---: | :---: |
+| ![Tokyo Night cold-start breathing splash with circular author avatar](docs/assets/showcase-geek-splash.png) | ![Interactive 4-step onboarding with live 1.5x scaling and guide arrow](docs/assets/showcase-onboarding-4step.png) |
+| **Bottom Dock (`Super + D`) &amp; Live Update Progress** | **Hermes Desktop + Local AI Tool Calling** |
+| ![Tokyo Night Nerd Font bottom dock and terminal progress bar update](docs/assets/showcase-bottom-dock.png) | ![Hermes Desktop running locally with live Chinese replies and terminal tool execution](docs/assets/showcase-ai-hermes.png) |
+| **Native ARM64 VS Code (Wayland)** | **Native ARM64 Codex / ChatGPT Desktop** |
+| ![Microsoft Visual Studio Code ARM64 running natively on Sway Wayland](docs/assets/showcase-vscode.png) | ![OpenAI Codex / ChatGPT Desktop ARM64 running natively on Sway Wayland](docs/assets/showcase-codex-desktop.png) |
+| **Firefox + `ffmpeg` HTML5 Video &amp; Danmaku** | **Transparent Floating Keyboard &amp; Edge Handle** |
+| ![Mozilla Firefox playing Bilibili HTML5 video and danmaku on Android 17 Rootless](docs/assets/showcase-firefox-bilibili.png) | ![Linux desktop with the 0.70x transparent floating keyboard](docs/assets/showcase-floating-keyboard.png) |
 
-Start with Alacritty, Thunar, Neovim, Lazygit, imv, Zathura, mpv and Chromium. Add CC Switch, Codex / ChatGPT Desktop, Claude Desktop or Hermes Desktop from the installer as needed. See the [architecture](docs/ARCHITECTURE.md) for both runtime routes.
+---
 
-## Quick start — the 30-second overview
+## What Makes Omarchy Android Different?
 
-You need an **ARM64 Android device** and enough free space for the download, extracted desktop and the installer's stated reserve. Download and extraction time depend on your connection and device.
+Most "Linux on Android" setups stop at giving you a raw VNC window or a bare terminal. **Omarchy Android** sweats the last mile of mobile ergonomics, PRoot reliability, and native ARM64 AI tooling:
+
+### 1. Mobile-Native Desktop Ergonomics (Not Just a Shrunk PC)
+- **Zero-permission edge handle:** Runs in-process inside the display activity — **no `SYSTEM_ALERT_WINDOW` overlay permission required**. Tap to expand controls, double-tap for the `0.70×` transparent floating keyboard (with custom opacity slider & drag pill), long-press for Android IME/voice input, or drag to either screen edge.
+- **Tokyo Night Bottom Dock (`Super + D`):** A solid rounded GTK Layer-Shell dock with crisp JetBrainsMono Nerd Font icons and live active-window pills — accessible from both keyboard and touch.
+- **4-step interactive onboarding &amp; R-corner safe margins:** Curved guide arrows walk you through `1.5×` high-DPI live scaling, edge handle gestures, `Super + K` shortcuts, and input permissions. Configurable screen-corner padding keeps Waybar away from rounded phone bezels.
+- **Hard-locked orientation &amp; portrait keyboard viewport:** Lock Portrait or Landscape cleanly; in Portrait mode, the desktop viewport automatically shrinks above Android's soft keyboard so your terminal prompt is never covered.
+
+### 2. Thoughtful Startup, Background Residency &amp; Graceful Shutdown
+- **Zero-black-screen polish:** Cold starts present a Tokyo Night breathing splash with staged progress (`Linux container` → `Graphics display` → `Sway desktop & top bar`) and an offline-bundled circular author badge (`Built by Audrey-cn · Omarchy Android`). Warm foreground resumes use a **300 ms delay threshold** — fast returns are completely flash-free, while slower surface restores surface a subtle translucent resume pill.
+- **Single unified notification &amp; one-tap "Stop Desktop":** Upstream `Termux:X11`'s redundant notification is automatically suppressed, leaving one clean **Omarchy Desktop** card with a native **Stop Desktop** action (plus a confirmed **Close Desktop** button inside the in-desktop control panel).
+- **Graceful shutdown that protects your data:** Stopping the desktop sends `SIGTERM` to flush PRoot/SQLite databases cleanly before tearing down `:xserver` and releasing battery/RAM — never leaving zombie processes behind.
+
+### 3. Native ARM64 AI &amp; Developer Workstation (Battle-Tested)
+Install official upstream ARM64 desktop apps straight from **Install → AI / Editor**, with automatic PRoot &amp; Wayland hardening built in:
+- **Hermes Desktop + Local Hermes Agent:** Pinned official ARM64 package with SHA-256 verification, fingerprinted first-run timeout repair (with rollback receipt), local `node-pty` rebuild for Ubuntu 24.04, global `UV_LINK_MODE=copy` (eliminating PRoot hardlink corruption), and an automatic pre-launch venv self-healer (`omarchy-ensure-hermes-venv`) covering both `~/.hermes` and `/usr/local/lib/hermes-agent`.
+- **Claude Desktop + CC Switch:** Official Anthropic ARM64 APT repository with `--no-install-recommends` (preventing 1.5 GB bloat and `systemd-resolved` DNS breakage), single-repo 1-second metadata refresh, and automatic **3P Gateway** (`--user-data-dir=/root/.config/Claude-3p`) detection in `claude-desktop-launch`.
+- **Codex / ChatGPT Desktop, VS Code &amp; Helix:** Official ARM64 native builds with Wayland IME &amp; PRoot launcher flags ready out of the box.
+- **Universal App Grid deduplication &amp; native icons:** `omarchy-app-grid` automatically deduplicates raw vendor `.desktop` entries by `TryExec` binary basename and normalized name, while `omarchy-fix-desktops` inherits native vendor icons so every app shows **one crisp native icon**.
+- **Verified HTTPS proxy auto-detection:** `omarchy-installer.sh` probes common local proxy ports (`18888 / 7890 / 7897 / 10809 / 10808`) with a live HTTPS handshake check — accelerating downloads when a working proxy is active and silently falling back to direct connections if a port is sleeping or SOCKS-only.
+
+### 4. Resilient Global &amp; China-Friendly Distribution
+- **Guided Download Route in both APK &amp; Desktop Update Center:** Switch between **GitHub Direct**, **China Mirror**, or a **Custom Mirror** right on the setup screen or inside the 2-path GTK Update Center (**Omarchy Desktop** + **Linux APT**).
+- **Same-source HTTP `Range` retry + SHA-256 fallback:** Transient mid-stream LTE drops retry up to 2× on the same mirror without losing downloaded progress; any size or SHA-256 mismatch automatically falls back to official GitHub releases.
+- **Live terminal progress &amp; instant rollback:** Desktop component updates stream real-time progress bars, transfer speed, and ETA, with one-click recovery (`omarchy-component-update recover`) to the previous generation.
+- **PRoot HTML5 video &amp; audio solved:** Bundles PRoot-safe **Mozilla Firefox** + `ffmpeg` (`MOZ_SHM_NO_SEALS=1`, `media.cubeb.sandbox=false`) for smooth HTML5 video and danmaku playback (verified on Bilibili), paired with PulseAudio (`omarchy_out`) audio bridging and `fcitx5` Chinese Pinyin IME.
+
+---
+
+## Quick Start — 30-Second Setup
+
+You need an **ARM64 Android device** with ~4.5 GB free storage for the download cache and extracted Ubuntu 24.04 desktop.
 
 | Step | What to do |
-| --- | --- |
-| **1 · Install** | Download the `arm64-v8a` APK from [Releases](https://github.com/Audrey-cn/omarchy-android/releases) and open Omarchy Android. |
-| **2 · Set up Ubuntu** | Select a compatible image and choose **Download and install desktop**. Downloads support pause/resume. For offline setup, select the matching image, then import its original `rootfs.tar.zst`. |
-| **3 · Launch** | Tap **Launch desktop** and follow the skippable four-step guide. Open the app grid with `Super + Space`. |
+| :--- | :--- |
+| **1 · Install APK** | Download `OmarchyAndroid-v1.0.2-arm64.apk` from [Releases](https://github.com/Audrey-cn/omarchy-android/releases) and open **Omarchy Android**. |
+| **2 · Fetch Ubuntu 24.04** | Pick your download route (**GitHub Direct** or **China Mirror**) and tap **Download and install desktop**. Supports pause/resume and offline `rootfs.tar.zst` import. |
+| **3 · Launch Desktop** | Tap **Launch desktop**, walk through (or skip) the 4-step guide, and press `Super + Space` for the App Grid or `Super + D` for the Bottom Dock. |
 
-[Full installation and update guide](docs/initial-install.md) · [Published image catalog](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)
+[Full installation &amp; update guide](docs/initial-install.md) · [Published image catalog](https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-images)
 
-### Four edge-handle gestures
+### Edge-Handle Gestures &amp; Core Shortcuts
 
-| Gesture on the handle | Action |
-| --- | --- |
-| **Tap** | Expand the dock for keyboard, input, orientation lock and unified settings. |
-| **Double-tap** | Show or hide the transparent floating keyboard. |
-| **Long-press (350 ms)** | Open Android IME input with haptic feedback; use Doubao IME for Chinese and voice input. |
-| **Drag** | Reposition vertically and snap to the left or right edge. |
+| Edge Handle Gesture | Action | Core Shortcut (`Super` or `Alt`) | Action |
+| :--- | :--- | :--- | :--- |
+| **Tap** | Expand floating control panel (keyboard, IME, orientation, settings, Stop Desktop) | `Super + Space` | Open App Grid |
+| **Double-tap** | Toggle transparent `0.70×` floating keyboard | `Super + D` | Toggle Tokyo Night Bottom Dock |
+| **Long-press (350 ms)** | Open Android IME / voice input with haptic feedback | `Super + Enter` | Open Alacritty terminal |
+| **Drag** | Reposition vertically &amp; snap to left/right edge | `Super + W` | Close focused window |
+| | | `Super + 1` … `5` | Switch workspaces |
+| | | `Super + K` / `Super + Alt + Space` | Shortcut guide / Omarchy menu |
 
-### Six core shortcuts
+---
 
-| Shortcut | Action |
-| --- | --- |
-| `Super + Space` | Open the app grid |
-| `Super + Enter` | Open Alacritty terminal |
-| `Super + W` | Close the focused window |
-| `Super + 1` … `5` | Switch workspaces |
-| `Super + K` | Open the complete shortcut guide |
-| `Super + Alt + Space` | Open the Omarchy menu |
+## Real-Device Verification Matrix
 
-**Super / Alt dual modifiers:** the rootless desktop uses dual modifiers by default, so the first five shortcuts also work with `Alt` in place of `Super`. The keyboard settings offer Super-only and Alt-only modes; the menu chord above uses both modifiers. `Super` is usually the Windows/Command key. Check `Super + K` for your active configuration.
+| Device | OS &amp; Mode | Resolution | Verified Highlights |
+| :--- | :--- | :--- | :--- |
+| **Redmi K90 Pro Max** | **Android 17 (SDK 37) · Rootless** | `2608 × 1200` (480 dpi) | Fresh `da2da65` image download (`5.52 MB/s`), `v1.0.2` breathing splash + circular avatar, single unified notification + Stop Desktop, `1.5×` onboarding, Bottom Dock, `fcitx5` Pinyin, Wayland clipboard, PulseAudio, Update Center (`desktop-v1.0.19`), Firefox Bilibili HTML5 playback |
+| **Redmi K20 Pro** | **Android ARM64 · Rooted** | `2340 × 1080` | Full clean-slate install, LTE mirror failover, APK in-place upgrade with 100% data retention, Update Center `recover` + re-upgrade, **Hermes Desktop** (MiMo + local terminal tool calling), **Claude Desktop + CC Switch** (3P Gateway + MiMo), **Codex / ChatGPT Desktop**, **VS Code**, **Helix** |
 
-### Five tips for a smoother start
+---
 
-1. **Use Wi-Fi for the first image.** If downloading on the phone is slow, copy the matching original `rootfs.tar.zst` from another device and use offline import. The installer checks its size and SHA-256.
-2. **Try an external keyboard and Doubao IME.** Bluetooth or USB makes terminal work easier. If Android intercepts a Super shortcut, use the supported Alt mode. Choose Doubao in Android's input method picker for Chinese/voice input.
-3. **Adjust the display scale.** The desktop starts at **1.5×** scale; adjust it with the monitor icon in the top bar.
-4. **Check child-process limits on Android 12+.** If the session ends with **Signal 9**, open the app's guidance and check the device's Developer Options for disabling child-process restrictions. The setting and availability vary by device.
-5. **Allow background operation.** Set Omarchy Android's battery usage to **Unrestricted** (or the vendor equivalent) so battery management is less likely to stop an active desktop.
+## Pinned Baselines &amp; Optional Root Route
 
-## Pinned versions & maintenance
+| Component | Baseline | Update Channel |
+| :--- | :--- | :--- |
+| **Android App (APK)** | **v1.0.2** (`versionCode 102`) | Same-signature APK updates preserve your Ubuntu guest and personal data. |
+| **Desktop Components** | **desktop-v1.0.19** | Updated explicitly from the in-desktop Update Center with rollback support. |
+| **Chromium / Playwright** | **128.0.6613.18** | Pinned for verified PRoot compatibility; Mozilla Firefox DEB + `ffmpeg` preinstalled for everyday media/web. |
+| **Hermes Desktop** | **2026.9.7-7** | Reviewed upstream ARM64 build with fingerprinted onboarding, PTY, and venv repairs. |
+| **Ubuntu Base** | **24.04 LTS ARM64** | Standard `apt` updates inside the guest. |
 
-| Component | Baseline | Update approach |
-| --- | --- | --- |
-| **Chromium** | **128.0.6613.18** | Pinned with its Playwright/Node bundle for tested PRoot compatibility and stability; maintained through the project runtime channel. |
-| **Hermes Desktop** | **2026.9.7-7** | The installer uses a pinned, reviewed build with matching native-module and onboarding repairs. |
-| **Ubuntu** | **24.04 ARM64** | Continue regular Ubuntu **APT updates** in the existing guest. |
-
-The pins describe the compatibility baseline. Version selection, browser security-update limits, component updates and recovery are documented in the [maintenance handbook](docs/MAINTENANCE.md), [runtime guide](docs/runtime-components.md) and [third-party update guide](docs/third-party-updates.md).
-
-APK updates and new initial images serve different purposes: use a compatible same-signature APK to update the app, and desktop update tools for the guest. A new initial image is a baseline for new installs. [Details](docs/initial-install.md).
-
-## Optional Root chroot & development routes
-
-For a rooted ARM64 device, the chroot installer provides a separate runtime with external Termux:X11 and hardware input support. Review the [prerequisites and installation guide](docs/root-chroot.md) before running:
+For rooted devices wanting a separate **Root chroot** runtime (external Termux:X11 + hardware input), see [docs/root-chroot.md](docs/root-chroot.md):
 
 ```bash
 git clone https://github.com/Audrey-cn/omarchy-android.git
@@ -98,29 +117,27 @@ cd omarchy-android
 ./install.sh --mode chroot
 ```
 
-The installer targets a new `/data/omarchy-chroot` directory and refuses to overwrite an existing installation. The external Termux + Termux:X11 PRoot route (`./install.sh --mode proot`) is retained for development and migration; [Omarchy Deck](apps/deck/) is its optional input companion. See [development and build instructions](docs/DEVELOPMENT.md).
+---
 
-## Fork, customize & contribute
+## Explore, Fork &amp; Contribute
 
-Make this desktop yours. Fork the repository, build a theme, improve an app package, adapt the runtime to a device, or explore another distribution in your own fork. Bring a focused proposal to an [issue](https://github.com/Audrey-cn/omarchy-android/issues) and send a PR when it is ready. Device reports, documentation and translations are useful contributions too.
+| Area | Path |
+| :--- | :--- |
+| Shared desktop scripts, Dock, App Grid, themes &amp; AI launchers | [`core/`](core/) |
+| Android app, installer, breathing splash, shutdown &amp; floating controls | [`apps/android/`](apps/android/) |
+| Root chroot &amp; legacy Termux PRoot runtimes | [`runtime/`](runtime/) |
+| Maintenance, release channels &amp; recovery handbook | [docs/MAINTENANCE.md](docs/MAINTENANCE.md) |
+| Development &amp; build guide | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
+| Contributing &amp; PR checks | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for the project map, checks and PR workflow. Device-specific results belong with their exact Android version, runtime route and tested build; existing [K20 Pro validation records](docs/reports/update-maintenance-k20-20261124.md) show the tested scope.
+---
 
-| Explore | Start here |
-| --- | --- |
-| Shared desktop scripts, themes and configuration | [`core/`](core/) |
-| Android app, installer and floating controls | [`apps/android/`](apps/android/) |
-| Root and external Termux runtimes | [`runtime/`](runtime/) |
-| Release channels and recovery | [Maintenance handbook](docs/MAINTENANCE.md) |
-| Building and testing | [Development guide](docs/DEVELOPMENT.md) |
-| Personal configuration migration | [`scripts/backup-personal.sh`](scripts/backup-personal.sh) |
+## License &amp; Acknowledgments
 
-## License & acknowledgments
+The Android application is based on **[Tiny Container](https://github.com/Cateners/tiny_container)** by Caten Hu and retains **GPL-3.0-or-later** and its original notices; see [COPYING](apps/android/COPYING). The shared desktop core, Termux runtimes, Deck and original repository documentation retain the root [MIT license](LICENSE). Third-party code, themes, fonts and tools retain their own licenses; see [LICENSES.md](LICENSES.md).
 
-The Android application is based on **[Tiny Container](https://github.com/Cateners/tiny_container)** by Caten Hu and retains **GPL-3.0-or-later** and its original notices; see [COPYING](apps/android/COPYING). The shared desktop core, Termux runtimes, Deck and original repository documentation retain the root [MIT license](LICENSE). Third-party code, themes, fonts and tools retain their own licenses. See [LICENSES.md](LICENSES.md) for the component boundaries.
-
-Thank you to [Omarchy](https://github.com/basecamp/omarchy) for the desktop inspiration, [Tiny Container](https://github.com/Cateners/tiny_container) for the Android container foundation, [Termux:X11](https://github.com/termux/termux-x11), [PRoot](https://github.com/proot-me/proot), [Sway](https://github.com/swaywm/sway), [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots), and their contributors.
+Thank you to [Omarchy](https://github.com/basecamp/omarchy), [Tiny Container](https://github.com/Cateners/tiny_container), [Termux:X11](https://github.com/termux/termux-x11), [PRoot](https://github.com/proot-me/proot), [Sway](https://github.com/swaywm/sway), [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots), and their contributors.
 
 ## Support
 
-Maintained by [Audrey](https://github.com/Audrey-cn/omarchy-android). If this project helps you, you can support its development through [GitHub Sponsors](https://github.com/sponsors/Audrey-cn), or contribute a device report, translation or fix in the [repository](https://github.com/Audrey-cn/omarchy-android).
+Maintained by [Audrey](https://github.com/Audrey-cn/omarchy-android). If this project helps you, consider supporting development via [GitHub Sponsors](https://github.com/sponsors/Audrey-cn), or share a device report, translation, or PR.
