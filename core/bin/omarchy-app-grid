@@ -124,9 +124,13 @@ def load_desktop_apps():
     wrapped_vendors = {
         "cc-switch": "omarchy-android-cc-switch",
         "CC-Switch": "omarchy-android-cc-switch",
+        "CC Switch": "omarchy-android-cc-switch",
         "chatgpt": "omarchy-android-chatgpt",
+        "ChatGPT": "omarchy-android-chatgpt",
         "claude-desktop": "omarchy-android-claude",
+        "Claude": "omarchy-android-claude",
         "hermes-desktop": "omarchy-android-hermes",
+        "Hermes": "omarchy-android-hermes",
         "code": "omarchy-android-code",
     }
     for vendor_id, wrapper_id in wrapped_vendors.items():

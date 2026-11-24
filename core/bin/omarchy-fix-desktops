@@ -73,7 +73,11 @@ LAUNCHERS = [
 ]
 
 VENDOR_DESKTOPS = {
-    "cc-switch": ("/usr/share/applications/cc-switch.desktop", "/usr/share/applications/CC-Switch.desktop"),
+    "cc-switch": (
+        "/usr/share/applications/CC Switch.desktop",
+        "/usr/share/applications/cc-switch.desktop",
+        "/usr/share/applications/CC-Switch.desktop",
+    ),
     "chatgpt": ("/usr/share/applications/chatgpt.desktop",),
     "claude": ("/usr/share/applications/claude-desktop.desktop",),
     "hermes": ("/usr/share/applications/hermes-desktop.desktop",),
