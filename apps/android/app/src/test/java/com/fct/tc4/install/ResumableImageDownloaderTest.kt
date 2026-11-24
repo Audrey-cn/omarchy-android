@@ -59,6 +59,29 @@ class ResumableImageDownloaderTest {
     }
 
     @Test
+    fun corruptMirrorFallsBackToOfficialWithStrictChecksum() = serve({
+        if (requestURI.path == "/mirror") send(image.copyOf().also { it[0] = 42 }, tag)
+        else send(image, tag)
+    }) { spec, requests ->
+        val routes = spec.copy(urls = listOf(spec.urls.single().replace("/image", "/mirror"), spec.urls.single()))
+        assertArrayEquals(image, downloader().download(routes, temporary.newFolder())!!.readBytes())
+        assertEquals(2, requests.size)
+    }
+
+    @Test
+    fun corruptCompletedMirrorCheckpointStillFallsBackToOfficial() = serve({
+        if (requestURI.path == "/mirror") send(image.copyOf().also { it[0] = 42 }, tag)
+        else send(image, tag)
+    }) { spec, _ ->
+        val directory = temporary.newFolder()
+        val routes = spec.copy(urls = listOf(spec.urls.single().replace("/image", "/mirror"), spec.urls.single()))
+        var downloaded = 0L
+        assertNull(downloader().download(routes, directory, shouldPause = { downloaded == spec.bytes },
+            progress = { done, _ -> downloaded = done }))
+        assertArrayEquals(image, downloader().download(routes, directory)!!.readBytes())
+    }
+
+    @Test
     fun temporaryServerFailureIsDistinguishedFromCorruptDownload() = serve({
         responseHeaders.set("Retry-After", "300")
         sendResponseHeaders(429, -1)

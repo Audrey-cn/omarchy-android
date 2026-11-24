@@ -57,7 +57,13 @@ class ResumableImageDownloader(
     private val connectTimeoutMs: Int = 15000,
     private val readTimeoutMs: Int = 15000,
     private val allowHttpForTests: Boolean = false,
-    private val onSource: (Int, Int) -> Unit = { _, _ -> }
+    private val onSource: (Int, Int) -> Unit = { _, _ -> },
+    private val mirrorStore: DownloadMirrorStore? = null,
+    private val connectionFactory: (URI) -> HttpURLConnection = { uri ->
+        val url = uri.toURL()
+        (if (uri.scheme.equals("http", ignoreCase = true)) url.openConnection(Proxy.NO_PROXY)
+        else url.openConnection()) as HttpURLConnection
+    }
 ) {
     init {
         require(connectTimeoutMs > 0 && readTimeoutMs > 0) { "Download timeouts must be positive" }
@@ -67,7 +73,8 @@ class ResumableImageDownloader(
     fun partialBytes(spec: ImageSpec, directory: File): Long {
         val cache = cache(spec, directory)
         if (regularFileSize(cache.archive) == spec.bytes) return spec.bytes
-        return checkpoint(spec, cache, fingerprint(spec))?.offset ?: 0L
+        val routed = routed(spec)
+        return checkpoint(routed, cache, fingerprint(routed))?.offset ?: 0L
     }
 
     /** Call after pausing an active download. */
@@ -84,6 +91,16 @@ class ResumableImageDownloader(
         directory: File,
         shouldPause: () -> Boolean = { false },
         progress: (Long, Long) -> Unit = { _, _ -> }
+    ): File? = downloadFromRoutes(routed(spec), directory, shouldPause, progress)
+
+    private fun routed(spec: ImageSpec): ImageSpec =
+        mirrorStore?.let { spec.copy(urls = it.expandUrls(spec.urls)) } ?: spec
+
+    private fun downloadFromRoutes(
+        spec: ImageSpec,
+        directory: File,
+        shouldPause: () -> Boolean,
+        progress: (Long, Long) -> Unit
     ): File? {
         val cache = cache(spec, directory, create = true)
         return exclusively(cache) {
@@ -99,12 +116,19 @@ class ResumableImageDownloader(
                 }
             }
             val specFingerprint = fingerprint(spec)
-            val resume = checkpoint(spec, cache, specFingerprint)
+            var resume = checkpoint(spec, cache, specFingerprint)
+            var failure: IOException? = null
             if (resume?.entity?.complete == true) {
                 progress(spec.bytes, spec.bytes)
-                return@exclusively verifyAndPublish(cache, spec, shouldPause)
+                try {
+                    return@exclusively verifyAndPublish(cache, spec, shouldPause)
+                } catch (error: IOException) {
+                    // A paused checksum pass may have checkpointed a corrupt mirror response.
+                    // Its strict verification failure must still reach the official fallback.
+                    failure = error
+                    resume = null
+                }
             }
-            var failure: IOException? = null
             val sources = spec.urls.indices.sortedBy { it != resume?.entity?.sourceIndex }
             for (sourceIndex in sources) {
                 if (shouldPause()) return@exclusively null
@@ -247,11 +271,9 @@ class ResumableImageDownloader(
                 (!uri.scheme.equals("https", ignoreCase = true) && !isTestHttp)) {
                 throw IOException("Image URL and redirects must use HTTPS")
             }
-            val url = uri.toURL()
             val resource = effectiveImageResourceKey(uri)
             val resume = requestedResume?.takeIf { it.entity.resource == resource }
-            val connection = (if (isTestHttp) url.openConnection(Proxy.NO_PROXY) else url.openConnection())
-                as HttpURLConnection
+            val connection = connectionFactory(uri)
             var keepOpen = false
             try {
                 connection.instanceFollowRedirects = false

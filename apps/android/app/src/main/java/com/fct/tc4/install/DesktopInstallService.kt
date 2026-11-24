@@ -138,13 +138,13 @@ class DesktopInstallService : Service() {
         if ("omarchy" in Global.installedContainers) throw IOException("An existing desktop cannot be replaced")
         val root = InitialDesktopState.directory(this)
         val downloads = File(root, "downloads")
+        val installer = InitialDesktopInstaller(this)
         var downloadSource = ""
-        val downloader = ResumableImageDownloader(onSource = { index, total ->
+        val downloader = installer.createDownloader(onSource = { index, total ->
             downloadSource = getString(R.string.omarchy_setup_source, index, total)
             publish(InitialDesktopState.state.value.copy(message = getString(R.string.omarchy_setup_connecting, downloadSource)))
         })
         val imports = InitialImageImportCache(File(root, "imports"))
-        val installer = InitialDesktopInstaller(this)
         val importUri = localUri ?: previous.importUri?.takeIf { previous.image == spec }?.let(Uri::parse)
         if (importUri != null && importUri.scheme != "content") throw IOException("Invalid local import")
         var imported: File? = null

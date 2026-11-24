@@ -37,9 +37,7 @@ val androidSigningMode = providers.environmentVariable("OMARCHY_ANDROID_SIGNING_
 check(androidSigningMode in setOf("stable-test", "temporary-pr", "temporary-local")) { "Unknown Android signing mode" }
 val androidVersionCode = androidBuildVersion["versionCode"].toString().toInt()
 check(androidVersionCode in 2..2_100_000_000) { "Android versionCode is outside supported bounds" }
-val androidVersionName = androidBuildVersion["versionName"].toString().let {
-    if (androidSigningMode != "stable-test" && !it.endsWith(".temporary")) "$it.temporary" else it
-}
+val androidVersionName = androidBuildVersion["versionName"].toString()
 
 // A previous all-in-one build can leave an ignored rootfs in src/main/assets.
 // Check source sets before resource merging, including normal Android Studio builds.
@@ -56,8 +54,17 @@ android {
         applicationId = "com.omarchy.android"
         minSdk = 28
         targetSdk = 37
-        versionCode = androidVersionCode
-        versionName = androidVersionName
+        versionCode = 101
+        versionName = "1.0.1"
+        // CI may supply prepared metadata; local defaults and verification must agree.
+        if (versionEnvironment.all { it != null }) {
+            versionCode = androidVersionCode
+            versionName = androidVersionName
+        } else {
+            check(androidVersionCode == versionCode && androidVersionName == versionName) {
+                "Android release defaults disagree with version.properties"
+            }
+        }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters.add("arm64-v8a")

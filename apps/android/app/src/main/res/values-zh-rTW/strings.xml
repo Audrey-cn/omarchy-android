@@ -417,6 +417,17 @@
     <string name="omarchy_setup_intro">下載初始桌面映像即可開始使用。APK 更新與已安裝的系統相互獨立，會保留你的個人資料。</string>
     <string name="omarchy_setup_image_version">桌面映像版本</string>
     <string name="omarchy_setup_loading_images">正在載入可用映像…</string>
+    <string name="omarchy_setup_route_title">下載線路 / Download Route</string>
+    <string name="omarchy_setup_route_guidance">中國大陸直連較慢時可切換加速；SHA-256 或大小驗證失敗會自動回退 GitHub 官方來源。切換線路前請暫停下載。</string>
+    <string name="omarchy_setup_route_direct">GitHub 直連</string>
+    <string name="omarchy_setup_route_accel">中國大陸加速</string>
+    <string name="omarchy_setup_route_custom">自訂鏡像</string>
+    <string name="omarchy_setup_route_custom_title">自訂 HTTPS 鏡像</string>
+    <string name="omarchy_setup_route_custom_hint">請輸入 HTTPS 前綴，下載時會在其後拼接 GitHub 發布位址，例如 https://mirror.example/https://github.com/…</string>
+    <string name="omarchy_setup_route_invalid">請輸入有效的 https:// 鏡像前綴，不含帳號密碼、查詢參數或片段。</string>
+    <string name="omarchy_setup_route_save">儲存線路</string>
+    <string name="omarchy_setup_route_save_failed">無法儲存下載線路，請重試。</string>
+    <string name="omarchy_setup_route_edit">修改鏡像前綴</string>
     <string name="omarchy_setup_download_install">下載並安裝桌面</string>
     <string name="omarchy_setup_pause_download">暫停下載</string>
     <string name="omarchy_setup_cancel_download">取消下載</string>

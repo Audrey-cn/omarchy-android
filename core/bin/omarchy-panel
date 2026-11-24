@@ -21,8 +21,10 @@ import shlex
 import socket
 import struct
 import subprocess
+import tempfile
 import threading
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -37,6 +39,59 @@ HOST_STATUS_FILE = "/tmp/omarchy-host-status.json"
 HOST_QUEUE_DIR = "/tmp/omarchy-browser-queue"
 KEYPROBE_FLAG = "/tmp/omarchy-keyprobe.active"
 KEYPROBE_OUT = "/tmp/omarchy-keyprobe.last"
+DOWNLOAD_MIRROR_CFG = "/root/.config/omarchy/download-mirror.json"
+
+
+def download_mirror_prefix(value):
+    if not isinstance(value, str):
+        raise ValueError("请输入有效的 https:// 镜像前缀")
+    value = value.strip()
+    parsed = urlsplit(value)
+    if (any(char.isspace() or ord(char) < 32 for char in value)
+            or parsed.scheme != "https" or not parsed.hostname or parsed.username is not None
+            or parsed.password is not None or "?" in value or "#" in value or "\\" in value):
+        raise ValueError("请输入有效的 https:// 镜像前缀，不含账号、查询参数或片段")
+    # Accessing port also rejects malformed values such as :abc or :99999.
+    if parsed.port == 0:
+        raise ValueError("镜像端口必须介于 1 到 65535")
+    return value.rstrip("/") + "/"
+
+
+def load_download_mirror():
+    try:
+        with open(DOWNLOAD_MIRROR_CFG, encoding="utf-8") as source:
+            config = json.load(source)
+        mode = config.get("mode", "direct")
+        if mode not in ("direct", "accel", "custom"):
+            raise ValueError("Unknown download route")
+        prefix = config.get("custom_prefix", "")
+        if prefix or mode == "custom":
+            prefix = download_mirror_prefix(prefix)
+        return {"mode": mode, "custom_prefix": prefix}
+    except (OSError, ValueError, AttributeError, TypeError):
+        return {"mode": "direct", "custom_prefix": ""}
+
+
+def save_download_mirror(mode, custom_prefix=""):
+    if mode not in ("direct", "accel", "custom"):
+        raise ValueError("Unknown download route")
+    prefix = download_mirror_prefix(custom_prefix) if custom_prefix or mode == "custom" else ""
+    config = {"mode": mode, "custom_prefix": prefix}
+    directory = os.path.dirname(DOWNLOAD_MIRROR_CFG)
+    os.makedirs(directory, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
+                                         prefix=".download-mirror-", delete=False) as output:
+            temporary = output.name
+            json.dump(config, output)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, DOWNLOAD_MIRROR_CFG)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+    return config
 
 
 def send_host_action(action):
@@ -878,6 +933,55 @@ class OmarchyPanel(Gtk.Window):
         self._render_update_state(rows)
         return False
 
+    def _select_download_route(self, mode):
+        prefix = self._download_mirror_config["custom_prefix"]
+        if mode == "custom":
+            dialog = Gtk.Dialog(title="自定义下载线路", transient_for=self, modal=True)
+            dialog.add_buttons("取消", Gtk.ResponseType.CANCEL, "保存", Gtk.ResponseType.OK)
+            dialog.set_default_response(Gtk.ResponseType.OK)
+            dialog.set_default_size(390, -1)
+            content = dialog.get_content_area()
+            content.set_spacing(8)
+            content.set_border_width(14)
+            hint = Gtk.Label(label="输入 https:// 镜像前缀，下载失败将自动回退 GitHub", xalign=0)
+            hint.get_style_context().add_class("panel-dim")
+            content.add(hint)
+            entry = Gtk.Entry()
+            entry.set_placeholder_text("https://mirror.example/")
+            entry.set_text(prefix)
+            entry.set_activates_default(True)
+            content.add(entry)
+            error = Gtk.Label(xalign=0)
+            error.get_style_context().add_class("warn-text")
+            error.set_line_wrap(True)
+            content.add(error)
+            dialog.show_all()
+            entry.grab_focus()
+            try:
+                while dialog.run() == Gtk.ResponseType.OK:
+                    try:
+                        prefix = download_mirror_prefix(entry.get_text())
+                    except ValueError as failure:
+                        error.set_text(str(failure))
+                        continue
+                    break
+                else:
+                    return
+            finally:
+                dialog.destroy()
+        try:
+            self._download_mirror_config = save_download_mirror(mode, prefix)
+        except (OSError, ValueError) as failure:
+            self._download_route_error.set_text("下载线路未保存：" + str(failure))
+            self._download_route_error.show()
+            return
+        self._download_route_error.hide()
+        for selected, button in self._download_route_buttons.items():
+            context = button.get_style_context()
+            context.remove_class("om-btn-active")
+            if selected == mode:
+                context.add_class("om-btn-active")
+
     def build_update(self):
         self.set_size_request(410, -1)
 
@@ -895,6 +999,34 @@ class OmarchyPanel(Gtk.Window):
         self.upd_time_lbl = Gtk.Label(label="上次检查：读取中...", xalign=0)
         self.upd_time_lbl.get_style_context().add_class("panel-dim")
         self.box.pack_start(self.upd_time_lbl, False, False, 0)
+
+        # Download controls remain visible alongside the ordinary update actions.
+        route_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        route_card.get_style_context().add_class("update-card")
+        route_title = Gtk.Label(label="下载线路", xalign=0)
+        route_title.get_style_context().add_class("update-card-title")
+        route_card.pack_start(route_title, False, False, 0)
+        self._download_mirror_config = load_download_mirror()
+        self._download_route_buttons = {}
+        route_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for mode, label in (("direct", "GitHub 直连"), ("accel", "国内加速"), ("custom", "自定义")):
+            button = Gtk.Button(label=label)
+            button.get_style_context().add_class("om-btn")
+            if mode == self._download_mirror_config["mode"]:
+                button.get_style_context().add_class("om-btn-active")
+            button.connect("clicked", lambda _button, selected=mode: self._select_download_route(selected))
+            self._download_route_buttons[mode] = button
+            route_buttons.pack_start(button, True, True, 0)
+        route_card.pack_start(route_buttons, False, False, 0)
+        route_help = Gtk.Label(label="国内直连较慢时可切换加速，校验 SHA256 失败自动回退官方源", xalign=0)
+        route_help.get_style_context().add_class("panel-dim")
+        route_card.pack_start(route_help, False, False, 0)
+        self._download_route_error = Gtk.Label(xalign=0)
+        self._download_route_error.get_style_context().add_class("warn-text")
+        self._download_route_error.set_line_wrap(True)
+        self._download_route_error.set_no_show_all(True)
+        route_card.pack_start(self._download_route_error, False, False, 0)
+        self.box.pack_start(route_card, False, False, 0)
 
         # Conditional recovery banner
         self.upd_warn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)

@@ -11,15 +11,20 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.net.Uri
 import android.os.Bundle
+import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -50,6 +55,7 @@ class DesktopSetupActivity : AppCompatActivity() {
     private lateinit var cancel: Button
     private lateinit var local: Button
     private lateinit var refresh: Button
+    private val routeControls = mutableListOf<View>()
     private var images = emptyList<ImageSpec>()
     private var pendingId: String? = null
     private var catalogJob: Job? = null
@@ -197,6 +203,110 @@ class DesktopSetupActivity : AppCompatActivity() {
                 setPadding(0, 0, 0, dp(6))
             }.also(::addView)
 
+            // Keep route selection next to the download action, including on first launch.
+            val mirrorStore = DownloadMirrorStore(this@DesktopSetupActivity)
+            addView(TextView(this@DesktopSetupActivity).apply {
+                text = getString(R.string.omarchy_setup_route_title)
+                textSize = 14f
+                setTextColor(primaryBlue)
+                typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+                setPadding(0, dp(8), 0, dp(4))
+            })
+            addView(TextView(this@DesktopSetupActivity).apply {
+                text = getString(R.string.omarchy_setup_route_guidance)
+                textSize = 12.5f
+                setTextColor(textMuted)
+            })
+            val routes = RadioGroup(this@DesktopSetupActivity).apply {
+                orientation = RadioGroup.VERTICAL
+            }.also(::addView)
+            val routeButtons = listOf(
+                DownloadMirrorStore.Mode.DIRECT to R.string.omarchy_setup_route_direct,
+                DownloadMirrorStore.Mode.ACCEL to R.string.omarchy_setup_route_accel,
+                DownloadMirrorStore.Mode.CUSTOM to R.string.omarchy_setup_route_custom
+            ).associate { (mode, label) ->
+                mode to RadioButton(this@DesktopSetupActivity).apply {
+                    id = View.generateViewId()
+                    setText(label)
+                    textSize = 14f
+                    setTextColor(textPrimary)
+                    buttonTintList = ColorStateList.valueOf(primaryBlue)
+                    minHeight = dp(44)
+                    routes.addView(this)
+                    routeControls.add(this)
+                }
+            }
+            val customPrefix = TextView(this@DesktopSetupActivity).apply {
+                textSize = 12f
+                setTextColor(textMuted)
+                setPadding(dp(4), 0, dp(4), dp(4))
+            }.also(::addView)
+            lateinit var editMirror: Button
+            var syncingRoute = false
+            fun showSavedRoute() {
+                syncingRoute = true
+                routes.check(routeButtons.getValue(mirrorStore.mode).id)
+                val custom = mirrorStore.mode == DownloadMirrorStore.Mode.CUSTOM
+                customPrefix.text = mirrorStore.customPrefix
+                customPrefix.visibility = if (custom) View.VISIBLE else View.GONE
+                editMirror.visibility = if (custom) View.VISIBLE else View.GONE
+                syncingRoute = false
+            }
+            fun editCustomMirror() {
+                val input = EditText(this@DesktopSetupActivity).apply {
+                    hint = "https://mirror.example/"
+                    setText(mirrorStore.customPrefix)
+                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                    isSingleLine = true
+                    setSelectAllOnFocus(true)
+                }
+                val content = LinearLayout(this@DesktopSetupActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(24), dp(8), dp(24), 0)
+                    addView(TextView(this@DesktopSetupActivity).apply {
+                        text = getString(R.string.omarchy_setup_route_custom_hint)
+                    })
+                    addView(input)
+                }
+                val dialog = android.app.AlertDialog.Builder(this@DesktopSetupActivity)
+                    .setTitle(R.string.omarchy_setup_route_custom_title)
+                    .setView(content)
+                    .setPositiveButton(R.string.omarchy_setup_route_save, null)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .create()
+                dialog.setOnDismissListener { showSavedRoute() }
+                dialog.setOnShowListener {
+                    dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        try {
+                            mirrorStore.set(DownloadMirrorStore.Mode.CUSTOM, input.text.toString())
+                            dialog.dismiss()
+                        } catch (_: IllegalArgumentException) {
+                            input.error = getString(R.string.omarchy_setup_route_invalid)
+                        } catch (_: IllegalStateException) {
+                            input.error = getString(R.string.omarchy_setup_route_save_failed)
+                        }
+                    }
+                }
+                dialog.show()
+            }
+            editMirror = styledButton(this, getString(R.string.omarchy_setup_route_edit)) { editCustomMirror() }
+            routeControls.add(editMirror)
+            showSavedRoute()
+            routes.setOnCheckedChangeListener { _, checkedId ->
+                if (!syncingRoute) {
+                    val mode = routeButtons.entries.first { it.value.id == checkedId }.key
+                    if (mode == DownloadMirrorStore.Mode.CUSTOM) editCustomMirror()
+                    else {
+                        try {
+                            mirrorStore.set(mode)
+                        } catch (_: IllegalStateException) {
+                            Toast.makeText(this@DesktopSetupActivity, R.string.omarchy_setup_route_save_failed, Toast.LENGTH_LONG).show()
+                        }
+                        showSavedRoute()
+                    }
+                }
+            }
+
             start = styledButton(this, getString(R.string.omarchy_setup_download_install), primary = true) {
                 val state = InitialDesktopState.state.value
                 if (initialDesktopAction(state.phase == SetupPhase.COMPLETE, "omarchy" in Global.installedContainers) == InitialDesktopAction.LAUNCH) openDesktop()
@@ -313,6 +423,7 @@ class DesktopSetupActivity : AppCompatActivity() {
         start.setText(when { ready -> R.string.omarchy_setup_launch; action == InitialDesktopAction.RECOVER -> R.string.omarchy_setup_recover; state.phase == SetupPhase.PAUSED || state.phase == SetupPhase.FAILED -> R.string.omarchy_setup_resume; else -> R.string.omarchy_setup_download_install })
         start.isEnabled = ready || (!active && (state.image != null || images.isNotEmpty()) && !installed)
         versions.isEnabled = state.phase == SetupPhase.IDLE && !installed
+        routeControls.forEach { it.isEnabled = !active }
         pause.visibility = if (state.phase == SetupPhase.DOWNLOADING || state.phase == SetupPhase.VERIFYING) View.VISIBLE else View.GONE
         cancel.visibility = if (state.phase in setOf(SetupPhase.DOWNLOADING, SetupPhase.PAUSED, SetupPhase.FAILED, SetupPhase.VERIFYING)) View.VISIBLE else View.GONE
         local.isEnabled = !active && !installed && images.isNotEmpty()

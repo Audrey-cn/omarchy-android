@@ -428,6 +428,17 @@
     <string name="omarchy_setup_intro">Download the initial desktop image to get started. APK updates are independent of your installed system and preserve your personal data.</string>
     <string name="omarchy_setup_image_version">Desktop image version</string>
     <string name="omarchy_setup_loading_images">Loading available images…</string>
+    <string name="omarchy_setup_route_title">Download Route</string>
+    <string name="omarchy_setup_route_guidance">If GitHub is slow in China, try the accelerator. SHA-256 or size check failures automatically fall back to GitHub. Pause before changing routes.</string>
+    <string name="omarchy_setup_route_direct">Direct · GitHub</string>
+    <string name="omarchy_setup_route_accel">China Accelerator</string>
+    <string name="omarchy_setup_route_custom">Custom Mirror</string>
+    <string name="omarchy_setup_route_custom_title">Custom HTTPS mirror</string>
+    <string name="omarchy_setup_route_custom_hint">Enter an HTTPS prefix. The GitHub release URL is appended to it, for example https://mirror.example/https://github.com/…</string>
+    <string name="omarchy_setup_route_invalid">Enter a valid https:// mirror prefix without credentials, query, or fragment.</string>
+    <string name="omarchy_setup_route_save">Save route</string>
+    <string name="omarchy_setup_route_save_failed">The download route could not be saved. Please try again.</string>
+    <string name="omarchy_setup_route_edit">Edit mirror prefix</string>
     <string name="omarchy_setup_download_install">Download and install desktop</string>
     <string name="omarchy_setup_pause_download">Pause download</string>
     <string name="omarchy_setup_cancel_download">Cancel download</string>

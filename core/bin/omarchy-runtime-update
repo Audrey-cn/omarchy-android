@@ -12,12 +12,12 @@ import os
 from pathlib import Path
 import posixpath
 import re
+import runpy
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
-from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 REPO = "Audrey-cn/omarchy-android"
@@ -26,6 +26,12 @@ API = "https://api.github.com/repos/" + REPO + "/releases"
 ROOT = Path("/")
 STATE = Path("/var/lib/omarchy-android/runtimes")
 BROWSER_RECEIPT = "opt/omarchy-chromium128/source-manifest.json"
+_downloads = runpy.run_path(str(Path(__file__).resolve().with_name("omarchy-download.py")))
+DownloadProgress = _downloads["DownloadProgress"]
+mirror_prefixes = _downloads["mirror_prefixes"]
+expand_routes = _downloads["expand_routes"]
+is_mirror_route = _downloads["is_mirror_route"]
+allowed_origin = _downloads["allowed_origin"]
 
 
 def sha(path):
@@ -52,13 +58,15 @@ def write(path, data):
     tmp.replace(path)
 
 
-def open_source(url, binary=False):
-    request = Request(url, headers={"User-Agent": "Omarchy-Android-runtime",
-                      "Accept": "application/octet-stream" if binary else "application/json"})
+def open_source(url, binary=False, range_start=None):
+    headers = {"User-Agent": "Omarchy-Android-runtime",
+               "Accept": "application/octet-stream" if binary else "application/json",
+               "Accept-Encoding": "identity"}
+    if range_start is not None:
+        headers["Range"] = f"bytes={range_start}-"
+    request = Request(url, headers=headers)
     stream = urlopen(request, timeout=45)
-    origin = urlsplit(stream.geturl())
-    if origin.scheme != "https" or origin.hostname not in ("api.github.com", "github.com",
-            "release-assets.githubusercontent.com", "objects.githubusercontent.com"):
+    if not allowed_origin(url, stream.geturl(), binary):
         stream.close()
         raise ValueError("Unexpected GitHub release download origin")
     return stream
@@ -88,29 +96,60 @@ def asset_routes(assets, name, tag):
 def download(routes, expected_size, expected_sha, dest=None):
     if type(expected_size) != int or not 0 < expected_size <= (2 << 30 if dest else 8 << 20):
         raise ValueError("Invalid Release attachment size")
+    if dest is not None and (not isinstance(expected_sha, str) or not re.fullmatch("[a-f0-9]{64}", expected_sha)):
+        raise ValueError("Binary attachment requires an expected SHA-256 digest")
+    prefixes = mirror_prefixes() if dest is not None else ()
+    routes = expand_routes(routes, prefixes)
     for index, url in enumerate(routes):
+        size, progress = 0, None
+        touched = False
+        mirrored = is_mirror_route(url, prefixes)
         try:
-            with open_source(url, binary=True) as stream:
+            offset = dest.stat().st_size if dest is not None and dest.exists() else 0
+            offset = offset if 0 < offset < expected_size else 0
+            options = {"range_start": offset} if offset else {}
+            with open_source(url, binary=True, **options) as stream:
                 if dest is None:
                     contents = stream.read(expected_size + 1)
                     size, digest = len(contents), hashlib.sha256(contents).hexdigest()
                 else:
-                    size, hasher = 0, hashlib.sha256()
-                    with dest.open("wb") as output:
+                    hasher = hashlib.sha256()
+                    status = getattr(stream, "status", 200)
+                    if status == 206:
+                        expected_range = f"bytes {offset}-{expected_size - 1}/{expected_size}"
+                        if not offset or stream.headers.get("Content-Range") != expected_range:
+                            raise ValueError("Invalid Release attachment Content-Range")
+                        with dest.open("rb") as existing:
+                            for block in iter(lambda: existing.read(1 << 20), b""):
+                                hasher.update(block)
+                        size = offset
+                    elif status != 200:
+                        raise ValueError("Unexpected Release attachment HTTP status")
+                    progress = DownloadProgress(expected_size, initial=size)
+                    with dest.open("ab" if size else "wb") as output:
+                        touched = True
                         for block in iter(lambda: stream.read(1 << 20), b""):
                             size += len(block)
                             if size > expected_size:
                                 raise ValueError("Release attachment exceeds expected length")
                             hasher.update(block)
                             output.write(block)
+                            progress.update(size)
                     digest = hasher.hexdigest()
             if size != expected_size or (expected_sha and digest != expected_sha):
                 raise ValueError("Release attachment size or checksum mismatch")
             return contents if dest is None else None
-        except (OSError, http.client.HTTPException):
+        except (OSError, http.client.HTTPException, ValueError) as error:
+            # Integrity/ownership errors from official sources remain fatal.
+            if isinstance(error, ValueError) and not mirrored:
+                raise
+            if mirrored and touched:
+                dest.unlink(missing_ok=True)
             if index + 1 == len(routes):
                 raise
-            print("GitHub API transport failed; trying the repository release URL", file=sys.stderr)
+        finally:
+            if progress is not None:
+                progress.finish(size)
 
 
 def candidate(pkg):

@@ -11,12 +11,12 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
-import urllib.parse
 import urllib.request
 
 PKG = "omarchy-android-desktop"
@@ -28,6 +28,11 @@ LAUNCH = Path("/usr/local/bin")
 STATE = Path("/var/lib/omarchy-android/desktop-updater")
 VER = r"(?:0|[1-9][0-9]{0,8})(?:\.(?:0|[1-9][0-9]{0,8})){2}"
 LIMIT = 16 * 1024 * 1024
+_downloads = runpy.run_path(str(Path(__file__).resolve().with_name("omarchy-download.py")))
+DownloadProgress = _downloads["DownloadProgress"]
+mirror_prefixes = _downloads["mirror_prefixes"]
+expand_routes = _downloads["expand_routes"]
+allowed_origin = _downloads["allowed_origin"]
 
 
 def digest(data):
@@ -57,7 +62,7 @@ def save(path, obj):
     atomic(path, json.dumps(obj, sort_keys=True).encode())
 
 
-def fetch(url, cap, *, binary=False):
+def fetch(url, cap, *, binary=False, progress_size=None):
     req = urllib.request.Request(
         url,
         headers={
@@ -66,15 +71,28 @@ def fetch(url, cap, *, binary=False):
         },
     )
     with urllib.request.urlopen(req, timeout=30) as conn:
-        host = urllib.parse.urlsplit(conn.geturl())
-        if host.scheme != "https" or host.hostname not in (
-            "github.com",
-            "api.github.com",
-            "release-assets.githubusercontent.com",
-            "objects.githubusercontent.com",
-        ):
+        if not allowed_origin(url, conn.geturl(), binary):
             raise ValueError("Unexpected release download origin")
-        data = conn.read(cap + 1)
+        progress = DownloadProgress(progress_size) if progress_size is not None else None
+        chunks, size = [], 0
+        try:
+            if progress is None or not progress.enabled or cap <= 65536:
+                data = conn.read(cap + 1)
+                size = len(data)
+                if progress is not None and progress.enabled:
+                    progress.update(size)
+            else:
+                while size <= cap:
+                    block = conn.read(min(65536, cap + 1 - size))
+                    if not block:
+                        break
+                    chunks.append(block)
+                    size += len(block)
+                    progress.update(size)
+                data = b"".join(chunks)
+        finally:
+            if progress is not None:
+                progress.finish(size)
     if len(data) > cap:
         raise ValueError("Release response exceeds size limit")
     return data
@@ -101,14 +119,30 @@ def release_assets(version):
     return assets
 
 
-def download_asset(version, name, cap):
+def download_asset(version, name, cap, *, expected_sha=None):
+    web = DOWNLOAD + version + "/" + name
+    options = {"progress_size": cap} if name.endswith(".deb") else {}
+    # Catalogs/API metadata must come from GitHub. Only verified binary packages
+    # use the optional routes; each mirror is checked before official fallback.
+    prefixes = mirror_prefixes() if name.endswith(".deb") and expected_sha else ()
+    for route in expand_routes((web,), prefixes)[:-1]:
+        try:
+            data = fetch(route, cap, binary=True, **options)
+            if len(data) != cap or digest(data) != expected_sha:
+                raise ValueError("Desktop download size or SHA-256 mismatch")
+            return data
+        except (OSError, http.client.HTTPException, ValueError):
+            continue
     try:
         url = release_assets(version)[name]
-        return fetch(url, cap, binary=True)
+        data = fetch(url, cap, binary=True, **options)
     except (OSError, http.client.HTTPException):
         # Only transport failures use the deterministic owned Release URL.
         # Ambiguous assets, identity failures and malformed metadata stay errors.
-        return fetch(DOWNLOAD + version + "/" + name, cap, binary=True)
+        data = fetch(web, cap, binary=True, **options)
+    if expected_sha and (len(data) != cap or digest(data) != expected_sha):
+        raise ValueError("Desktop download size or SHA-256 mismatch")
+    return data
 
 
 def catalog(version=None):
@@ -510,7 +544,7 @@ def install(cat, directory=None):
         if directory:
             data = local_file(directory / cat["filename"], cat["size"])
         else:
-            data = download_asset(cat["version"], cat["filename"], cat["size"])
+            data = download_asset(cat["version"], cat["filename"], cat["size"], expected_sha=cat["sha256"])
         if len(data) != cat["size"] or digest(data) != cat["sha256"]:
             raise ValueError("Desktop download size or SHA-256 mismatch")
         package = STATE / (cat["sha256"] + ".deb")

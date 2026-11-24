@@ -80,6 +80,32 @@ class AndroidBuildTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("fetch-depth: 0", result.stderr)
 
+    def test_explicit_release_version_matches_gradle_and_keeps_source_provenance(self):
+        properties = self.repo / "apps/android/version.properties"
+        properties.write_text(properties.read_text() + "releaseVersionCode=101\nreleaseVersionName=1.0.1\n")
+        result = self.run_script("version")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        metadata = json.loads(result.stdout)
+        self.assertEqual(metadata["versionCode"], 101)
+        self.assertEqual(metadata["versionName"], "1.0.1")
+        self.assertTrue(metadata["sourceDirty"])
+        self.assertEqual(metadata["sourceSha"], self.git("rev-parse", "HEAD"))
+        prepared = self.run_script("prepare", "--output-dir", str(self.root / "signing"))
+        self.assertEqual(prepared.returncode, 0, prepared.stderr)
+        metadata = json.loads((self.root / "signing/build-metadata.json").read_text())
+        self.assertEqual(metadata["versionName"], "1.0.1")
+        self.assertEqual(metadata["signingMode"], "temporary-local")
+        self.assertFalse(metadata["upgradeable"])
+
+    def test_explicit_release_version_requires_a_complete_valid_pair(self):
+        properties = self.repo / "apps/android/version.properties"
+        original = properties.read_text()
+        for suffix in ("releaseVersionCode=101\n", "releaseVersionName=1.0.1\n",
+                       "releaseVersionCode=101\nreleaseVersionName=not-a-version\n"):
+            properties.write_text(original + suffix)
+            result = self.run_script("version")
+            self.assertNotEqual(result.returncode, 0)
+
     def test_trusted_main_requires_both_secrets(self):
         result = self.run_script("prepare", "--output-dir", str(self.root / "signing"), env=self.trusted_env())
         self.assertNotEqual(result.returncode, 0)

@@ -21,6 +21,10 @@ class InitialDesktopInstaller(
     private val stateRoot: File = File(context.filesDir, "initial-desktop"),
     private val registerGuest: Boolean = true
 ) {
+    /** Use the same persisted route selection for every initial image download. */
+    fun createDownloader(onSource: (Int, Int) -> Unit = { _, _ -> }): ResumableImageDownloader =
+        ResumableImageDownloader(onSource = onSource, mirrorStore = DownloadMirrorStore(context))
+
     private fun transaction(): InitialInstallTransaction {
         if (registerGuest && dataRoot.canonicalFile != context.dataDir.canonicalFile) throw IOException("Invalid desktop root")
         if (Files.isSymbolicLink(stateRoot.toPath()) || (!stateRoot.isDirectory && !stateRoot.mkdirs())) throw IOException("Invalid installation state directory")

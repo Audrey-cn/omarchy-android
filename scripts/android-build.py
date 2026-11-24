@@ -44,15 +44,21 @@ def version(repo):
     for line in (repo / "apps/android/version.properties").read_text().splitlines():
         if line.strip() and not line.lstrip().startswith("#"):
             key, value = line.split("=", 1)
-            properties[key.strip()] = int(value.strip())
-    code = properties["versionCodeBase"] + int(git("rev-list", "--count", "HEAD"))
-    if not 1 < code <= 2_100_000_000 or min(properties.values()) < 0:
+            properties[key.strip()] = value.strip()
+    release = "releaseVersionCode" in properties or "releaseVersionName" in properties
+    if release and (not re.fullmatch(r"[1-9][0-9]*", properties.get("releaseVersionCode", ""))
+                    or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", properties.get("releaseVersionName", ""))):
+        raise ValueError("Explicit Android release version requires a valid code and name")
+    base = int(properties["versionCodeBase"])
+    major, minor = int(properties["versionMajor"]), int(properties["versionMinor"])
+    code = int(properties["releaseVersionCode"]) if release else base + int(git("rev-list", "--count", "HEAD"))
+    if not 1 < code <= 2_100_000_000 or min(base, major, minor) < 0:
         raise ValueError("Android version properties are outside supported bounds")
     sha = git("rev-parse", "HEAD")
     dirty = bool(git("status", "--porcelain", "--untracked-files=normal"))
-    name = f'{properties["versionMajor"]}.{properties["versionMinor"]}.{code}-test.g{sha[:12]}'
-    return dict(versionCode=code, versionName=name + (".dirty" if dirty else ""),
-                sourceSha=sha, sourceDirty=dirty)
+    name = properties["releaseVersionName"] if release else f'{major}.{minor}.{code}-test.g{sha[:12]}'
+    return dict(versionCode=code, versionName=name + (".dirty" if dirty and not release else ""),
+                sourceSha=sha, sourceDirty=dirty, releaseVersion=release)
 
 
 def write_private(path, data):
@@ -86,7 +92,7 @@ def prepare(repo, output):
     mode = "stable-test" if trusted else (
         "temporary-pr" if os.environ.get("GITHUB_EVENT_NAME") == "pull_request" else "temporary-local")
     metadata.update(signingMode=mode, upgradeable=False, packageName="com.omarchy.android")
-    if not trusted:
+    if not trusted and not metadata["releaseVersion"]:
         metadata["versionName"] += ".temporary"
     if output.is_symlink():
         raise ValueError("Signing output must not be a symlink")
