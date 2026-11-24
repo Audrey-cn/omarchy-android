@@ -152,6 +152,24 @@ def install():
                 ],
                 check=True,
             )
+            # Extract bundled native app icon if present in the reviewed archive.
+            subprocess.run(
+                [
+                    "tar",
+                    "--zstd",
+                    "--ignore-failed-read",
+                    "-xf",
+                    archive,
+                    "-C",
+                    root,
+                    "--wildcards",
+                    "usr/share/icons/hicolor/*/apps/hermes*.png",
+                    "usr/share/pixmaps/hermes*.png",
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             candidate = root / "opt/hermes-desktop"
             bootstrap = root / "usr/share/hermes-desktop/install.sh"
             if (
@@ -167,8 +185,12 @@ def install():
                 [BIN / "omarchy-repair-hermes-pty", "--hermes-dir", candidate],
                 check=True,
             )
-            # Keep the verified bootstrap with the application. Profile seeding belongs to first launch.
+            # Keep the verified bootstrap and native icon with the application.
             os.rename(bootstrap, candidate / ".omarchy-onboarding" / "install.sh")
+            for icon_cand in sorted(root.glob("usr/share/**/hermes*.png"), reverse=True):
+                if icon_cand.is_file() and not icon_cand.is_symlink():
+                    os.rename(icon_cand, candidate / ".omarchy-onboarding" / "icon.png")
+                    break
             activate(candidate, live)
     result = subprocess.run([BIN / "omarchy-fix-desktops"], check=False)
     if result.returncode:

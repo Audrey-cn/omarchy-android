@@ -6,41 +6,134 @@ import tempfile
 from pathlib import Path
 
 LAUNCHERS = [
-    ("cc-switch", "CC Switch", "/usr/bin/cc-switch", "/usr/local/bin/cc-switch-launch"),
-    ("chatgpt", "ChatGPT", "/usr/bin/chatgpt", "/usr/local/bin/chatgpt-launch %u"),
+    (
+        "cc-switch",
+        "CC Switch",
+        "/usr/bin/cc-switch",
+        "/usr/local/bin/cc-switch-launch",
+        (
+            "/usr/share/icons/hicolor/256x256/apps/cc-switch.png",
+            "/usr/share/icons/hicolor/128x128/apps/cc-switch.png",
+            "/usr/share/icons/hicolor/scalable/apps/cc-switch.svg",
+            "cc-switch",
+        ),
+    ),
+    (
+        "chatgpt",
+        "ChatGPT",
+        "/usr/bin/chatgpt",
+        "/usr/local/bin/chatgpt-launch %u",
+        (
+            "/usr/share/icons/hicolor/512x512/apps/chatgpt.png",
+            "/usr/share/icons/hicolor/256x256/apps/chatgpt.png",
+            "/usr/share/pixmaps/chatgpt.png",
+            "chatgpt",
+        ),
+    ),
     (
         "claude",
         "Claude Desktop",
         "/usr/bin/claude-desktop",
         "/usr/local/bin/claude-desktop-launch %u",
+        (
+            "/usr/share/icons/hicolor/512x512/apps/claude-desktop.png",
+            "/usr/share/icons/hicolor/256x256/apps/claude-desktop.png",
+            "/usr/share/pixmaps/claude-desktop.png",
+            "claude-desktop",
+        ),
     ),
     (
         "hermes",
         "Hermes Desktop",
         "/opt/hermes-desktop/Hermes",
         "/usr/local/bin/hermes-desktop-launch %u",
+        (
+            "/opt/hermes-desktop/.omarchy-onboarding/icon.png",
+            "/usr/share/icons/hicolor/512x512/apps/hermes-desktop.png",
+            "/usr/share/icons/hicolor/256x256/apps/hermes-desktop.png",
+            "/usr/share/pixmaps/hermes-desktop.png",
+            "/opt/hermes-desktop/resources/icon.png",
+            "/opt/hermes-desktop/resources/app.asar.unpacked/dist/icon.png",
+            "/opt/hermes-desktop/resources/app.asar.unpacked/assets/icon.png",
+            "hermes-desktop",
+        ),
     ),
     (
         "code",
         "Visual Studio Code",
         "/usr/share/code/code",
         "/usr/share/code/code --no-sandbox --disable-dev-shm-usage --in-process-gpu --disable-gpu-compositing --ozone-platform=wayland --enable-wayland-ime --password-store=basic %F",
+        (
+            "/usr/share/pixmaps/vscode.png",
+            "/usr/share/icons/hicolor/512x512/apps/vscode.png",
+            "/usr/share/code/resources/app/resources/linux/code.png",
+            "vscode",
+        ),
     ),
 ]
 
+VENDOR_DESKTOPS = {
+    "cc-switch": ("/usr/share/applications/cc-switch.desktop", "/usr/share/applications/CC-Switch.desktop"),
+    "chatgpt": ("/usr/share/applications/chatgpt.desktop",),
+    "claude": ("/usr/share/applications/claude-desktop.desktop",),
+    "hermes": ("/usr/share/applications/hermes-desktop.desktop",),
+    "code": ("/usr/share/applications/code.desktop",),
+}
 
-def publish(directory, slug, name, executable, command):
+
+def resolve_icon(slug, candidates=()):
+    for desktop_path in VENDOR_DESKTOPS.get(slug, ()):
+        path = Path(desktop_path)
+        if path.is_file():
+            try:
+                for line in path.read_text(errors="ignore").splitlines():
+                    if line.startswith("Icon=") and line[5:].strip():
+                        val = line[5:].strip()
+                        if not os.path.isabs(val) or os.path.isfile(val):
+                            return val
+            except OSError:
+                pass
+    fallback_name = None
+    for cand in candidates:
+        if os.path.isabs(cand):
+            if os.path.isfile(cand):
+                return cand
+        elif fallback_name is None:
+            fallback_name = cand
+    return fallback_name
+
+
+def publish(directory, slug, name, executable, command, icons=()):
     if not os.access(executable, os.X_OK) or not os.access(command.split()[0], os.X_OK):
         return
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / f"omarchy-android-{slug}.desktop"
+    icon = resolve_icon(slug, icons)
+    icon_line = f"Icon={icon}\n" if icon else ""
+    body = (
+        f"[Desktop Entry]\nType=Application\nName={name} (Omarchy)\n"
+        f"TryExec={executable}\nExec={command}\n{icon_line}Terminal=false\nCategories=Utility;\n"
+    )
     if os.path.lexists(target):
+        # Upgrade legacy project-generated entries that omitted Icon=, while preserving user edits.
+        if icon and target.is_file() and not target.is_symlink():
+            try:
+                existing = target.read_text(errors="ignore")
+            except OSError:
+                return
+            legacy = (
+                f"[Desktop Entry]\nType=Application\nName={name} (Omarchy)\n"
+                f"TryExec={executable}\nExec={command}\nTerminal=false\nCategories=Utility;\n"
+            )
+            if existing == legacy:
+                with tempfile.NamedTemporaryFile(dir=directory, mode="w", delete=False) as staged:
+                    staged.write(body)
+                    staged.flush()
+                    os.chmod(staged.name, 0o644)
+                    os.replace(staged.name, target)
         return
     with tempfile.NamedTemporaryFile(dir=directory, mode="w") as staged:
-        staged.write(
-            f"[Desktop Entry]\nType=Application\nName={name} (Omarchy)\n"
-            f"TryExec={executable}\nExec={command}\nTerminal=false\nCategories=Utility;\n"
-        )
+        staged.write(body)
         staged.flush()
         os.chmod(staged.name, 0o644)
         try:
