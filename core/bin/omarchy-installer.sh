@@ -26,10 +26,15 @@ ensure_dns() {
 }
 
 ensure_apt_updated() {
-    ensure_dns
+    declare -F ensure_dns >/dev/null && ensure_dns
+    case "$KEY" in
+        install.ai.hermes|install.ai.grok-bot|install.ai.perplexity|install.ai.antigravity|install.ai.amp|install.ai.ollama|install.ai.openclaw|install.ai.lm-studio|install.ai.herdr|install.ai.t3-code|install.webapp.*|install.font.*)
+            return 0
+            ;;
+    esac
     if [ -z "$(ls -A /var/lib/apt/lists 2>/dev/null | grep -v '^partial$\|^auxfiles$\|^lock$')" ]; then
         echo "正在更新 APT 软件源索引..."
-        DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any update
     fi
 }
 
@@ -174,7 +179,7 @@ DESKTOP
         echo "检测到最新版本: v${CC_VER}"
         curl -fSL -o /tmp/cc-switch_arm64.deb "https://github.com/farion1231/cc-switch/releases/download/v${CC_VER}/CC-Switch-v${CC_VER}-Linux-arm64.deb"
         ensure_apt_updated
-        DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/cc-switch_arm64.deb
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/cc-switch_arm64.deb
         rm -f /tmp/cc-switch_arm64.deb
         echo "✓ CC Switch v${CC_VER} (ARM64) 已安装完成！已添加到应用网格 (Super + Space)。"
         ;;
@@ -190,8 +195,9 @@ DESKTOP
         mkdir -p /usr/share/keyrings
         curl -fsSL https://downloads.claude.ai/claude-desktop/key.asc -o /usr/share/keyrings/claude-desktop-archive-keyring.asc
         echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" > /etc/apt/sources.list.d/claude-desktop.list
-        DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y claude-desktop
+        DEBIAN_FRONTEND=noninteractive apt-get -o APT::Update::Error-Mode=any -o Dir::Etc::sourcelist="sources.list.d/claude-desktop.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0" update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends claude-desktop
+        ensure_dns
         echo "✓ 官方原生 ARM64 Claude Desktop 已安装完成！"
         ;;
     install.ai.hermes)

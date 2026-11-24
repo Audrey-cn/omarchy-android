@@ -22,7 +22,10 @@ REQUIRED_MODULES = (
     ("snowballstemmer", "snowballstemmer"),
 )
 
-DEFAULT_VENV = Path("/usr/local/lib/hermes-agent/venv")
+DEFAULT_VENVS = (
+    Path.home() / ".hermes" / "hermes-agent" / "venv",
+    Path("/usr/local/lib/hermes-agent/venv"),
+)
 DEFAULT_UV_CANDIDATES = (
     Path("/root/.hermes/bin/uv"),
     Path("/usr/local/bin/uv"),
@@ -100,8 +103,12 @@ def repair_venv(venv_dir: Path) -> int:
 
 
 def main() -> int:
-    venv_dir = Path(os.environ.get("HERMES_VENV_DIR", str(DEFAULT_VENV)))
-    return repair_venv(venv_dir)
+    override = os.environ.get("HERMES_VENV_DIR")
+    if override:
+        return repair_venv(Path(override))
+    for venv_dir in DEFAULT_VENVS:
+        repair_venv(venv_dir)
+    return 0
 
 
 if __name__ == "__main__":
