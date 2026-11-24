@@ -3,6 +3,28 @@
 set -euo pipefail
 [[ -x /usr/bin/firefox ]] || { echo "Firefox is not installed; use the Firefox (Mozilla DEB) menu entry." >&2; exit 1; }
 export MOZ_ENABLE_WAYLAND=1 GDK_BACKEND=wayland
+export MOZ_FAKE_NO_SANDBOX=1
+export MOZ_SHM_NO_SEALS=1
+export MOZ_DISABLE_CONTENT_SANDBOX=1
+export MOZ_DISABLE_RDD_SANDBOX=1
+export MOZ_DISABLE_GMP_SANDBOX=1
+export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
+export MOZ_DISABLE_GPU_SANDBOX=1
+export PULSE_SERVER="${PULSE_SERVER:-unix:/tmp/pulse/native}"
 PROFILE="${HOME:-/root}/.local/share/omarchy-firefox/profile"
 mkdir -p "$PROFILE"
+if [[ ! -f "$PROFILE/user.js" ]]; then
+  cat > "$PROFILE/user.js" <<'EOF'
+user_pref("security.sandbox.content.level", 0);
+user_pref("security.sandbox.rdd.level", 0);
+user_pref("security.sandbox.socket.process.level", 0);
+user_pref("media.cubeb.sandbox", false);
+user_pref("media.ffmpeg.enabled", true);
+user_pref("media.rdd-ffmpeg.enabled", true);
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("browser.translations.automaticallyPopup", false);
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
+user_pref("datareporting.policy.firstRunURL", "");
+EOF
+fi
 exec /usr/bin/firefox --profile "$PROFILE" "$@"
