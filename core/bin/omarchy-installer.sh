@@ -26,21 +26,24 @@ ensure_dns() {
 }
 
 detect_local_proxy() {
-    # Respect an explicitly configured proxy; otherwise probe common Android/Omarchy local HTTP proxy ports.
+    # Respect an explicitly configured proxy; otherwise probe common Android/Omarchy local HTTP proxy ports
+    # and verify the port actually proxies HTTPS traffic before exporting it (avoids dead/SOCKS-only ports).
     if [[ -n "${http_proxy:-}${https_proxy:-}${HTTP_PROXY:-}${HTTPS_PROXY:-}" ]]; then
         return 0
     fi
     local port
     for port in 18888 7890 7897 10809 10808; do
         if timeout 0.2 bash -c "</dev/tcp/127.0.0.1/$port" 2>/dev/null; then
-            export http_proxy="http://127.0.0.1:$port"
-            export https_proxy="http://127.0.0.1:$port"
-            export HTTP_PROXY="http://127.0.0.1:$port"
-            export HTTPS_PROXY="http://127.0.0.1:$port"
-            export no_proxy="127.0.0.1,localhost"
-            export NO_PROXY="127.0.0.1,localhost"
-            echo "已自动检测到本地代理 127.0.0.1:$port，正在加速下载..."
-            return 0
+            if curl -fsS --max-time 2 --proxy "http://127.0.0.1:$port" -o /dev/null "https://github.com/robots.txt" 2>/dev/null; then
+                export http_proxy="http://127.0.0.1:$port"
+                export https_proxy="http://127.0.0.1:$port"
+                export HTTP_PROXY="http://127.0.0.1:$port"
+                export HTTPS_PROXY="http://127.0.0.1:$port"
+                export no_proxy="127.0.0.1,localhost"
+                export NO_PROXY="127.0.0.1,localhost"
+                echo "已自动检测到可用本地代理 127.0.0.1:$port，正在加速下载..."
+                return 0
+            fi
         fi
     done
 }
@@ -358,8 +361,9 @@ EOF
     install.editor.vscode)
         echo "正在下载微软官方 ARM64 VSCode (.deb)..."
         curl -fSL -o /tmp/vscode-arm64.deb "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-arm64"
-        DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/vscode-arm64.deb
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/vscode-arm64.deb
         rm -f /tmp/vscode-arm64.deb
+        ensure_dns
         echo "✓ VSCode (ARM64) 安装完成！已添加到应用网格 (Super + Space)。"
         ;;
     install.editor.vim)
@@ -400,6 +404,9 @@ EOF
     install.service.tailscale)
         echo "正在安装 Tailscale 组网客户端..."
         curl -fsSL https://tailscale.com/install.sh | sh
+        echo "ℹ️  Android PRoot 内无 systemd/内核 tun 设备，请使用用户态模式启动："
+        echo "   tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &"
+        echo "   tailscale up"
         ;;
     install.service.notion)
         install_webapp_desktop "Notion" "https://www.notion.so" "Basecamp"
