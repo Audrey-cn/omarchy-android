@@ -25,6 +25,28 @@ ensure_dns() {
     fi
 }
 
+detect_local_proxy() {
+    # Respect an explicitly configured proxy; otherwise probe common Android/Omarchy local HTTP proxy ports.
+    if [[ -n "${http_proxy:-}${https_proxy:-}${HTTP_PROXY:-}${HTTPS_PROXY:-}" ]]; then
+        return 0
+    fi
+    local port
+    for port in 18888 7890 7897 10809 10808; do
+        if timeout 0.2 bash -c "</dev/tcp/127.0.0.1/$port" 2>/dev/null; then
+            export http_proxy="http://127.0.0.1:$port"
+            export https_proxy="http://127.0.0.1:$port"
+            export HTTP_PROXY="http://127.0.0.1:$port"
+            export HTTPS_PROXY="http://127.0.0.1:$port"
+            export no_proxy="127.0.0.1,localhost"
+            export NO_PROXY="127.0.0.1,localhost"
+            echo "已自动检测到本地代理 127.0.0.1:$port，正在加速下载..."
+            return 0
+        fi
+    done
+}
+
+detect_local_proxy
+
 ensure_apt_updated() {
     declare -F ensure_dns >/dev/null && ensure_dns
     case "$KEY" in
