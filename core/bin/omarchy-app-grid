@@ -120,6 +120,18 @@ def load_desktop_apps():
                 "terminal": terminal,
                 "search": f"{name} {app_id} {keywords}".lower(),
             }
+    # Hide raw vendor entries when Omarchy's PRoot/Wayland wrapper entry is installed.
+    wrapped_vendors = {
+        "cc-switch": "omarchy-android-cc-switch",
+        "CC-Switch": "omarchy-android-cc-switch",
+        "chatgpt": "omarchy-android-chatgpt",
+        "claude-desktop": "omarchy-android-claude",
+        "hermes-desktop": "omarchy-android-hermes",
+        "code": "omarchy-android-code",
+    }
+    for vendor_id, wrapper_id in wrapped_vendors.items():
+        if wrapper_id in seen and vendor_id in seen:
+            del seen[vendor_id]
     return sorted(seen.values(), key=lambda x: x["name"].lower())
 
 

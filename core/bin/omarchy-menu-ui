@@ -353,10 +353,8 @@ def navigate_menu(route="root"):
                 zh[key] = {"label": item["label"]}
         if route == "install.ai" and not any(k == "install.ai.cc-switch" for k, _ in children):
             children.insert(0, ("install.ai.cc-switch", {"label": "CC Switch", "icon": "󰣆"}))
-            children.insert(1, ("install.ai.doubao-say", {"label": "Doubao Say (豆包说语音输入)", "icon": "󰍬"}))
         if route == "remove.ai" and not any(k == "remove.ai.cc-switch" for k, _ in children):
             children.insert(0, ("remove.ai.cc-switch", {"label": "CC Switch", "icon": "󰣆"}))
-            children.insert(1, ("remove.ai.doubao-say", {"label": "Doubao Say (豆包说)", "icon": "󰍬"}))
         ztitle = zh.get(route, {}).get("title") or zh.get(route, {}).get("label") or menu.get(route, {}).get("label", route)
         prompt = f"{ztitle}…"
 
