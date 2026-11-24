@@ -507,4 +507,12 @@
     <string name="omarchy_overlay_ime_hide">Hide system keyboard</string>
     <string name="omarchy_xserver_restart_failed">The previous display session could not be cleaned up. Exit the container and try again.</string>
     <string name="omarchy_container_start_failed">The desktop could not start. Exit the container and try again.</string>
+    <string name="omarchy_startup_container">Starting Linux container…</string>
+    <string name="omarchy_startup_graphics">Connecting graphics display…</string>
+    <string name="omarchy_startup_desktop">Starting Sway desktop &amp; top bar…</string>
+    <string name="omarchy_startup_attribution">Built by Audrey-cn · Omarchy Android</string>
+    <string name="omarchy_resume_desktop">Resuming desktop…</string>
+    <string name="omarchy_stop_desktop">Stop Desktop</string>
+    <string name="omarchy_stop_desktop_menu">Stop Desktop</string>
+    <string name="omarchy_stop_desktop_confirm">Close all Linux windows and stop background services?</string>
 </resources>

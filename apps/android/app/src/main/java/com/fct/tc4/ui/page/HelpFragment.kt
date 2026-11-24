@@ -20,8 +20,11 @@ package com.fct.tc4.ui.page
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import android.widget.LinearLayout
 import androidx.annotation.StringRes
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -30,6 +33,7 @@ import com.fct.tc4.R
 import com.fct.tc4.databinding.Tc4FragmentHelpBinding
 import com.fct.tc4.databinding.Tc4HelpFooterItemBinding
 import com.fct.tc4.databinding.Tc4SettingsActionItemBinding
+import com.fct.tc4.ui.misc.AuthorAvatarView
 import com.google.android.material.listitem.ListItemViewHolder
 
 class HelpFragment : Fragment() {
@@ -176,11 +180,35 @@ private class HelpActionVH(
     private val onClick: (HelpItem) -> Unit
 ) : ListItemViewHolder(binding.root) {
 
+    private val authorAvatar = AuthorAvatarView(itemView.context)
+
+    init {
+        val description = binding.itemDescription
+        val descriptionParent = description.parent as LinearLayout
+        val position = descriptionParent.indexOfChild(description)
+        val rowLayout = description.layoutParams as LinearLayout.LayoutParams
+        descriptionParent.removeView(description)
+        val attributionRow = LinearLayout(itemView.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = rowLayout.topMargin }
+            addView(authorAvatar, LinearLayout.LayoutParams(authorAvatar.layoutParams).apply {
+                marginEnd = (8 * resources.displayMetrics.density).toInt()
+            })
+            addView(description, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        descriptionParent.addView(attributionRow, position)
+    }
+
     fun bind(item: HelpItem, position: Int, itemCount: Int) {
         super.bind(position, itemCount)
         val ctx = itemView.context
         binding.itemTitle.text = ctx.getString(item.titleRes)
         binding.itemDescription.text = ctx.getString(item.descriptionRes)
+        authorAvatar.visibility = if (item.titleRes == R.string.tc4_help_about_title) View.VISIBLE else View.GONE
         binding.itemCard.setOnClickListener {
             onClick(item)
         }

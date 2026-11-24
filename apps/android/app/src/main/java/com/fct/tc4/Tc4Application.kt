@@ -19,6 +19,7 @@ package com.fct.tc4
 
 import android.app.Application
 import com.fct.tc4.ui.misc.Global
+import com.fct.tc4.ui.misc.OmarchyDesktopShutdown
 import com.fct.tc4.ui.misc.OmarchyX11Overlay
 import com.google.android.material.color.DynamicColors
 
@@ -26,6 +27,7 @@ open class Tc4Application : Application() {
     override fun onCreate() {
         super.onCreate()
         Global.init(this)
+        OmarchyDesktopShutdown.register(this)
         OmarchyX11Overlay.register(this)
     }
 }

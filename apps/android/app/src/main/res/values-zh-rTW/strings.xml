@@ -496,4 +496,12 @@
     <string name="omarchy_overlay_ime_hide">隱藏系統鍵盤</string>
     <string name="omarchy_xserver_restart_failed">無法清理上一次顯示工作階段。請退出容器後重試。</string>
     <string name="omarchy_container_start_failed">桌面無法啟動。請退出容器後重試。</string>
+    <string name="omarchy_startup_container">正在啟動 Linux 容器…</string>
+    <string name="omarchy_startup_graphics">正在連線圖形顯示…</string>
+    <string name="omarchy_startup_desktop">正在啟動 Sway 桌面與頂部狀態列…</string>
+    <string name="omarchy_startup_attribution">Built by Audrey-cn · Omarchy Android</string>
+    <string name="omarchy_resume_desktop">正在恢復桌面畫面…</string>
+    <string name="omarchy_stop_desktop">停止桌面</string>
+    <string name="omarchy_stop_desktop_menu">關閉桌面</string>
+    <string name="omarchy_stop_desktop_confirm">關閉所有 Linux 視窗並停止背景服務？</string>
 </resources>

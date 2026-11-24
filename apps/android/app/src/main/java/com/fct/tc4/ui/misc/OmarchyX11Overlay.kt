@@ -7,6 +7,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -39,6 +40,7 @@ import android.view.ViewTreeObserver
 import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
@@ -49,12 +51,15 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ImageView
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.fct.tc4.R
+import com.offsec.nhterm.backend.TerminalSession
 import com.termux.x11.MainActivity as X11Activity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +93,9 @@ import kotlin.math.sqrt
  */
 object OmarchyX11Overlay {
     private val controllers = WeakHashMap<Activity, Controller>()
+    // Readiness belongs to a terminal session, so Activity recreation is a warm
+    // restore while a newly launched container always gets its own cold splash.
+    private var readySession: TerminalSession? = null
     private const val DOUBAO_PKG = "com.bytedance.android.doubaoime"
     private const val DOUBAO_URL = "https://shurufa.doubao.com/"
     private const val ONBOARDING_COMPLETE = "onboarding_v2_done"
@@ -120,9 +128,12 @@ object OmarchyX11Overlay {
                     val ctrl = controllers.getOrPut(activity) { Controller(activity) }
                     ctrl.attachIfNeeded()
                     ctrl.restoreOnboardingIfInProgress()
+                    ctrl.onResume()
                 }
             }
-            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {
+                controllers[activity]?.onPause()
+            }
             override fun onActivityStopped(activity: Activity) {}
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {
@@ -378,6 +389,12 @@ object OmarchyX11Overlay {
         private var onboardingStatus: View? = null
         private var onboardingProbeJob: Job? = null
         private var onboardingReadiness: OnboardingReadiness? = null
+        private var desktopLoadingJob: Job? = null
+        private var desktopLoadingView: View? = null
+        private var desktopLoadingFadeView: View? = null
+        private var desktopLoadingText: TextView? = null
+        private var desktopLoadingAppearance = DesktopLoadingState.Appearance.HIDDEN
+        private var breathingAnimator: ValueAnimator? = null
         private var currentOnboardingStep: Int? = null
         private var selectedOnboardingScale: String? = null
         private var onboardingScaleInitialized = false
@@ -511,12 +528,13 @@ object OmarchyX11Overlay {
             }
 
             if (!restoreOnboardingIfInProgress() && onboardingProgress().shouldShowAutomatically) {
-                waitForOnboardingDesktop()
+                waitForOnboardingDesktop(showWaitingStatus = false)
             }
         }
 
         fun detach() {
             attached = false
+            onPause()
             cancelOnboardingProbe()
             mainHandler.removeCallbacks(queuePollTask)
             startupTasks.forEach { mainHandler.removeCallbacks(it) }
@@ -550,6 +568,171 @@ object OmarchyX11Overlay {
             modBtns.clear()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) content?.setOnApplyWindowInsetsListener(null)
             netExec.shutdownNow()
+        }
+
+        fun onResume() {
+            if (!attached) return
+            onPause()
+            val session = Global.terminalSession
+            val loading = DesktopLoadingState(
+                warmResume = session != null && readySession === session,
+                startedAt = SystemClock.elapsedRealtime()
+            )
+            val readiness = OnboardingReadiness(SystemClock.elapsedRealtime())
+            val probe = SwayDesktopProbe(File(activity.filesDir, "tmp"))
+            if (!loading.warmResume) showDesktopLoading(DesktopLoadingState.Appearance.SPLASH)
+            desktopLoadingJob = CoroutineScope(Dispatchers.Main).launch {
+                while (attached && Global.x11SessionActive && Global.terminalSession === session) {
+                    val viewport = onboardingViewport()
+                    val desktop = if (!loading.warmResume && viewport != null) probe.sample(1_200) else null
+                    val currentViewport = onboardingViewport()
+                    val desktopReady = readiness.observe(
+                        SystemClock.elapsedRealtime(), currentViewport, desktop.takeIf { viewport == currentViewport }
+                    ) == OnboardingReadiness.State.READY
+                    val appearance = loading.observe(SystemClock.elapsedRealtime(), currentViewport != null, desktopReady)
+                    showDesktopLoading(appearance)
+                    val status = s(when {
+                        loading.warmResume -> R.string.omarchy_resume_desktop
+                        Global.terminalSession?.isRunning != true -> R.string.omarchy_startup_container
+                        currentViewport == null -> R.string.omarchy_startup_graphics
+                        else -> R.string.omarchy_startup_desktop
+                    })
+                    desktopLoadingText?.let { if (it.text != status) it.text = status }
+                    if (loading.ready) {
+                        readySession = session
+                        return@launch
+                    }
+                    if (!loading.warmResume && readiness.state == OnboardingReadiness.State.TIMED_OUT) {
+                        // Expose desktop controls on a slow or failed startup.
+                        // First-run onboarding also keeps its retry/skip status.
+                        hideDesktopLoading()
+                        return@launch
+                    }
+                    delay(if (loading.warmResume) 50 else 350)
+                }
+                hideDesktopLoading()
+            }
+        }
+
+        fun onPause() {
+            desktopLoadingJob?.cancel()
+            desktopLoadingJob = null
+            hideDesktopLoading(animate = false)
+        }
+
+        private fun showDesktopLoading(appearance: DesktopLoadingState.Appearance) {
+            if (appearance == desktopLoadingAppearance) return
+            if (appearance == DesktopLoadingState.Appearance.HIDDEN) {
+                hideDesktopLoading()
+                return
+            }
+            hideDesktopLoading(animate = false)
+            val host = overlayHost ?: return
+            desktopLoadingAppearance = appearance
+            val cold = appearance == DesktopLoadingState.Appearance.SPLASH
+            val root = FrameLayout(activity).apply {
+                // Cover any elevated status or controls retained across a pause.
+                elevation = dp(24).toFloat()
+                if (cold) {
+                    setBackgroundColor(Color.parseColor("#1A1B26"))
+                    isClickable = true
+                }
+            }
+            val content = LinearLayout(activity).apply {
+                orientation = if (cold) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(dp(18), dp(12), dp(18), dp(12))
+                if (!cold) background = makeRounded("#DB1A1B26", "#667AA2F7", 24, 1)
+            }
+            if (cold) {
+                val icon = ImageView(activity).apply {
+                    setImageResource(R.drawable.ic_launcher_foreground)
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }
+                content.addView(icon, LinearLayout.LayoutParams(dp(112), dp(112)).apply { bottomMargin = dp(22) })
+                breathingAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+                    duration = 1_700
+                    repeatCount = ValueAnimator.INFINITE
+                    repeatMode = ValueAnimator.REVERSE
+                    interpolator = AccelerateDecelerateInterpolator()
+                    addUpdateListener {
+                        val fraction = it.animatedValue as Float
+                        icon.alpha = 0.66f + fraction * 0.34f
+                        icon.scaleX = 0.96f + fraction * 0.04f
+                        icon.scaleY = icon.scaleX
+                    }
+                    start()
+                }
+            }
+            val progress = ProgressBar(activity, null,
+                if (cold) android.R.attr.progressBarStyleHorizontal else android.R.attr.progressBarStyleSmall
+            ).apply {
+                isIndeterminate = true
+                indeterminateTintList = ColorStateList.valueOf(Color.parseColor("#7AA2F7"))
+            }
+            content.addView(progress, LinearLayout.LayoutParams(
+                if (cold) dp(192) else dp(18), if (cold) dp(3) else dp(18)
+            ).apply { if (cold) bottomMargin = dp(16) else marginEnd = dp(10) })
+            desktopLoadingText = TextView(activity).apply {
+                setText(if (cold) R.string.omarchy_startup_container else R.string.omarchy_resume_desktop)
+                setTextColor(Color.parseColor("#C0CAF5"))
+                textSize = 12f
+                gravity = Gravity.CENTER
+                typeface = Typeface.MONOSPACE
+                accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            }.also { content.addView(it) }
+            root.addView(content, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                if (cold) Gravity.CENTER else Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            ).apply { setMargins(dp(12), dp(24), dp(12), 0) })
+            if (cold) {
+                val attribution = LinearLayout(activity).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(16), 0, dp(16), 0)
+                }
+                attribution.addView(AuthorAvatarView(activity), LinearLayout.LayoutParams(dp(26), dp(26)).apply {
+                    marginEnd = dp(8)
+                })
+                attribution.addView(TextView(activity).apply {
+                    setText(R.string.omarchy_startup_attribution)
+                    typeface = Typeface.MONOSPACE
+                    textSize = 10f
+                    setTextColor(Color.parseColor("#9AA5CE"))
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                root.addView(attribution, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                ).apply { bottomMargin = dp(28) })
+            }
+            host.addView(root, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+            desktopLoadingView = root
+        }
+
+        private fun hideDesktopLoading(animate: Boolean = true) {
+            breathingAnimator?.cancel()
+            breathingAnimator = null
+            desktopLoadingFadeView?.let {
+                it.animate().cancel()
+                (it.parent as? ViewGroup)?.removeView(it)
+            }
+            desktopLoadingFadeView = null
+            val view = desktopLoadingView
+            desktopLoadingView = null
+            desktopLoadingText = null
+            desktopLoadingAppearance = DesktopLoadingState.Appearance.HIDDEN
+            view?.animate()?.cancel()
+            if (view != null) {
+                if (animate) {
+                    desktopLoadingFadeView = view
+                    view.animate().alpha(0f).setDuration(180).withEndAction {
+                        (view.parent as? ViewGroup)?.removeView(view)
+                        if (desktopLoadingFadeView === view) desktopLoadingFadeView = null
+                    }.start()
+                }
+                else (view.parent as? ViewGroup)?.removeView(view)
+            }
         }
 
         private fun updateViewportForIme() {
@@ -1145,6 +1328,16 @@ object OmarchyX11Overlay {
                 waitForOnboardingDesktop()
             }
 
+            addMenuItem(s(R.string.omarchy_stop_desktop_menu), s(R.string.omarchy_stop_desktop_confirm), "#f7768e") {
+                android.app.AlertDialog.Builder(activity)
+                    .setTitle(R.string.omarchy_stop_desktop_menu)
+                    .setMessage(R.string.omarchy_stop_desktop_confirm)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.omarchy_stop_desktop_menu) { _, _ ->
+                        OmarchyDesktopShutdown.requestStop()
+                    }.show()
+            }
+
             val scroll = ScrollView(activity).apply { addView(card) }
             val sw = activity.resources.displayMetrics.widthPixels
             val cardW = min(sw - dp(32), dp(380))
@@ -1159,7 +1352,9 @@ object OmarchyX11Overlay {
 
         // ==================== Interactive 4-Step Arrow-Guided Onboarding ====================
 
-        private fun waitForOnboardingDesktop() {
+        private fun waitForOnboardingDesktop() = waitForOnboardingDesktop(showWaitingStatus = true)
+
+        private fun waitForOnboardingDesktop(showWaitingStatus: Boolean) {
             if (restoreOnboardingIfInProgress()) return
             // An explicitly replayed guide must also survive Activity recreation.
             prefs.edit().putBoolean(ONBOARDING_MANUAL_REPLAY, !onboardingProgress().shouldShowAutomatically).apply()
@@ -1169,7 +1364,7 @@ object OmarchyX11Overlay {
             onboardingScaleInitialized = false
             val readiness = OnboardingReadiness(SystemClock.elapsedRealtime())
             onboardingReadiness = readiness
-            showOnboardingStatus(timedOut = false)
+            if (showWaitingStatus) showOnboardingStatus(timedOut = false)
             val desktopProbe = SwayDesktopProbe(File(activity.filesDir, "tmp"))
             onboardingProbeJob = CoroutineScope(Dispatchers.Main).launch {
                 while (attached) {
@@ -1184,6 +1379,10 @@ object OmarchyX11Overlay {
                     val currentDesktop = desktop.takeIf { viewport == currentViewport }
                     when (readiness.observe(SystemClock.elapsedRealtime(), currentViewport, currentDesktop)) {
                         OnboardingReadiness.State.READY -> {
+                            readySession = Global.terminalSession
+                            desktopLoadingJob?.cancel()
+                            desktopLoadingJob = null
+                            hideDesktopLoading()
                             hideOnboardingStatus()
                             showOnboardingStep(0)
                             return@launch

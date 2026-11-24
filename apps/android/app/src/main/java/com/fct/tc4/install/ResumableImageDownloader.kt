@@ -131,17 +131,25 @@ class ResumableImageDownloader(
             }
             val sources = spec.urls.indices.sortedBy { it != resume?.entity?.sourceIndex }
             for (sourceIndex in sources) {
-                if (shouldPause()) return@exclusively null
-                try {
-                    onSource(sourceIndex + 1, spec.urls.size)
-                    return@exclusively transfer(
-                        spec, cache, specFingerprint, sourceIndex,
-                        resume?.takeIf { it.entity.sourceIndex == sourceIndex }, shouldPause, progress
-                    )
-                } catch (error: IOException) {
+                var sourceResume = resume?.takeIf { it.entity.sourceIndex == sourceIndex }
+                var retries = 0
+                while (true) {
                     if (shouldPause()) return@exclusively null
-                    failure?.let(error::addSuppressed)
-                    failure = error
+                    try {
+                        if (retries == 0) onSource(sourceIndex + 1, spec.urls.size)
+                        return@exclusively transfer(
+                            spec, cache, specFingerprint, sourceIndex, sourceResume, shouldPause, progress
+                        )
+                    } catch (error: IOException) {
+                        if (shouldPause()) return@exclusively null
+                        failure?.let(error::addSuppressed)
+                        failure = error
+                        if (error !is InterruptedBody || retries == MAX_TRANSFER_RETRIES) break
+                        // Re-read the durable checkpoint after each failed read; never append using a stale offset.
+                        sourceResume = checkpoint(spec, cache, specFingerprint)
+                            ?.takeIf { it.entity.sourceIndex == sourceIndex }
+                        retries++
+                    }
                 }
             }
             throw failure ?: IOException("No image download URL is available")
@@ -234,7 +242,7 @@ class ResumableImageDownloader(
         bytes: Long,
         shouldPause: () -> Boolean,
         progress: (Long, Long) -> Unit
-    ): Boolean = response.inputStream.use { input ->
+    ): Boolean = readImageBody { response.inputStream }.use { input ->
         FileChannel.open(partial, WRITE, CREATE, NOFOLLOW_LINKS).use { output ->
             if (offset > 0L && offset == bytes - 1 && output.size() == bytes) {
                 output.truncate(offset)
@@ -247,19 +255,28 @@ class ResumableImageDownloader(
                 progress(done, bytes)
                 while (done < bytes) {
                     if (shouldPause()) return false
-                    val count = input.read(buffer, 0, minOf((bytes - done), buffer.size.toLong()).toInt())
-                    if (count < 0) throw IOException("Image ended before the expected length")
+                    val count = readImageBody {
+                        input.read(buffer, 0, minOf((bytes - done), buffer.size.toLong()).toInt())
+                    }
+                    if (count < 0) throw InterruptedBody(IOException("Image ended before the expected length"))
                     val chunk = ByteBuffer.wrap(buffer, 0, count)
                     while (chunk.hasRemaining()) output.write(chunk)
                     done += count
                     progress(done, bytes)
                 }
-                if (input.read() != -1) throw OversizedBody()
+                if (readImageBody { input.read() } != -1) throw OversizedBody()
             } finally {
                 output.force(true)
             }
         }
         true
+    }
+
+    private inline fun <T> readImageBody(read: () -> T): T = try {
+        read()
+    } catch (error: IOException) {
+        // Only transport reads qualify: cache writes, HTTP errors and verification failures do not.
+        throw InterruptedBody(error)
     }
 
     private fun openResponse(initialUrl: String, requestedResume: ResumePoint?): Response {
@@ -454,6 +471,7 @@ class ResumableImageDownloader(
     )
     private data class ResumePoint(val offset: Long, val entity: Entity)
     private data class Response(val connection: HttpURLConnection, val resource: String, val resume: ResumePoint?)
+    private class InterruptedBody(cause: IOException) : IOException(cause.message, cause)
     private class OversizedBody : IOException("Image exceeds its expected length")
 
     private companion object {
@@ -461,6 +479,7 @@ class ResumableImageDownloader(
         const val ENTITY_VERSION = 2
         const val MAX_ENTITY_BYTES = 4 * 1024L
         const val MAX_REDIRECTS = 5
+        const val MAX_TRANSFER_RETRIES = 2
         val REDIRECTS = setOf(301, 302, 303, 307, 308)
         val LOOPBACK_HOSTS = setOf("127.0.0.1", "[::1]")
         val SHA256 = Regex("[0-9a-f]{64}")

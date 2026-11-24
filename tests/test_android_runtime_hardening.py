@@ -31,7 +31,10 @@ class RuntimeOwnershipTests(unittest.TestCase):
         self.assertIn("CmdEntryPointService::class.java", source)
         self.assertIn("BIND_AUTO_CREATE or BIND_IMPORTANT", source)
         self.assertIn("bindService(", source)
-        self.assertIn("unbindService(", function(source, "override fun onDestroy()"))
+        self.assertIn("releaseXServerBinding()", function(source, "override fun onDestroy()"))
+        self.assertIn("unbindService(", function(source, "private fun releaseXServerBinding()"))
+        shutdown = function(source, "internal fun stopForDesktopShutdown()")
+        self.assertLess(shutdown.index("releaseXServerBinding()"), shutdown.index("stopSelf()"))
 
     def test_x11_recovery_checks_live_socket_and_serializes_startup(self):
         source = (JAVA / "ui/page/ContainerMainViewModel.kt").read_text()

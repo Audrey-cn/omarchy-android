@@ -20,6 +20,7 @@ import com.termux.x11.MainActivity
 /** Keeps the active container visible to Android while its desktop is in the background. */
 class OmarchyKeepAliveService : Service() {
     companion object {
+        const val ACTION_STOP_DESKTOP = "com.omarchy.android.action.STOP_DESKTOP"
         private const val CHANNEL = "omarchy-desktop-session"
         private const val NOTICE = 2402
     }
@@ -45,12 +46,16 @@ class OmarchyKeepAliveService : Service() {
         val returnIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         }
+        val stopIntent = PendingIntent.getService(this, 1,
+            Intent(this, OmarchyKeepAliveService::class.java).setAction(ACTION_STOP_DESKTOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notice = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(getString(R.string.omarchy_keep_alive_title))
             .setContentText(getString(R.string.omarchy_keep_alive_text))
             .setStyle(Notification.BigTextStyle().bigText(getString(R.string.omarchy_keep_alive_text)))
             .setContentIntent(PendingIntent.getActivity(this, 0, returnIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            .addAction(Notification.Action.Builder(null, getString(R.string.omarchy_stop_desktop), stopIntent).build())
             .setCategory(Notification.CATEGORY_SERVICE)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -69,6 +74,7 @@ class OmarchyKeepAliveService : Service() {
             stopSelf()
             return
         }
+        OmarchyDesktopShutdown.serviceStarted(this)
         try {
             xserverBound = bindService(
                 Intent(this, CmdEntryPointService::class.java),
@@ -81,7 +87,10 @@ class OmarchyKeepAliveService : Service() {
 
     // The container's ViewModel owns this service. A process restart must not
     // recreate a notification that claims a dead desktop is still running.
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_NOT_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP_DESKTOP) OmarchyDesktopShutdown.requestStop()
+        return START_NOT_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -91,12 +100,23 @@ class OmarchyKeepAliveService : Service() {
         stopSelf()
     }
 
-    override fun onDestroy() {
+    internal fun stopForDesktopShutdown() {
+        releaseXServerBinding()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun releaseXServerBinding() {
         if (xserverBound) {
             xserverBound = false
             try { unbindService(xserverConnection) }
             catch (error: RuntimeException) { Log.w("OmarchyKeepAlive", "X server unbind failed", error) }
         }
+    }
+
+    override fun onDestroy() {
+        OmarchyDesktopShutdown.serviceStopped(this)
+        releaseXServerBinding()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }

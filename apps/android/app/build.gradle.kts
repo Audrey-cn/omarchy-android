@@ -54,8 +54,8 @@ android {
         applicationId = "com.omarchy.android"
         minSdk = 28
         targetSdk = 37
-        versionCode = 101
-        versionName = "1.0.1"
+        versionCode = 102
+        versionName = "1.0.2"
         // CI may supply prepared metadata; local defaults and verification must agree.
         if (versionEnvironment.all { it != null }) {
             versionCode = androidVersionCode

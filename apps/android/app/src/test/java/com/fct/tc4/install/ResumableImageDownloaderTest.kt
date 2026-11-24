@@ -85,12 +85,13 @@ class ResumableImageDownloaderTest {
     fun temporaryServerFailureIsDistinguishedFromCorruptDownload() = serve({
         responseHeaders.set("Retry-After", "300")
         sendResponseHeaders(429, -1)
-    }) { spec, _ ->
+    }) { spec, requests ->
         val failure = assertThrows(RetryableImageResponse::class.java) {
             downloader().download(spec, temporary.newFolder())
         }
         assertEquals(429, failure.status)
         assertEquals(5L, failure.retryAfterSeconds!!)
+        assertEquals(listOf(Request()), requests)
     }
 
     @Test
@@ -211,7 +212,7 @@ class ResumableImageDownloaderTest {
     }
 
     @Test
-    fun truncatedTransferCanResumeItsValidatedPrefix() = serve({
+    fun truncatedTransferAutomaticallyResumesItsValidatedPrefix() = serve({
         if (requestedOffset() == null) {
             send(image.copyOf(32 * 1024), tag, declaredLength = image.size.toLong())
         } else {
@@ -219,8 +220,6 @@ class ResumableImageDownloaderTest {
         }
     }) { spec, requests ->
         val directory = temporary.newFolder()
-        assertThrows(IOException::class.java) { downloader().download(spec, directory) }
-        assertEquals(32 * 1024L, downloader().partialBytes(spec, directory))
         assertArrayEquals(image, downloader().download(spec, directory)!!.readBytes())
         assertEquals(listOf(Request(), Request("bytes=32768-", tag)), requests)
     }

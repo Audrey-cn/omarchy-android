@@ -48,6 +48,19 @@ fun main() {
             check(shouldReturnToX11(session, management, pending) == (session && !management && !pending))
         }
     }
+    val cold = DesktopLoadingState(warmResume = false, startedAt = 1000)
+    check(cold.observe(1000, displayReady = true, desktopReady = false) == DesktopLoadingState.Appearance.SPLASH)
+    check(cold.observe(1100, displayReady = false, desktopReady = true) == DesktopLoadingState.Appearance.SPLASH)
+    check(cold.observe(1200, displayReady = true, desktopReady = true) == DesktopLoadingState.Appearance.HIDDEN)
+    val fastResume = DesktopLoadingState(warmResume = true, startedAt = 2000)
+    check(fastResume.observe(2299, false, false) == DesktopLoadingState.Appearance.HIDDEN)
+    check(fastResume.observe(2300, true, false) == DesktopLoadingState.Appearance.HIDDEN)
+    val slowResume = DesktopLoadingState(warmResume = true, startedAt = 3000)
+    check(slowResume.observe(3299, false, false) == DesktopLoadingState.Appearance.HIDDEN)
+    check(slowResume.observe(3300, false, false) == DesktopLoadingState.Appearance.PILL)
+    check(slowResume.observe(3301, true, false) == DesktopLoadingState.Appearance.HIDDEN)
+    // A completed restoration cannot flash again later in the same resume.
+    check(slowResume.observe(4000, false, false) == DesktopLoadingState.Appearance.HIDDEN)
     println("Android QA policies passed")
 }
 ''')
@@ -59,7 +72,7 @@ fun main() {
                     str(next(libraries.glob('kotlin-stdlib-*.jar'))),
                     str(next(libraries.glob('kotlinx-coroutines-core-jvm-*.jar'))),
                 ]), '-d', str(classes), str(MISC / 'OnboardingReadiness.kt'),
-                str(MISC / 'DesktopReturnPolicy.kt'), str(harness),
+                str(MISC / 'DesktopReturnPolicy.kt'), str(MISC / 'DesktopLoadingState.kt'), str(harness),
             ], text=True, capture_output=True, timeout=90)
             self.assertEqual(compile_result.returncode, 0, compile_result.stdout + compile_result.stderr)
             result = subprocess.run([java, '-cp', os.pathsep.join([

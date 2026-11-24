@@ -41,6 +41,11 @@ import com.fct.tc4.ProotRuntimePolicy
 import com.fct.tc4.ui.misc.ConfigManager
 import com.fct.tc4.ui.misc.Global
 import com.fct.tc4.ui.misc.OmarchyKeepAliveService
+import com.fct.tc4.ui.misc.OmarchyDesktopShutdown
+import com.fct.tc4.ui.misc.DesktopProcessSnapshot
+import com.fct.tc4.ui.misc.desktopProcesses
+import com.fct.tc4.ui.misc.parseDesktopProcessStat
+import com.fct.tc4.ui.misc.survivingDesktopProcesses
 import com.fct.tc4.ui.misc.UpdateChecker
 import com.fct.tc4.ui.misc.UpdateResult
 import kotlinx.coroutines.Dispatchers
@@ -113,9 +118,15 @@ class ContainerMainViewModel(
 
     init {
         initializationJob = viewModelScope.launch {
+            // A stop owns the shared bridges until its flush completes. A new
+            // Activity/VM created meanwhile must not start another container.
+            if (OmarchyDesktopShutdown.isStopping) {
+                exited = true
+                _isInitialized.value = true
+                return@launch
+            }
             val loaded = ConfigManager.load(code)
             if (loaded == null) {
-                Global.x11SessionActive = false
                 _errorMessage.value = getApplication<Application>().getString(R.string.tc4_container_config_lost, code)
                 _isInitialized.value = true
                 return@launch
@@ -123,7 +134,6 @@ class ContainerMainViewModel(
             config = loaded
             _configState.value = config
             if (config["boot_command"] !is String) {
-                Global.x11SessionActive = false
                 _errorMessage.value = getApplication<Application>().getString(R.string.tc4_container_missing_boot_cmd, code)
                 _isInitialized.value = true
                 return@launch
@@ -132,7 +142,7 @@ class ContainerMainViewModel(
             // replace or retire guest files when APK payloads change or disappear.
             // New Linux contents are delivered only through explicit initial install.
             if (!setupEnvironment()) {
-                Global.x11SessionActive = false
+                if (ownedSession != null && Global.terminalSession === ownedSession) Global.x11SessionActive = false
                 _isInitialized.value = true
                 return@launch
             }
@@ -146,8 +156,10 @@ class ContainerMainViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                Log.e(TAG, "Container startup failed", error)
-                _errorMessage.value = getApplication<Application>().getString(R.string.omarchy_container_start_failed)
+                if (!exited) {
+                    Log.e(TAG, "Container startup failed", error)
+                    _errorMessage.value = getApplication<Application>().getString(R.string.omarchy_container_start_failed)
+                }
             } finally {
                 if (!launchCompleted) {
                     stopRuntime()
@@ -245,6 +257,12 @@ class ContainerMainViewModel(
                 .any { name -> File(nativeDirectory, name).let { !it.isFile || !it.canExecute() } }) {
             Log.e(TAG, "Bundled Omarchy PRoot runtime is incomplete in $nativeDirectory")
             _errorMessage.value = app.getString(R.string.tc4_bundled_runtime_incomplete)
+            return false
+        }
+        // Invalid/unavailable containers must not replace a live desktop's stop
+        // handler. Claim only when this VM can take terminal ownership now.
+        if (!OmarchyDesktopShutdown.claimSession(this, ::stopDesktopGracefully)) {
+            exited = true
             return false
         }
         Global.terminalSession?.finishIfRunning()
@@ -560,12 +578,117 @@ class ContainerMainViewModel(
         }
     }
 
+    /** Called in the application scope, so Activity destruction cannot cancel the flush. */
+    private suspend fun stopDesktopGracefully() {
+        explicitExitCompleted = true
+        exited = true
+        _isInitialized.value = true
+        // Mark intentional exit before cancellation or SIGTERM can deliver a
+        // shell-finished callback; neither is a container startup failure.
+        initializationJob?.cancel()
+        initializationJob?.join()
+        val session = ownedSession ?: return
+        if (Global.terminalSession !== session) return
+        Global.x11SessionActive = false
+        Global.onSessionSignal9 = null
+        val pid = session.pid
+        val processes = if (pid > 0) withContext(Dispatchers.IO) { terminateDesktopProcesses(pid) } else emptyList()
+        // Keep all runtime bridges and the X priority binding alive while apps
+        // handle TERM and flush preferences, files and terminal output.
+        delay(600L)
+        if (Global.terminalSession !== session) return
+        withContext(Dispatchers.IO) { forceStopDesktopProcesses(processes) }
+        if (Global.terminalSession !== session) return
+        // /proc can be restricted on some Android builds. The still-owned
+        // TerminalSession remains the fallback authority for its live shell.
+        if (session.isRunning) {
+            val originalLeader = processes.firstOrNull { it.pid == pid }
+            val currentLeader = withContext(Dispatchers.IO) { readDesktopProcess(pid) }
+            if (Global.terminalSession === session && session.pid == pid &&
+                (originalLeader == null || currentLeader?.startTime == originalLeader.startTime)) {
+                session.finishIfRunning()
+            }
+        }
+        val cleanup: List<Pair<String, () -> Unit>> = listOf(
+            // Release BIND_AUTO_CREATE before STOP, or Android may restart X.
+            "keepalive" to { OmarchyDesktopShutdown.stopKeepAliveService() },
+            "X server" to { killXServer() },
+            "audio" to { TinyAudio.stop() },
+            "microphone" to { TinyMicrophone.stop() },
+            "printing" to { TinyIpp.stop() },
+            "storage" to { TinyStorage.stop() }
+        )
+        for ((owner, stop) in cleanup) {
+            try { stop() }
+            catch (error: Exception) { Log.w(TAG, "$owner cleanup failed", error) }
+            catch (error: LinkageError) { Log.w(TAG, "$owner cleanup unavailable", error) }
+        }
+        // TerminalSession's waiter reaps the exited process and closes its PTY.
+        // Only remaining original processes were force-stopped after the grace.
+    }
+
+    private fun readDesktopProcess(pid: Int): DesktopProcessSnapshot? {
+        val process = try { parseDesktopProcessStat(File("/proc/$pid/stat").readText()) }
+        catch (_: java.io.IOException) { null }
+        catch (_: SecurityException) { null }
+        if (process == null) return null
+        // Some Android builds expose stat but restrict status. Tracer discovery
+        // is optional; retain the available identity and parent/session ownership.
+        val tracer = try {
+            File("/proc/$pid/status").useLines { lines ->
+                lines.firstOrNull { it.startsWith("TracerPid:") }?.substringAfter(':')?.trim()?.toIntOrNull() ?: 0
+            }
+        } catch (_: java.io.IOException) { 0 }
+          catch (_: SecurityException) { 0 }
+        return process.copy(tracerPid = tracer)
+    }
+
+    private fun terminateDesktopProcesses(pid: Int): List<DesktopProcessSnapshot> {
+        if (pid <= 1 || pid == android.os.Process.myPid()) return emptyList()
+        // terminal-lib calls setsid() before exec. Guest job control and daemons
+        // may change groups or sessions, so the initial group alone is incomplete.
+        val snapshot = File("/proc").listFiles().orEmpty().mapNotNull { dir ->
+            dir.name.toIntOrNull()?.let(::readDesktopProcess)
+        }
+        val processes = desktopProcesses(pid, snapshot)
+        val leader = processes.firstOrNull { it.pid == pid } ?: return emptyList()
+        for (process in processes.filter { it.pid != pid }.asReversed()) {
+            if (readDesktopProcess(process.pid)?.startTime != process.startTime) continue
+            signalProcess(process.pid, OsConstants.SIGTERM)
+        }
+        if (readDesktopProcess(pid)?.startTime == leader.startTime) {
+            signalProcess(-pid, OsConstants.SIGTERM)
+            signalProcess(pid, OsConstants.SIGTERM)
+        }
+        return processes
+    }
+
+    private fun forceStopDesktopProcesses(original: List<DesktopProcessSnapshot>) {
+        val current = original.mapNotNull { readDesktopProcess(it.pid) }
+        for (process in survivingDesktopProcesses(original, current).asReversed()) {
+            // Do not use a process group after the grace: the leader may have
+            // exited and its numeric PID/group may belong to a newer process.
+            if (process.pid != android.os.Process.myPid() &&
+                readDesktopProcess(process.pid)?.startTime == process.startTime) {
+                signalProcess(process.pid, OsConstants.SIGKILL)
+            }
+        }
+    }
+
+    private fun signalProcess(pid: Int, signal: Int) {
+        try { Os.kill(pid, signal) }
+        catch (error: android.system.ErrnoException) {
+            if (error.errno != OsConstants.ESRCH) Log.w(TAG, "Container signal $signal failed for $pid", error)
+        }
+    }
+
     /** Main-thread terminal state shared by startup failure, shell exit and explicit exit. */
     private fun stopRuntime(message: String? = null): Boolean {
         if (exited) return false
         exited = true
         if (message != null) _errorMessage.value = message
         _isInitialized.value = true
+        OmarchyDesktopShutdown.releaseSession(this)
         if (ownedSession == null || Global.terminalSession !== ownedSession) return false
         Global.x11SessionActive = false
         Global.onSessionSignal9 = null
@@ -602,6 +725,7 @@ class ContainerMainViewModel(
     override fun onCleared() {
         stopRuntime()
         initializationJob?.cancel()
+        OmarchyDesktopShutdown.releaseSession(this)
         super.onCleared()
     }
 
