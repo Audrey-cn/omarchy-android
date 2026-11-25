@@ -346,6 +346,13 @@ object OmarchyX11Overlay {
 
         private fun restoreSentinel() {
             // Never leave the hidden editor empty: Doubao disables Send for empty editors.
+            // Skip redundant setText() when sentinel is already in place to avoid triggering
+            // InputMethodManager.restartInput() and flickering Doubao's Send button on Backspace.
+            val cur = text
+            if (cur != null && cur.length == 1 && cur[0] == ImeBridgeHelper.SENTINEL[0] && !composing()) {
+                if (selectionStart != 1 || selectionEnd != 1) setSelection(1)
+                return
+            }
             setText(ImeBridgeHelper.SENTINEL)
             setSelection(length())
         }
