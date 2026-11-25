@@ -70,6 +70,22 @@ def focused_app_id():
     return ""
 
 
+def is_direct_type_app(app):
+    return any(t in app for t in ("cc-switch", "cc_switch", "ccswitch", "cc switch", "webkit", "tauri"))
+
+
+def type_text_direct(text, env):
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    args = ["wtype"]
+    for idx, line in enumerate(lines):
+        if line:
+            args += ["--", line]
+        if idx < len(lines) - 1:
+            args += ["-k", "Return"]
+    if len(args) > 1:
+        subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def handle_text(msg):
     text = msg.get("text", "")
     if not text:
@@ -77,6 +93,10 @@ def handle_text(msg):
     env = wl_env()
     # Set Wayland clipboard synchronously and verify wl-paste matches before Ctrl+V (ZERO 1-step lag!)
     subprocess.Popen(["wl-copy", "--", text], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    app = focused_app_id()
+    if is_direct_type_app(app):
+        type_text_direct(text, env)
+        return
     deadline = time.time() + 0.5
     while time.time() < deadline:
         try:
@@ -87,7 +107,6 @@ def handle_text(msg):
             pass
         time.sleep(0.03)
 
-    app = focused_app_id()
     is_term = any(t in app for t in ("alacritty", "kitty", "foot", "terminal", "wezterm"))
     if is_term:
         args = ["wtype", "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl"]
@@ -197,14 +216,25 @@ def handle_cmd(msg):
         subprocess.Popen(args, env=wl_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return
     if action == "paste":
+        env = wl_env()
         app = focused_app_id()
+        if is_direct_type_app(app):
+            try:
+                clip = subprocess.check_output(
+                    ["wl-paste", "--no-newline"], env=env, text=True, stderr=subprocess.DEVNULL, timeout=0.6
+                )
+            except Exception:
+                clip = ""
+            if clip:
+                type_text_direct(clip, env)
+            return
         is_term = any(t in app for t in ("alacritty", "kitty", "foot", "terminal", "wezterm"))
         args = (
             ["wtype", "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl"]
             if is_term
             else ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]
         )
-        subprocess.Popen(args, env=wl_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return
     if action == "phone_toggle":
         toggle_phone_orientation()

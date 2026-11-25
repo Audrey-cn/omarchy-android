@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from http.client import HTTPException
 from pathlib import Path
@@ -616,6 +617,18 @@ def apply_desktop():
         if theme_engine.exists():
             print("▶ 正在重载桌面配置与顶栏...")
             subprocess.run([str(theme_engine), "restore"], check=False)
+        deck_bridge = BIN / "omarchy-deck-bridge.py"
+        if deck_bridge.exists():
+            subprocess.run(["pkill", "-f", "omarchy-deck-bridge.py"], check=False)
+            time.sleep(0.2)
+            with open("/tmp/deck-bridge.log", "ab") as logf:
+                subprocess.Popen(
+                    ["python3", str(deck_bridge)],
+                    stdin=subprocess.DEVNULL,
+                    stdout=logf,
+                    stderr=logf,
+                    start_new_session=True,
+                )
     print("▶ 正在刷新更新状态...")
     refresh()
     signal_waybar()
