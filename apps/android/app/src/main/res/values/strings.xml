@@ -367,6 +367,12 @@
     <string name="omarchy_overlay_terminal_key">Term</string>
     <string name="omarchy_overlay_close_key">Close</string>
     <string name="omarchy_overlay_ime_key">IME</string>
+    <string name="omarchy_overlay_copy">Copy</string>
+    <string name="omarchy_overlay_paste">Paste</string>
+    <string name="omarchy_clipboard_history_title">Clipboard history</string>
+    <string name="omarchy_clipboard_history_clear">Clear</string>
+    <string name="omarchy_clipboard_history_empty">No clipboard history</string>
+    <string name="omarchy_clipboard_history_close">Close clipboard history</string>
     <string name="omarchy_key_esc">Esc</string>
     <string name="omarchy_key_tab">Tab</string>
     <string name="omarchy_key_super">Super</string>

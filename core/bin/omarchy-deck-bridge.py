@@ -96,6 +96,27 @@ def handle_text(msg):
     subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def handle_clipboard_sync(msg):
+    text = msg.get("text", "")
+    if not text:
+        return
+    subprocess.Popen(["wl-copy", "--", text], env=wl_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def handle_clipboard_get(conn):
+    text = ""
+    try:
+        text = subprocess.check_output(
+            ["wl-paste", "--no-newline"], env=wl_env(), text=True, stderr=subprocess.DEVNULL, timeout=0.6
+        )
+    except Exception:
+        text = ""
+    try:
+        conn.sendall((json.dumps({"text": text}) + "\n").encode("utf-8"))
+    except Exception:
+        pass
+
+
 def handle_key(msg):
     code = msg.get("key", "")
     sup = bool(msg.get("super", False))
@@ -165,6 +186,26 @@ def apply_scale(scale):
 
 def handle_cmd(msg):
     action = msg.get("cmd", "")
+    if action == "copy":
+        app = focused_app_id()
+        is_term = any(t in app for t in ("alacritty", "kitty", "foot", "terminal", "wezterm"))
+        args = (
+            ["wtype", "-M", "ctrl", "-M", "shift", "-k", "c", "-m", "shift", "-m", "ctrl"]
+            if is_term
+            else ["wtype", "-M", "ctrl", "-k", "c", "-m", "ctrl"]
+        )
+        subprocess.Popen(args, env=wl_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    if action == "paste":
+        app = focused_app_id()
+        is_term = any(t in app for t in ("alacritty", "kitty", "foot", "terminal", "wezterm"))
+        args = (
+            ["wtype", "-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl"]
+            if is_term
+            else ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]
+        )
+        subprocess.Popen(args, env=wl_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
     if action == "phone_toggle":
         toggle_phone_orientation()
         return
@@ -237,6 +278,10 @@ def cmd_server():
                             handle_key(msg)
                         elif t == "text":
                             handle_text(msg)
+                        elif t == "clipboard_sync":
+                            handle_clipboard_sync(msg)
+                        elif t == "clipboard_get":
+                            handle_clipboard_get(conn)
                         elif t == "cmd":
                             handle_cmd(msg)
                         elif t == "resize":

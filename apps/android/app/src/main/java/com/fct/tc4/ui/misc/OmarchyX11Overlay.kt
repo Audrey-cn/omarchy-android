@@ -6,6 +6,8 @@ import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.Application
 import android.app.NotificationManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
@@ -31,6 +33,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.KeyEvent
@@ -48,6 +51,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.TextAttribute
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -68,7 +72,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.File
+import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.WeakHashMap
 import java.util.concurrent.Executors
@@ -309,6 +315,7 @@ object OmarchyX11Overlay {
         private val onCommit: (String) -> Unit,
         private val onBackspace: () -> Unit,
         private val onEnter: () -> Unit,
+        private val onNewline: () -> Unit,
         private val onDismiss: () -> Unit
     ) : EditText(context) {
 
@@ -321,6 +328,70 @@ object OmarchyX11Overlay {
             imeOptions = EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_EXTRACT_UI
             isFocusable = true
             isFocusableInTouchMode = true
+            restoreSentinel()
+            setOnEditorActionListener { _, actionId, event ->
+                when {
+                    isSendAction(actionId) -> {
+                        if (event == null || event.action == KeyEvent.ACTION_DOWN) sendEditorAction()
+                        true
+                    }
+                    event?.keyCode == KeyEvent.KEYCODE_ENTER -> {
+                        if (event.action == KeyEvent.ACTION_DOWN) handleEnterKey(event)
+                        true
+                    }
+                    else -> false
+                }
+            }
+        }
+
+        private fun restoreSentinel() {
+            // Never leave the hidden editor empty: Doubao disables Send for empty editors.
+            setText(ImeBridgeHelper.SENTINEL)
+            setSelection(length())
+        }
+
+        private fun dispatch(events: List<ImeBridgeHelper.Event>) {
+            events.forEach { event ->
+                when (event) {
+                    is ImeBridgeHelper.Event.Text -> onCommit(event.value)
+                    ImeBridgeHelper.Event.Newline -> onNewline()
+                    ImeBridgeHelper.Event.Return -> onEnter()
+                }
+            }
+        }
+
+        private fun commitToLinux(committed: CharSequence?) {
+            val events = ImeBridgeHelper.splitCommit(committed)
+            restoreSentinel()
+            dispatch(events)
+        }
+
+        private fun sendEditorAction() {
+            val events = ImeBridgeHelper.send(text)
+            restoreSentinel()
+            dispatch(events)
+        }
+
+        private fun isSendAction(action: Int): Boolean = action in setOf(
+            EditorInfo.IME_ACTION_SEND, EditorInfo.IME_ACTION_GO, EditorInfo.IME_ACTION_DONE
+        )
+
+        private fun handleEnterKey(event: KeyEvent) {
+            if (!event.isShiftPressed && event.flags and KeyEvent.FLAG_EDITOR_ACTION != 0) {
+                sendEditorAction()
+            } else {
+                // Raw/Shift+Enter is a newline; only an explicit editor action submits.
+                commitToLinux(text)
+                onNewline()
+            }
+        }
+
+        private fun composing(): Boolean = text?.let {
+            BaseInputConnection.getComposingSpanStart(it) != -1
+        } ?: false
+
+        private fun restoreIfEmpty() {
+            if (ImeBridgeHelper.shouldForwardBackspace(text, composing())) restoreSentinel()
         }
 
         override fun onKeyPreIme(keyCode: Int, event: KeyEvent?): Boolean {
@@ -335,61 +406,79 @@ object OmarchyX11Overlay {
             val base = super.onCreateInputConnection(outAttrs) ?: return null
             outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
             return object : InputConnectionWrapper(base, true) {
+                private var forwardedDelete = false
+
                 override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                    val s = text?.toString() ?: ""
-                    if (s.isNotEmpty()) {
-                        onCommit(s)
-                        post { setText("") }
-                    }
+                    commitToLinux(text)
                     return true
                 }
 
-                override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                    return super.setComposingText(text, newCursorPosition)
-                }
+                // InputConnectionWrapper delegates the modern overload directly to its
+                // target, so it must also be intercepted to avoid buffering invisible text.
+                override fun commitText(
+                    text: CharSequence, newCursorPosition: Int, textAttribute: TextAttribute?
+                ): Boolean = commitText(text, newCursorPosition)
 
                 override fun finishComposingText(): Boolean {
-                    val ed = this@ImeBridgeEditText.text
-                    val remaining = ed?.toString() ?: ""
-                    val res = super.finishComposingText()
-                    if (remaining.isNotEmpty()) {
-                        onCommit(remaining)
-                        post { setText("") }
+                    val remaining = this@ImeBridgeEditText.text?.toString()
+                    val result = super.finishComposingText()
+                    commitToLinux(remaining)
+                    return result
+                }
+
+                override fun performEditorAction(editorAction: Int): Boolean {
+                    if (isSendAction(editorAction)) {
+                        sendEditorAction()
+                        return true
                     }
-                    return res
+                    return super.performEditorAction(editorAction)
                 }
 
                 override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                    val ed = this@ImeBridgeEditText.text
-                    val composing = ed != null && BaseInputConnection.getComposingSpanStart(ed) != -1
-                    if (!composing && (ed == null || ed.isEmpty()) && beforeLength > 0) {
+                    if (beforeLength > 0 && ImeBridgeHelper.shouldForwardBackspace(
+                            this@ImeBridgeEditText.text, composing())) {
                         repeat(beforeLength) { onBackspace() }
+                        restoreSentinel()
                         return true
                     }
-                    return super.deleteSurroundingText(beforeLength, afterLength)
+                    val result = super.deleteSurroundingText(beforeLength, afterLength)
+                    restoreIfEmpty()
+                    return result
+                }
+
+                override fun deleteSurroundingTextInCodePoints(beforeLength: Int, afterLength: Int): Boolean {
+                    if (beforeLength > 0 && ImeBridgeHelper.shouldForwardBackspace(
+                            this@ImeBridgeEditText.text, composing())) {
+                        repeat(beforeLength) { onBackspace() }
+                        restoreSentinel()
+                        return true
+                    }
+                    val result = super.deleteSurroundingTextInCodePoints(beforeLength, afterLength)
+                    restoreIfEmpty()
+                    return result
                 }
 
                 override fun sendKeyEvent(event: KeyEvent): Boolean {
-                    if (event.action == KeyEvent.ACTION_DOWN) {
-                        if (event.keyCode == KeyEvent.KEYCODE_DEL) {
-                            val ed = this@ImeBridgeEditText.text
-                            val composing = ed != null && BaseInputConnection.getComposingSpanStart(ed) != -1
-                            if (!composing && (ed == null || ed.isEmpty())) {
-                                onBackspace()
-                                return true
-                            }
-                        } else if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
-                            val ed = this@ImeBridgeEditText.text
-                            val remaining = ed?.toString() ?: ""
-                            if (remaining.isNotEmpty()) {
-                                onCommit(remaining)
-                                post { setText("") }
-                            }
-                            onEnter()
+                    if (event.keyCode == KeyEvent.KEYCODE_ENTER) {
+                        if (event.action == KeyEvent.ACTION_DOWN) handleEnterKey(event)
+                        return true
+                    }
+                    if (event.keyCode == KeyEvent.KEYCODE_DEL) {
+                        if (event.action == KeyEvent.ACTION_DOWN && ImeBridgeHelper.shouldForwardBackspace(
+                                this@ImeBridgeEditText.text, composing())) {
+                            forwardedDelete = true
+                            onBackspace()
+                            restoreSentinel()
+                            return true
+                        }
+                        if (event.action == KeyEvent.ACTION_UP && forwardedDelete) {
+                            forwardedDelete = false
                             return true
                         }
                     }
-                    return super.sendKeyEvent(event)
+                    val result = super.sendKeyEvent(event)
+                    restoreIfEmpty()
+                    return result
                 }
             }
         }
@@ -399,6 +488,15 @@ object OmarchyX11Overlay {
         private val mainHandler = Handler(Looper.getMainLooper())
         private val netExec = Executors.newSingleThreadExecutor()
         private val prefs = activity.getSharedPreferences("omarchy_overlay_prefs", Context.MODE_PRIVATE)
+        private val clipboardHistory = ClipboardHistoryStore(
+            initialEntries = loadClipboardHistory(),
+            persist = { entries ->
+                prefs.edit().putString("clipboard_history", JSONArray(entries).toString()).apply()
+            }
+        )
+        private var lastSyncedAndroidClipboard: String? = null
+        private var clipboardCopyGeneration = 0
+        private var resumed = false
 
         @Volatile private var attached = false
         private var overlayHost: FrameLayout? = null
@@ -406,6 +504,7 @@ object OmarchyX11Overlay {
         private var edgeTabView: View? = null
         private var expandedDockView: View? = null
         private var quickMenuOverlay: View? = null
+        private var clipboardHistoryOverlay: View? = null
         private var onboardingOverlay: View? = null
         private var onboardingStatus: View? = null
         private var onboardingProbeJob: Job? = null
@@ -464,6 +563,10 @@ object OmarchyX11Overlay {
         private val globalLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
             updateViewportForIme()
         }
+        // onResume can precede window focus, when Android denies clipboard reads.
+        private val clipboardFocusListener = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            if (focused && resumed) syncAndroidClipboard()
+        }
 
         private val layoutListener = View.OnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
             val w = v.width
@@ -521,6 +624,7 @@ object OmarchyX11Overlay {
             buildEdgeTab(host)
             content.addOnLayoutChangeListener(layoutListener)
             content.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
+            content.viewTreeObserver.addOnWindowFocusChangeListener(clipboardFocusListener)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 content.setOnApplyWindowInsetsListener { v, insets ->
@@ -574,12 +678,14 @@ object OmarchyX11Overlay {
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
             content?.removeOnLayoutChangeListener(layoutListener)
             try { content?.viewTreeObserver?.removeOnGlobalLayoutListener(globalLayoutListener) } catch (_: Exception) {}
+            try { content?.viewTreeObserver?.removeOnWindowFocusChangeListener(clipboardFocusListener) } catch (_: Exception) {}
             overlayHost?.let { content?.removeView(it) }
             overlayHost = null
             nightOverlay = null
             edgeTabView = null
             expandedDockView = null
             quickMenuOverlay = null
+            clipboardHistoryOverlay = null
             onboardingOverlay = null
             currentOnboardingStep = null
             oskView = null
@@ -594,6 +700,8 @@ object OmarchyX11Overlay {
         fun onResume() {
             if (!attached) return
             onPause()
+            resumed = true
+            syncAndroidClipboard()
             val session = Global.terminalSession
             val loading = DesktopLoadingState(
                 warmResume = session != null && readySession === session,
@@ -636,6 +744,8 @@ object OmarchyX11Overlay {
         }
 
         fun onPause() {
+            resumed = false
+            clipboardCopyGeneration++
             desktopLoadingJob?.cancel()
             desktopLoadingJob = null
             hideDesktopLoading(animate = false)
@@ -835,18 +945,25 @@ object OmarchyX11Overlay {
 
         private fun sendResize(w: Int, h: Int) = sendJson("""{"type":"resize","w":$w,"h":$h}""")
 
-        private fun sendJson(jsonLine: String) {
+        private fun writeBridgeLine(socket: Socket, jsonLine: String) {
+            socket.connect(InetSocketAddress("127.0.0.1", 18901), 500)
+            socket.soTimeout = 1_000
+            socket.getOutputStream().apply {
+                write((jsonLine + "\n").toByteArray(Charsets.UTF_8))
+                flush()
+            }
+        }
+
+        private fun sendJson(jsonLine: String, onSent: (() -> Unit)? = null) {
             if (!attached || netExec.isShutdown) return
             // detach() may shut the executor down between the guard and execute().
             try {
                 netExec.execute {
                     if (!attached) return@execute
                     try {
-                        Socket("127.0.0.1", 18901).use { socket ->
-                            socket.getOutputStream().apply {
-                                write((jsonLine + "\n").toByteArray(Charsets.UTF_8))
-                                flush()
-                            }
+                        Socket().use { socket -> writeBridgeLine(socket, jsonLine) }
+                        if (onSent != null) {
+                            mainHandler.post { if (attached) onSent() }
                         }
                     } catch (_: Exception) {}
                 }
@@ -858,17 +975,98 @@ object OmarchyX11Overlay {
         private fun sendCmd(cmd: String) = sendJson("""{"type":"cmd","cmd":"$cmd"}""")
 
         private fun sendKey(key: String) {
-            sendJson("""{"type":"key","key":"$key","super":$modSuper,"ctrl":$modCtrl,"alt":$modAlt,"shift":$modShift}""")
+            sendKeyWithMods(key, modSuper, modCtrl, modAlt, modShift)
             if (modSuper || modCtrl || modAlt || modShift) {
                 modSuper = false; modCtrl = false; modAlt = false; modShift = false
                 refreshModButtons()
             }
         }
 
+        private fun sendKeyWithMods(
+            key: String, superKey: Boolean = false, ctrl: Boolean = false,
+            alt: Boolean = false, shift: Boolean = false
+        ) {
+            sendJson(JSONObject().put("type", "key").put("key", key)
+                .put("super", superKey).put("ctrl", ctrl).put("alt", alt).put("shift", shift).toString())
+        }
+
         private fun sendText(text: String) {
             if (text.isEmpty()) return
-            val esc = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "")
-            sendJson("""{"type":"text","text":"$esc"}""")
+            // The Linux text bridge uses wl-copy before pasting, changing its clipboard.
+            lastSyncedAndroidClipboard = null
+            sendJson(JSONObject().put("type", "text").put("text", text).toString()) {
+                lastSyncedAndroidClipboard = null
+            }
+        }
+
+        private fun loadClipboardHistory(): List<String> = try {
+            val saved = JSONArray(prefs.getString("clipboard_history", "[]") ?: "[]")
+            (0 until saved.length()).mapNotNull { saved.opt(it) as? String }
+        } catch (_: Exception) { emptyList() }
+
+        private fun androidClipboardText(): String = try {
+            val clip = activity.getSystemService(ClipboardManager::class.java)?.primaryClip
+            if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(activity)?.toString().orEmpty()
+            else ""
+        } catch (_: Exception) { "" }
+
+        private fun syncAndroidClipboard() {
+            if (!attached || !resumed || !activity.hasWindowFocus()) return
+            val text = androidClipboardText()
+            if (text.isEmpty() || text == lastSyncedAndroidClipboard) return
+            clipboardHistory.record(text)
+            sendJson(JSONObject().put("type", "clipboard_sync").put("text", text).toString()) {
+                lastSyncedAndroidClipboard = text
+            }
+        }
+
+        private fun copyFromLinux() {
+            if (!attached || netExec.isShutdown) return
+            val request = ++clipboardCopyGeneration
+            val previousAndroidText = androidClipboardText()
+            try {
+                netExec.execute {
+                    if (!attached) return@execute
+                    try {
+                        Socket().use { writeBridgeLine(it, """{"type":"cmd","cmd":"copy"}""") }
+                        Thread.sleep(180)
+                        if (!attached) return@execute
+                        val copied = Socket().use { socket ->
+                            writeBridgeLine(socket, """{"type":"clipboard_get"}""")
+                            val response = socket.getInputStream().bufferedReader(Charsets.UTF_8).readLine()
+                            if (response == null) "" else JSONObject(response).optString("text", "")
+                        }
+                        if (copied.isNotEmpty()) mainHandler.post {
+                            if (!attached || !resumed || !activity.hasWindowFocus() ||
+                                request != clipboardCopyGeneration || androidClipboardText() != previousAndroidText
+                            ) return@post
+                            clipboardHistory.record(copied)
+                            try {
+                                activity.getSystemService(ClipboardManager::class.java)
+                                    ?.setPrimaryClip(ClipData.newPlainText("Omarchy", copied))
+                                lastSyncedAndroidClipboard = copied
+                            } catch (_: Exception) {}
+                        }
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+        }
+
+        private fun pasteFromAndroid() {
+            val text = androidClipboardText()
+            if (text.isNotEmpty()) {
+                clipboardHistory.record(text)
+                sendText(text)
+            } else sendCmd("paste")
+        }
+
+        private fun configurePasteButton(button: Button) {
+            button.setOnLongClickListener {
+                it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                collapseDock()
+                showClipboardHistory()
+                true
+            }
         }
 
         private fun isLandscapeNow(): Boolean =
@@ -1130,6 +1328,16 @@ object OmarchyX11Overlay {
                 collapseDock()
                 triggerAndroidIme()
             }
+            val paste = makeBarBtn(s(R.string.omarchy_overlay_paste), false) {
+                collapseDock()
+                pasteFromAndroid()
+            }.apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, dp(34)
+                ).apply { setMargins(dp(3), 0, dp(3), 0) }
+            }
+            configurePasteButton(paste)
+            pill.addView(paste)
             addDockBtn(
                 if (isLandscapeNow()) VectorKind.ORIENT_PORT else VectorKind.ORIENT_LAND,
                 "#7aa2f7"
@@ -1203,6 +1411,102 @@ object OmarchyX11Overlay {
         }
 
         // ==================== Unified Control Center (⚙) ====================
+
+        private fun hideClipboardHistory() {
+            clipboardHistoryOverlay?.let { overlayHost?.removeView(it) }
+            clipboardHistoryOverlay = null
+        }
+
+        private fun showClipboardHistory() {
+            val host = overlayHost ?: return
+            hideClipboardHistory()
+            hideQuickMenu()
+
+            val backdrop = FrameLayout(activity).apply {
+                setBackgroundColor(Color.parseColor("#88000000"))
+                setOnClickListener { hideClipboardHistory() }
+                elevation = dp(24).toFloat()
+            }
+            val card = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
+                background = makeRounded("#FA1a1b26", "#7aa2f7", 16, 1)
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                isClickable = true
+            }
+            val header = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            header.addView(TextView(activity).apply {
+                text = s(R.string.omarchy_clipboard_history_title)
+                textSize = 16f
+                setTextColor(Color.parseColor("#c0caf5"))
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            val items = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+            val clear = makeBarBtn(s(R.string.omarchy_clipboard_history_clear), false) {}
+            fun refreshItems() {
+                items.removeAllViews()
+                val entries = clipboardHistory.entries()
+                clear.isEnabled = entries.isNotEmpty()
+                clear.alpha = if (clear.isEnabled) 1f else 0.45f
+                if (entries.isEmpty()) items.addView(TextView(activity).apply {
+                    text = s(R.string.omarchy_clipboard_history_empty)
+                    textSize = 13f
+                    setTextColor(Color.parseColor("#9aa5ce"))
+                    setPadding(dp(8), dp(24), dp(8), dp(24))
+                })
+                entries.forEach { entry ->
+                    items.addView(TextView(activity).apply {
+                        text = entry.take(240).replace('\n', ' ').replace('\r', ' ') +
+                            if (entry.length > 240) "…" else ""
+                        textSize = 13f
+                        maxLines = 3
+                        ellipsize = TextUtils.TruncateAt.END
+                        setTextColor(Color.parseColor("#c0caf5"))
+                        background = makeRounded("#CC24283b", "#414868", 8, 1)
+                        setPadding(dp(12), dp(10), dp(12), dp(10))
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply { topMargin = dp(7) }
+                        setOnClickListener {
+                            it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            clipboardHistory.record(entry)
+                            sendText(entry)
+                            hideClipboardHistory()
+                        }
+                    })
+                }
+            }
+            clear.setOnClickListener {
+                it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                clipboardHistory.clear()
+                refreshItems()
+            }
+            header.addView(clear, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(32)
+            ).apply { marginStart = dp(8) })
+            header.addView(makeBarBtn("×", false) { hideClipboardHistory() }.apply {
+                contentDescription = s(R.string.omarchy_clipboard_history_close)
+                textSize = 20f
+                setPadding(0, 0, 0, 0)
+            }, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginStart = dp(8) })
+            card.addView(header)
+            refreshItems()
+            card.addView(ScrollView(activity).apply { addView(items) }, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+            ))
+            val availableHeight = (host.height - lastImeH).coerceAtLeast(dp(100))
+            backdrop.addView(card, FrameLayout.LayoutParams(
+                min(host.width - dp(24), dp(420)).coerceAtLeast(dp(100)),
+                min(availableHeight - dp(24), dp(420)).coerceAtLeast(dp(76)),
+                Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            ).apply { topMargin = dp(12) })
+            host.addView(backdrop, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+            clipboardHistoryOverlay = backdrop
+        }
 
         private fun hideQuickMenu() {
             quickMenuOverlay?.let { overlayHost?.removeView(it) }
@@ -2032,21 +2336,10 @@ object OmarchyX11Overlay {
                 context = activity,
                 onCommit = { committed -> sendText(committed) },
                 onBackspace = { sendKey("BackSpace") },
-                onEnter = { sendKey("Return") },
+                onEnter = { sendKeyWithMods("Return") },
+                onNewline = { sendKeyWithMods("Return", shift = true) },
                 onDismiss = { hideIme() }
             )
-
-            edit.setOnEditorActionListener { _, actionId, event ->
-                if (actionId == EditorInfo.IME_ACTION_SEND || (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER)) {
-                    val rem = edit.text?.toString() ?: ""
-                    if (rem.isNotEmpty()) {
-                        sendText(rem)
-                        edit.setText("")
-                    }
-                    sendKey("Return")
-                    true
-                } else false
-            }
 
             host.addView(edit, FrameLayout.LayoutParams(1, 1, Gravity.BOTTOM or Gravity.START))
             imeAnchor = edit
@@ -2120,6 +2413,14 @@ object OmarchyX11Overlay {
             // Keep the compact edge tab collapsed at edge instead of hiding it!
             collapseDock()
             modBtns.clear()
+            val screenW = activity.resources.displayMetrics.widthPixels
+            val screenH = activity.resources.displayMetrics.heightPixels
+            val width = if (screenW > screenH) {
+                min(screenW - dp(16), (screenW * 0.56f).roundToInt())
+            } else {
+                min(screenW - dp(12), (screenW * 0.94f).roundToInt())
+            }
+            val compactBar = width < dp(460)
 
             val rootBg = GradientDrawable().apply {
                 setColor(bgWithAlpha(oskAlpha))
@@ -2154,7 +2455,7 @@ object OmarchyX11Overlay {
                 }
             }
 
-            // Clean top bar: [1][2][3][4][5] [⛶ 全屏]  [drag space]  [refined opacity slider]  [✕]
+            // Compact text actions sit beside Fullscreen; portrait uses weighted widths.
             val bar = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -2168,7 +2469,9 @@ object OmarchyX11Overlay {
                     refreshFullscreenButton()
                     sendCmd("ws_$w")
                 }
-                wb.layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply {
+                wb.layoutParams = LinearLayout.LayoutParams(
+                    if (compactBar) 0 else dp(28), dp(28), if (compactBar) 0.6f else 0f
+                ).apply {
                     setMargins(dp(1), 0, dp(2), 0)
                 }
                 wb.contentDescription = s(R.string.omarchy_overlay_workspace, ws)
@@ -2181,22 +2484,40 @@ object OmarchyX11Overlay {
                 refreshFullscreenButton()
                 sendCmd("fullscreen")
             }.apply {
-                layoutParams = LinearLayout.LayoutParams(dp(58), dp(28)).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    if (compactBar) 0 else dp(58), dp(28), if (compactBar) 1.4f else 0f
+                ).apply {
                     setMargins(dp(4), 0, dp(2), 0)
                 }
                 setPadding(dp(4), 0, dp(4), 0)
+                if (compactBar) textSize = 10f
+                setSingleLine(true)
             }
             fullscreenBtn = bFull
             bar.addView(bFull)
 
+            val copy = makeBarBtn(s(R.string.omarchy_overlay_copy), false) { copyFromLinux() }
+            val paste = makeBarBtn(s(R.string.omarchy_overlay_paste), false) { pasteFromAndroid() }
+            configurePasteButton(paste)
+            listOf(copy, paste).forEach { button ->
+                button.setPadding(dp(2), 0, dp(2), 0)
+                button.setSingleLine(true)
+                if (compactBar) button.textSize = 10f
+                bar.addView(button, LinearLayout.LayoutParams(
+                    if (compactBar) 0 else dp(46), dp(28), if (compactBar) 1.2f else 0f
+                ).apply { setMargins(dp(2), 0, dp(2), 0) })
+            }
+
             val dragSpacer = View(activity).apply { setOnTouchListener(dragTouchListener) }
-            bar.addView(dragSpacer, LinearLayout.LayoutParams(0, dp(28), 1f))
+            if (!compactBar) bar.addView(dragSpacer, LinearLayout.LayoutParams(0, dp(28), 1f))
 
             val alphaBar = SeekBar(activity).apply {
                 contentDescription = s(R.string.omarchy_overlay_keyboard_opacity)
                 max = 75
                 progress = ((oskAlpha - 0.20f) * 100f).roundToInt()
-                layoutParams = LinearLayout.LayoutParams(dp(100), dp(24)).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    if (compactBar) 0 else dp(76), dp(24), if (compactBar) 1.8f else 0f
+                ).apply {
                     setMargins(dp(4), 0, dp(6), 0)
                 }
                 styleOpacitySlider(this)
@@ -2214,7 +2535,9 @@ object OmarchyX11Overlay {
 
             val bClose = makeBarBtn(s(R.string.omarchy_overlay_dismiss_symbol), false) { hideOsk() }.apply {
                 contentDescription = s(R.string.omarchy_overlay_keyboard_hide)
-                layoutParams = LinearLayout.LayoutParams(dp(30), dp(28)).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    if (compactBar) 0 else dp(30), dp(28), if (compactBar) 0.8f else 0f
+                ).apply {
                     setMargins(dp(2), 0, 0, 0)
                 }
                 setPadding(0, 0, 0, 0)
@@ -2289,14 +2612,6 @@ object OmarchyX11Overlay {
             root.addView(grabArea, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(20)
             ))
-
-            val screenW = activity.resources.displayMetrics.widthPixels
-            val screenH = activity.resources.displayMetrics.heightPixels
-            val width = if (screenW > screenH) {
-                min(screenW - dp(16), (screenW * 0.56f).roundToInt())
-            } else {
-                min(screenW - dp(12), (screenW * 0.94f).roundToInt())
-            }
 
             val olp = FrameLayout.LayoutParams(
                 width,

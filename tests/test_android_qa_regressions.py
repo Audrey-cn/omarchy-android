@@ -25,6 +25,103 @@ def kotlin_tools():
 
 
 class AndroidQaRegressionTests(unittest.TestCase):
+    def test_clipboard_history_and_ime_helpers_on_jvm(self):
+        java, libraries = kotlin_tools()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            harness = tmp_path / 'ClipboardImePolicies.kt'
+            harness.write_text(r'''package com.fct.tc4.ui.misc
+fun main() {
+    val persisted = mutableListOf<List<String>>()
+    val history = ClipboardHistoryStore(persist = { persisted.add(it) })
+    history.record(""); history.record(" \n\t")
+    check(history.entries().isEmpty() && persisted.isEmpty())
+    repeat(35) { history.record("item-$it") }
+    check(history.entries() == (34 downTo 5).map { "item-$it" })
+    history.record("item-10")
+    check(history.entries().first() == "item-10")
+    check(history.entries().count { it == "item-10" } == 1)
+    check(history.entries().drop(1) == (34 downTo 5).filter { it != 10 }.map { "item-$it" })
+    history.record("  exact text\n\t")
+    check(history.entries().first() == "  exact text\n\t")
+    val restored = ClipboardHistoryStore(persisted.last())
+    check(restored.entries() == history.entries())
+    val snapshot = history.entries()
+    history.clear()
+    check(history.entries().isEmpty() && persisted.last().isEmpty())
+    check(snapshot.size == 30)
+    val loaded = ClipboardHistoryStore(listOf("", "a", "a", " ", "b") + (1..40).map { "n$it" })
+    check(loaded.entries().size == 30 && loaded.entries().take(2) == listOf("a", "b"))
+
+    val sentinel = ImeBridgeHelper.SENTINEL
+    check(sentinel == "\u200B")
+    check(ImeBridgeHelper.stripSentinel("${sentinel}hello${sentinel}世界$sentinel") == "hello世界")
+    check(ImeBridgeHelper.splitCommit(sentinel).isEmpty())
+    check(ImeBridgeHelper.splitCommit("\n${sentinel}first\n\nsecond\n") == listOf(
+        ImeBridgeHelper.Event.Newline, ImeBridgeHelper.Event.Text("first"),
+        ImeBridgeHelper.Event.Newline, ImeBridgeHelper.Event.Newline,
+        ImeBridgeHelper.Event.Text("second"), ImeBridgeHelper.Event.Newline))
+    check(ImeBridgeHelper.send(sentinel) == listOf(ImeBridgeHelper.Event.Return))
+    check(ImeBridgeHelper.send("${sentinel}unsent") == listOf(
+        ImeBridgeHelper.Event.Text("unsent"), ImeBridgeHelper.Event.Return))
+    check(ImeBridgeHelper.send("a\nb") == listOf(ImeBridgeHelper.Event.Text("a"),
+        ImeBridgeHelper.Event.Newline, ImeBridgeHelper.Event.Text("b"), ImeBridgeHelper.Event.Return))
+    for (text in listOf(null, "", sentinel, sentinel + sentinel)) {
+        check(ImeBridgeHelper.shouldForwardBackspace(text, composing = false))
+        check(!ImeBridgeHelper.shouldForwardBackspace(text, composing = true))
+    }
+    check(!ImeBridgeHelper.shouldForwardBackspace("${sentinel}local", composing = false))
+    println("Clipboard and IME policies passed")
+}
+''')
+            classes = tmp_path / 'classes'
+            classes.mkdir()
+            compile_result = subprocess.run([
+                java, '-cp', str(libraries / '*'), 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler',
+                '-no-stdlib', '-no-reflect', '-classpath', str(next(libraries.glob('kotlin-stdlib-*.jar'))),
+                '-d', str(classes), str(MISC / 'ClipboardHistoryStore.kt'),
+                str(MISC / 'ImeBridgeHelper.kt'), str(harness),
+            ], text=True, capture_output=True, timeout=90)
+            self.assertEqual(compile_result.returncode, 0, compile_result.stdout + compile_result.stderr)
+            result = subprocess.run([java, '-cp', os.pathsep.join([
+                str(classes), str(libraries / '*')]), 'com.fct.tc4.ui.misc.ClipboardImePoliciesKt'],
+                text=True, capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('Clipboard and IME policies passed', result.stdout)
+
+    def test_ime_bridge_keeps_sentinel_and_separates_editor_actions_from_newlines(self):
+        overlay = (MISC / 'OmarchyX11Overlay.kt').read_text()
+        bridge = overlay.split('private class ImeBridgeEditText(', 1)[1].split('private class Controller(', 1)[0]
+        self.assertIn('ImeBridgeHelper.SENTINEL', bridge)
+        self.assertNotIn('setText("")', bridge)
+        self.assertIn('override fun performEditorAction(', bridge)
+        for action in ['IME_ACTION_SEND', 'IME_ACTION_GO', 'IME_ACTION_DONE']:
+            self.assertIn(action, bridge)
+        self.assertIn('ImeBridgeHelper.splitCommit(', bridge)
+        self.assertIn('ImeBridgeHelper.shouldForwardBackspace(', bridge)
+        self.assertIn('override fun deleteSurroundingTextInCodePoints(', bridge)
+        self.assertIn('textAttribute: TextAttribute?', bridge)
+        self.assertIn('sendKeyWithMods("Return", shift = true)', overlay)
+
+    def test_clipboard_controls_and_resume_sync_are_wired_to_android_bridge(self):
+        overlay = (MISC / 'OmarchyX11Overlay.kt').read_text()
+        resume = overlay.split('fun onResume()', 1)[1].split('fun onPause()', 1)[0]
+        self.assertIn('syncAndroidClipboard()', resume)
+        self.assertIn('ClipboardHistoryStore(', overlay)
+        self.assertIn('clipboard_get', overlay)
+        self.assertIn('clipboard_sync', overlay)
+        self.assertIn('socket.soTimeout', overlay)
+        self.assertIn('readLine()', overlay)
+        self.assertIn('ClipData.newPlainText(', overlay)
+        self.assertIn('Thread.sleep(180)', overlay)
+        dock = overlay.split('private fun expandDock()', 1)[1].split('private fun positionExpandedDock()', 1)[0]
+        keyboard = overlay.split('private fun showOsk()', 1)[1].split('private fun makeBarBtn(', 1)[0]
+        self.assertIn('omarchy_overlay_paste', dock)
+        self.assertIn('configurePasteButton(', dock)
+        self.assertIn('omarchy_overlay_copy', keyboard)
+        self.assertIn('omarchy_overlay_paste', keyboard)
+        self.assertIn('configurePasteButton(', keyboard)
+
     def test_onboarding_and_desktop_return_policies_on_jvm(self):
         java, libraries = kotlin_tools()
         with tempfile.TemporaryDirectory() as tmp:

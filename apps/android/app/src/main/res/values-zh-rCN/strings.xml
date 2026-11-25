@@ -356,6 +356,12 @@
     <string name="omarchy_overlay_terminal_key">终端</string>
     <string name="omarchy_overlay_close_key">关窗</string>
     <string name="omarchy_overlay_ime_key">中</string>
+    <string name="omarchy_overlay_copy">复制</string>
+    <string name="omarchy_overlay_paste">粘贴</string>
+    <string name="omarchy_clipboard_history_title">剪贴板历史</string>
+    <string name="omarchy_clipboard_history_clear">清空</string>
+    <string name="omarchy_clipboard_history_empty">暂无剪贴板历史</string>
+    <string name="omarchy_clipboard_history_close">关闭剪贴板历史</string>
     <string name="omarchy_key_esc">Esc</string>
     <string name="omarchy_key_tab">Tab</string>
     <string name="omarchy_key_super">Super</string>
