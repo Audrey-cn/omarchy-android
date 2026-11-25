@@ -246,9 +246,9 @@ def launch_app(app):
             n = stack.pop()
             aid = (n.get("app_id") or "").lower()
             if n.get("id") and aid and aid != "omarchy-app-grid" and (
-                (nl == "hermes" and aid == "hermes") or
-                (nl == "claude" and "claude" in aid) or
-                (nl == "chatgpt" and "chatgpt" in aid)
+                ("hermes" in nl and aid == "hermes") or
+                ("claude" in nl and "claude" in aid) or
+                ("chatgpt" in nl and "chatgpt" in aid)
             ):
                 subprocess.Popen(["swaymsg", f"[con_id={n['id']}] focus"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 return

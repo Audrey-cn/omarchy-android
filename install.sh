@@ -99,7 +99,7 @@ else
     apt-get install -y waybar wofi swaybg mako-notifier alacritty thunar neovim tmux btop fzf ripgrep fd-find jq \
       imv zathura zathura-pdf-poppler mpv \
       git gh curl wget unzip zstd locales webp imagemagick \
-      python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 papirus-icon-theme \
+      python3-gi gir1.2-gtk-3.0 gir1.2-gdkpixbuf-2.0 gir1.2-gtklayershell-0.1 papirus-icon-theme librsvg2-common \
       grim slurp \
       fcitx5 fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
     sed -i "s/# zh_CN.UTF-8 UTF-8/zh_CN.UTF-8 UTF-8/" /etc/locale.gen
