@@ -222,6 +222,12 @@ class DesktopLaunchTests(unittest.TestCase):
         self.assertIn("librsvg2-common", (ROOT / "install.sh").read_text())
         self.assertIn("librsvg2-common", (ROOT / ".github/workflows/build-container.yml").read_text())
 
+    def test_deck_bridge_detects_any_webkitgtk_process_by_proc_maps(self):
+        bridge = load("polish_deck_bridge", "core/bin/omarchy-deck-bridge.py")
+        with patch.object(bridge, "process_uses_webkit", side_effect=lambda pid: pid == 4242):
+            self.assertTrue(bridge.is_direct_type_app("com.example.clash-verge", 4242))
+            self.assertFalse(bridge.is_direct_type_app("firefox", 1001))
+
 
 if __name__ == "__main__":
     unittest.main()

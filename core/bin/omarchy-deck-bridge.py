@@ -54,7 +54,7 @@ def run_bg(cmd):
     )
 
 
-def focused_app_id():
+def focused_window_info():
     try:
         out = subprocess.check_output(["swaymsg", "-t", "get_tree"], env=wl_env(), text=True, stderr=subprocess.DEVNULL)
         tree = json.loads(out)
@@ -62,16 +62,37 @@ def focused_app_id():
         while stack:
             node = stack.pop()
             if node.get("focused"):
-                return (node.get("app_id") or node.get("window_properties", {}).get("class") or "").lower()
+                app = (node.get("app_id") or node.get("window_properties", {}).get("class") or "").lower()
+                return app, node.get("pid")
             stack.extend(node.get("nodes", []))
             stack.extend(node.get("floating_nodes", []))
     except Exception:
         pass
-    return ""
+    return "", None
 
 
-def is_direct_type_app(app):
-    return any(t in app for t in ("cc-switch", "cc_switch", "ccswitch", "cc switch", "webkit", "tauri"))
+def focused_app_id():
+    return focused_window_info()[0]
+
+
+def process_uses_webkit(pid):
+    if not pid:
+        return False
+    try:
+        with open(f"/proc/{int(pid)}/maps", "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if "libwebkit" in line:
+                    return True
+    except (OSError, ValueError):
+        pass
+    return False
+
+
+def is_direct_type_app(app, pid=None):
+    return (
+        any(t in app for t in ("cc-switch", "cc_switch", "ccswitch", "cc switch", "webkit", "tauri"))
+        or process_uses_webkit(pid)
+    )
 
 
 def type_text_direct(text, env):
@@ -93,8 +114,8 @@ def handle_text(msg):
     env = wl_env()
     # Set Wayland clipboard synchronously and verify wl-paste matches before Ctrl+V (ZERO 1-step lag!)
     subprocess.Popen(["wl-copy", "--", text], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    app = focused_app_id()
-    if is_direct_type_app(app):
+    app, pid = focused_window_info()
+    if is_direct_type_app(app, pid):
         type_text_direct(text, env)
         return
     deadline = time.time() + 0.5
@@ -217,8 +238,8 @@ def handle_cmd(msg):
         return
     if action == "paste":
         env = wl_env()
-        app = focused_app_id()
-        if is_direct_type_app(app):
+        app, pid = focused_window_info()
+        if is_direct_type_app(app, pid):
             try:
                 clip = subprocess.check_output(
                     ["wl-paste", "--no-newline"], env=env, text=True, stderr=subprocess.DEVNULL, timeout=0.6
