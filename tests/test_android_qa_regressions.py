@@ -259,6 +259,11 @@ fun main() {
         self.assertIn('keyRepeatInitialDelayMs = 350L', overlay)
         self.assertIn('keyRepeatIntervalMs = 55L', overlay)
         self.assertIn('onViewDetachedFromWindow', overlay)
+        # Dual-mode compact/expanded OSK (default expanded) + intuitive arrows + symbol layer + long-press close guard
+        self.assertIn('prefs.getBoolean("osk_compact_mode", false)', overlay)
+        self.assertIn('MODE:sym', overlay)
+        self.assertIn('omarchy_overlay_close_hold_hint', overlay)
+        self.assertLess(overlay.index('OskKey("↑", "Up"'), overlay.index('OskKey("↓", "Down"'))
         restore = overlay.split('private fun restoreSentinel()', 1)[1].split('override fun onCreateInputConnection', 1)[0]
         self.assertIn('cur[0] == ImeBridgeHelper.SENTINEL[0] && !composing()', restore)
 

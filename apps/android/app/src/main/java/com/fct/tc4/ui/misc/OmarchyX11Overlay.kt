@@ -544,6 +544,9 @@ object OmarchyX11Overlay {
         private var oskVisible = false
         private var imeActive = false
         private var oskAlpha = 0.78f
+        private var oskCompactMode = prefs.getBoolean("osk_compact_mode", false)
+        private var oskSymbolLayer = false
+        private var activeWorkspace = 1
 
         private var lastFullW = 0
         private var lastFullH = 0
@@ -557,7 +560,8 @@ object OmarchyX11Overlay {
         private var fullscreenBtn: Button? = null
         private var lastTabTapAt = 0L
         private var pendingSingleTap: Runnable? = null
-        private val modBtns = HashMap<String, Button>()
+        private val modBtns = HashMap<String, TextView>()
+        private val oskDynamicKeyViews = mutableListOf<Triple<TextView, String, String>>()
 
         private val queuePollTask = object : Runnable {
             override fun run() {
@@ -2367,15 +2371,21 @@ object OmarchyX11Overlay {
             oskView = null
             fullscreenBtn = null
             oskVisible = false
+            oskSymbolLayer = false
             modBtns.clear()
+            oskDynamicKeyViews.clear()
             updateImeAccessory()
         }
 
         private fun refreshFullscreenButton() {
             val b = fullscreenBtn ?: return
             b.text = if (fullscreenActive) s(R.string.omarchy_overlay_exit_fullscreen) else s(R.string.omarchy_overlay_enter_fullscreen)
-            b.setTextColor(Color.parseColor(if (fullscreenActive) "#1a1b26" else "#c0caf5"))
-            b.background = makeRounded(if (fullscreenActive) "#7aa2f7" else "#CC24283b", "#7aa2f7", 6, 1)
+            b.setTextColor(Color.parseColor(if (fullscreenActive) "#1a1b26" else "#a9b1d6"))
+            b.background = makeRounded(
+                if (fullscreenActive) "#7aa2f7" else "#14FFFFFF",
+                if (fullscreenActive) "#7aa2f7" else "#00000000",
+                6, 1
+            )
         }
 
         private fun bgWithAlpha(alpha: Float): Int {
@@ -2386,15 +2396,15 @@ object OmarchyX11Overlay {
         private fun styleOpacitySlider(sb: SeekBar) {
             val bgTrack = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(3).toFloat()
-                setColor(Color.parseColor("#55414868"))
-                setSize(-1, dp(4))
+                cornerRadius = dp(2).toFloat()
+                setColor(Color.parseColor("#447aa2f7"))
+                setSize(-1, dp(3))
             }
             val fgTrack = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = dp(3).toFloat()
+                cornerRadius = dp(2).toFloat()
                 setColor(Color.parseColor("#7aa2f7"))
-                setSize(-1, dp(4))
+                setSize(-1, dp(3))
             }
             val layers = LayerDrawable(arrayOf(bgTrack, ClipDrawable(fgTrack, Gravity.START, ClipDrawable.HORIZONTAL))).apply {
                 setId(0, android.R.id.background)
@@ -2402,24 +2412,37 @@ object OmarchyX11Overlay {
             }
             val thumb = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setSize(dp(14), dp(14))
+                setSize(dp(11), dp(11))
                 setColor(Color.parseColor("#c0caf5"))
-                setStroke(dp(2), Color.parseColor("#7aa2f7"))
+                setStroke(dp(1), Color.parseColor("#7aa2f7"))
             }
             sb.progressDrawable = layers
             sb.thumb = thumb
             sb.splitTrack = false
-            sb.setPadding(dp(8), dp(4), dp(8), dp(4))
+            sb.setPadding(dp(6), dp(4), dp(6), dp(4))
         }
+
+        private data class OskKey(
+            val label: String,
+            val code: String,
+            val weight: Float = 1f,
+            val shiftLabel: String? = null,
+            val subLabel: String? = null,
+            val longPressCode: String? = null,
+            val forceShift: Boolean = false,
+            val tone: String = "normal" // normal | mod | ctrl | sym | accent
+        )
 
         private fun showOsk() {
             if (oskVisible) return
             val host = overlayHost ?: return
             oskVisible = true
+            oskSymbolLayer = false
             hideIme()
             // Keep the compact edge tab collapsed at edge instead of hiding it!
             collapseDock()
             modBtns.clear()
+            oskDynamicKeyViews.clear()
             val screenW = activity.resources.displayMetrics.widthPixels
             val screenH = activity.resources.displayMetrics.heightPixels
             val width = if (screenW > screenH) {
@@ -2431,14 +2454,14 @@ object OmarchyX11Overlay {
 
             val rootBg = GradientDrawable().apply {
                 setColor(bgWithAlpha(oskAlpha))
-                setStroke(dp(2), Color.parseColor("#7aa2f7"))
+                setStroke(dp(1), Color.parseColor("#887aa2f7"))
                 cornerRadius = dp(14).toFloat()
             }
 
             val root = LinearLayout(activity).apply {
                 orientation = LinearLayout.VERTICAL
                 background = rootBg
-                setPadding(dp(7), dp(6), dp(7), dp(3))
+                setPadding(dp(7), dp(6), dp(7), dp(2))
                 elevation = dp(12).toFloat()
                 alpha = max(0.38f, oskAlpha + 0.14f)
             }
@@ -2462,198 +2485,470 @@ object OmarchyX11Overlay {
                 }
             }
 
-            // Compact text actions sit beside Fullscreen; portrait uses weighted widths.
-            val bar = LinearLayout(activity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 0, 0, dp(5))
+            val contentHost = LinearLayout(activity).apply {
+                orientation = LinearLayout.VERTICAL
             }
-
-            for (ws in 1..5) {
-                val w = ws.toString()
-                val wb = makeBarBtn(w, false) {
-                    fullscreenActive = false
-                    refreshFullscreenButton()
-                    sendCmd("ws_$w")
-                }
-                wb.layoutParams = LinearLayout.LayoutParams(
-                    if (compactBar) 0 else dp(28), dp(28), if (compactBar) 0.6f else 0f
-                ).apply {
-                    setMargins(dp(1), 0, dp(2), 0)
-                }
-                wb.contentDescription = s(R.string.omarchy_overlay_workspace, ws)
-                wb.setPadding(0, 0, 0, 0)
-                bar.addView(wb)
-            }
-
-            val bFull = makeBarBtn(if (fullscreenActive) s(R.string.omarchy_overlay_exit_fullscreen) else s(R.string.omarchy_overlay_enter_fullscreen), fullscreenActive) {
-                fullscreenActive = !fullscreenActive
-                refreshFullscreenButton()
-                sendCmd("fullscreen")
-            }.apply {
-                layoutParams = LinearLayout.LayoutParams(
-                    if (compactBar) 0 else dp(58), dp(28), if (compactBar) 1.4f else 0f
-                ).apply {
-                    setMargins(dp(4), 0, dp(2), 0)
-                }
-                setPadding(dp(4), 0, dp(4), 0)
-                if (compactBar) textSize = 10f
-                setSingleLine(true)
-            }
-            fullscreenBtn = bFull
-            bar.addView(bFull)
-
-            val copy = makeBarBtn(s(R.string.omarchy_overlay_copy), false) { copyFromLinux() }
-            val paste = makeBarBtn(s(R.string.omarchy_overlay_paste), false) { pasteFromAndroid() }
-            configurePasteButton(paste)
-            listOf(copy, paste).forEach { button ->
-                button.setPadding(dp(2), 0, dp(2), 0)
-                button.setSingleLine(true)
-                if (compactBar) button.textSize = 10f
-                bar.addView(button, LinearLayout.LayoutParams(
-                    if (compactBar) 0 else dp(46), dp(28), if (compactBar) 1.2f else 0f
-                ).apply { setMargins(dp(2), 0, dp(2), 0) })
-            }
-
-            val dragSpacer = View(activity).apply { setOnTouchListener(dragTouchListener) }
-            if (!compactBar) bar.addView(dragSpacer, LinearLayout.LayoutParams(0, dp(28), 1f))
-
-            val alphaBar = SeekBar(activity).apply {
-                contentDescription = s(R.string.omarchy_overlay_keyboard_opacity)
-                max = 75
-                progress = ((oskAlpha - 0.20f) * 100f).roundToInt()
-                layoutParams = LinearLayout.LayoutParams(
-                    if (compactBar) 0 else dp(76), dp(24), if (compactBar) 1.8f else 0f
-                ).apply {
-                    setMargins(dp(4), 0, dp(6), 0)
-                }
-                styleOpacitySlider(this)
-                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                        oskAlpha = 0.20f + (progress / 100f)
-                        rootBg.setColor(bgWithAlpha(oskAlpha))
-                        root.alpha = max(0.38f, oskAlpha + 0.14f)
-                    }
-                    override fun onStartTrackingTouch(sb: SeekBar?) {}
-                    override fun onStopTrackingTouch(sb: SeekBar?) {}
-                })
-            }
-            bar.addView(alphaBar)
-
-            val bClose = makeBarBtn(s(R.string.omarchy_overlay_dismiss_symbol), false) { hideOsk() }.apply {
-                contentDescription = s(R.string.omarchy_overlay_keyboard_hide)
-                layoutParams = LinearLayout.LayoutParams(
-                    if (compactBar) 0 else dp(30), dp(28), if (compactBar) 0.8f else 0f
-                ).apply {
-                    setMargins(dp(2), 0, 0, 0)
-                }
-                setPadding(0, 0, 0, 0)
-            }
-            bar.addView(bClose)
-            root.addView(bar)
-
-            val rows = arrayOf(
-                arrayOf(Triple(s(R.string.omarchy_key_esc),"Escape",1.1f), Triple(s(R.string.omarchy_key_tab),"Tab",1.1f), Triple(s(R.string.omarchy_key_super),"MOD:super",1.4f), Triple(s(R.string.omarchy_key_ctrl),"MOD:ctrl",1.2f), Triple(s(R.string.omarchy_key_alt),"MOD:alt",1.1f), Triple("←","Left",1.0f), Triple("↓","Down",1.0f), Triple("↑","Up",1.0f), Triple("→","Right",1.0f), Triple("⌫","BackSpace",1.4f)),
-                arrayOf(Triple("1","1",1f), Triple("2","2",1f), Triple("3","3",1f), Triple("4","4",1f), Triple("5","5",1f), Triple("6","6",1f), Triple("7","7",1f), Triple("8","8",1f), Triple("9","9",1f), Triple("0","0",1f), Triple("-","minus",1f), Triple("=","equal",1f)),
-                arrayOf(Triple("q","q",1f), Triple("w","w",1f), Triple("e","e",1f), Triple("r","r",1f), Triple("t","t",1f), Triple("y","y",1f), Triple("u","u",1f), Triple("i","i",1f), Triple("o","o",1f), Triple("p","p",1f), Triple("[","bracketleft",1f), Triple("]","bracketright",1f)),
-                arrayOf(Triple("a","a",1f), Triple("s","s",1f), Triple("d","d",1f), Triple("f","f",1f), Triple("g","g",1f), Triple("h","h",1f), Triple("j","j",1f), Triple("k","k",1f), Triple("l","l",1f), Triple(";","semicolon",1f), Triple("'","apostrophe",1f), Triple("⏎","Return",1.5f)),
-                arrayOf(Triple("⇧","MOD:shift",1.4f), Triple("z","z",1f), Triple("x","x",1f), Triple("c","c",1f), Triple("v","v",1f), Triple("b","b",1f), Triple("n","n",1f), Triple("m","m",1f), Triple(",","comma",1f), Triple(".","period",1f), Triple("/","slash",1f), Triple(s(R.string.omarchy_overlay_ime_key),"CMD:ime",1.2f)),
-                arrayOf(Triple(s(R.string.omarchy_overlay_apps_key),"CMD:apps",1.3f), Triple(s(R.string.omarchy_overlay_menu_key),"CMD:menu",1.3f), Triple(s(R.string.omarchy_key_space),"space",3.4f), Triple(s(R.string.omarchy_overlay_terminal_key),"CMD:terminal",1.3f), Triple(s(R.string.omarchy_overlay_close_key),"CMD:kill",1.3f))
-            )
+            root.addView(contentHost, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
+            ))
 
             val repeatableKeys = setOf("BackSpace", "Left", "Down", "Up", "Right")
             val keyRepeatInitialDelayMs = 350L
             val keyRepeatIntervalMs = 55L
-            val keyH = dp((36f * 0.70f).roundToInt())
-            for (r in rows) {
+            val keyH = dp((36f * 0.72f).roundToInt())
+
+            lateinit var renderOskContent: () -> Unit
+
+            fun triggerKey(key: OskKey) {
+                when {
+                    key.code.startsWith("MOD:") -> {
+                        when (key.code.substring(4)) {
+                            "super" -> modSuper = !modSuper
+                            "ctrl" -> modCtrl = !modCtrl
+                            "alt" -> modAlt = !modAlt
+                            "shift" -> modShift = !modShift
+                        }
+                        refreshModButtons()
+                    }
+                    key.code == "MODE:sym" -> {
+                        oskSymbolLayer = !oskSymbolLayer
+                        modShift = false
+                        renderOskContent()
+                    }
+                    key.code.startsWith("CMD:") -> sendCmd(key.code.substring(4))
+                    key.forceShift -> {
+                        sendKeyWithMods(key.code, modSuper, modCtrl, modAlt, shift = true)
+                        if (modSuper || modCtrl || modAlt || modShift) {
+                            modSuper = false; modCtrl = false; modAlt = false; modShift = false
+                            refreshModButtons()
+                        }
+                    }
+                    else -> sendKey(key.code)
+                }
+            }
+
+            fun buildKeyRow(keys: List<OskKey>): LinearLayout {
                 val rowView = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
-                for ((label, code, weight) in r) {
-                    val isSpecial = code.startsWith("MOD:") || code.startsWith("CMD:")
-                    val isRepeatable = code in repeatableKeys
-                    val b = Button(activity).apply {
-                        text = label
-                        isAllCaps = false
-                        textSize = 11f
-                        setPadding(0, 0, 0, 0)
-                        minHeight = 0; minimumHeight = keyH
-                        minWidth = 0; minimumWidth = 0
-                        setTextColor(Color.parseColor(if (isSpecial) "#7aa2f7" else "#c0caf5"))
-                        background = makeRounded(
-                            if (isSpecial) "#CC283457" else "#CC24283b",
-                            if (isSpecial) "#7aa2f7" else "#414868",
-                            6, 1
-                        )
-                        if (isRepeatable) {
-                            var repeating = false
-                            val repeatTask = object : Runnable {
-                                override fun run() {
-                                    if (!repeating || !isAttachedToWindow) return
-                                    sendKey(code)
-                                    mainHandler.postDelayed(this, keyRepeatIntervalMs)
-                                }
+                for (key in keys) {
+                    val isRepeatable = key.code in repeatableKeys
+                    val isMod = key.code.startsWith("MOD:")
+                    val isSymToggleActive = key.code == "MODE:sym" && oskSymbolLayer
+                    val (bgHex, strokeHex, textHex) = when {
+                        isSymToggleActive -> Triple("#7aa2f7", "#7aa2f7", "#1a1b26")
+                        key.tone == "mod" || isMod -> Triple("#CC283457", "#887aa2f7", "#7aa2f7")
+                        key.tone == "accent" -> Triple("#387aa2f7", "#7aa2f7", "#7dcfff")
+                        key.tone == "sym" -> Triple("#24bb9af7", "#66bb9af7", "#bb9af7")
+                        key.tone == "ctrl" -> Triple("#CC1e2132", "#343a56", "#a9b1d6")
+                        else -> Triple("#CC24283b", "#3b4261", "#c0caf5")
+                    }
+
+                    val cell = FrameLayout(activity).apply {
+                        background = makeRounded(bgHex, strokeHex, 6, 1)
+                        isClickable = true
+                        isFocusable = false
+                    }
+                    val mainLabel = TextView(activity).apply {
+                        text = if (modShift && key.shiftLabel != null) key.shiftLabel else key.label
+                        textSize = if (oskCompactMode && keys.size >= 14) 10f else 11f
+                        setTextColor(Color.parseColor(textHex))
+                        if (key.tone == "accent" || isSymToggleActive) setTypeface(null, Typeface.BOLD)
+                        gravity = Gravity.CENTER
+                        includeFontPadding = false
+                        setSingleLine(true)
+                    }
+                    cell.addView(mainLabel, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+                    ))
+
+                    if (key.subLabel != null) {
+                        val sub = TextView(activity).apply {
+                            text = key.subLabel
+                            textSize = 7.5f
+                            setTextColor(Color.parseColor("#6b7499"))
+                            includeFontPadding = false
+                            setPadding(0, dp(1), dp(3), 0)
+                        }
+                        cell.addView(sub, FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.WRAP_CONTENT,
+                            FrameLayout.LayoutParams.WRAP_CONTENT,
+                            Gravity.TOP or Gravity.END
+                        ))
+                    }
+
+                    if (key.shiftLabel != null) {
+                        oskDynamicKeyViews.add(Triple(mainLabel, key.label, key.shiftLabel))
+                    }
+                    if (isMod) {
+                        modBtns[key.code.substring(4)] = mainLabel
+                    }
+
+                    if (isRepeatable) {
+                        var repeating = false
+                        val repeatTask = object : Runnable {
+                            override fun run() {
+                                if (!repeating || !cell.isAttachedToWindow) return
+                                sendKey(key.code)
+                                mainHandler.postDelayed(this, keyRepeatIntervalMs)
                             }
-                            fun stopRepeat() {
-                                repeating = false
-                                mainHandler.removeCallbacks(repeatTask)
-                                isPressed = false
-                            }
-                            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-                                override fun onViewAttachedToWindow(v: View) {}
-                                override fun onViewDetachedFromWindow(v: View) { stopRepeat() }
-                            })
-                            setOnTouchListener { v, event ->
-                                when (event.actionMasked) {
-                                    MotionEvent.ACTION_DOWN -> {
-                                        stopRepeat()
-                                        repeating = true
-                                        v.isPressed = true
-                                        v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                        sendKey(code)
-                                        mainHandler.postDelayed(repeatTask, keyRepeatInitialDelayMs)
-                                        true
-                                    }
-                                    MotionEvent.ACTION_MOVE -> {
-                                        val inside = event.x >= 0f && event.x <= v.width &&
-                                            event.y >= 0f && event.y <= v.height
-                                        if (!inside && repeating) {
-                                            stopRepeat()
-                                        }
-                                        true
-                                    }
-                                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                                        stopRepeat()
-                                        true
-                                    }
-                                    else -> false
+                        }
+                        fun stopRepeat() {
+                            repeating = false
+                            mainHandler.removeCallbacks(repeatTask)
+                            cell.isPressed = false
+                        }
+                        cell.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                            override fun onViewAttachedToWindow(v: View) {}
+                            override fun onViewDetachedFromWindow(v: View) { stopRepeat() }
+                        })
+                        cell.setOnTouchListener { v, event ->
+                            when (event.actionMasked) {
+                                MotionEvent.ACTION_DOWN -> {
+                                    stopRepeat()
+                                    repeating = true
+                                    v.isPressed = true
+                                    v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                    sendKey(key.code)
+                                    mainHandler.postDelayed(repeatTask, keyRepeatInitialDelayMs)
+                                    true
                                 }
-                            }
-                        } else {
-                            setOnClickListener {
-                                it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                                when {
-                                    code.startsWith("MOD:") -> {
-                                        when (code.substring(4)) {
-                                            "super" -> modSuper = !modSuper
-                                            "ctrl" -> modCtrl = !modCtrl
-                                            "alt" -> modAlt = !modAlt
-                                            "shift" -> modShift = !modShift
-                                        }
-                                        refreshModButtons()
-                                    }
-                                    code.startsWith("CMD:") -> sendCmd(code.substring(4))
-                                    else -> sendKey(code)
+                                MotionEvent.ACTION_MOVE -> {
+                                    val inside = event.x >= 0f && event.x <= v.width &&
+                                        event.y >= 0f && event.y <= v.height
+                                    if (!inside && repeating) stopRepeat()
+                                    true
                                 }
+                                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                    stopRepeat()
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                    } else {
+                        cell.setOnClickListener {
+                            it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                            triggerKey(key)
+                        }
+                        if (key.longPressCode != null) {
+                            cell.setOnLongClickListener {
+                                it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                                sendKey(key.longPressCode)
+                                true
                             }
                         }
                     }
-                    if (code.startsWith("MOD:")) modBtns[code.substring(4)] = b
-                    val klp = LinearLayout.LayoutParams(0, keyH, weight).apply {
+
+                    val klp = LinearLayout.LayoutParams(0, keyH, key.weight).apply {
                         setMargins(dp(2), dp(2), dp(2), dp(2))
                     }
-                    rowView.addView(b, klp)
+                    rowView.addView(cell, klp)
                 }
-                root.addView(rowView)
+                return rowView
             }
+
+            fun makeCloseWindowBarBtn(compact: Boolean): Button =
+                makeBarBtn(s(R.string.omarchy_overlay_close_key), false) {
+                    android.widget.Toast.makeText(
+                        activity,
+                        s(R.string.omarchy_overlay_close_hold_hint),
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }.apply {
+                    setTextColor(Color.parseColor("#f7768e"))
+                    background = makeRounded("#1EF7768E", "#66F7768E", 6, 1)
+                    setSingleLine(true)
+                    setPadding(dp(4), 0, dp(4), 0)
+                    if (compact) textSize = 10f
+                    setOnLongClickListener {
+                        it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        sendCmd("kill")
+                        true
+                    }
+                }
+
+            renderOskContent = {
+                contentHost.removeAllViews()
+                modBtns.clear()
+                oskDynamicKeyViews.clear()
+                fullscreenBtn = null
+
+                // Lightweight top toolbar (subtle pills, only active workspace highlighted)
+                val bar = LinearLayout(activity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, 0, 0, dp(4))
+                }
+
+                for (ws in 1..5) {
+                    val w = ws.toString()
+                    val wb = makeBarBtn(w, ws == activeWorkspace) {
+                        activeWorkspace = ws
+                        fullscreenActive = false
+                        sendCmd("ws_$w")
+                        renderOskContent()
+                    }
+                    wb.layoutParams = LinearLayout.LayoutParams(
+                        if (compactBar) 0 else dp(24), dp(25), if (compactBar) 0.55f else 0f
+                    ).apply {
+                        setMargins(dp(1), 0, dp(2), 0)
+                    }
+                    wb.contentDescription = s(R.string.omarchy_overlay_workspace, ws)
+                    wb.setPadding(0, 0, 0, 0)
+                    bar.addView(wb)
+                }
+
+                if (oskCompactMode) {
+                    val bApps = makeBarBtn(s(R.string.omarchy_overlay_apps_key), false) { sendCmd("apps") }
+                    val bTerm = makeBarBtn(s(R.string.omarchy_overlay_terminal_key), false) { sendCmd("terminal") }
+                    val copy = makeBarBtn(s(R.string.omarchy_overlay_copy), false) { copyFromLinux() }
+                    val paste = makeBarBtn(s(R.string.omarchy_overlay_paste), false) { pasteFromAndroid() }
+                    configurePasteButton(paste)
+                    val bIme = makeBarBtn(s(R.string.omarchy_overlay_ime_key), false) { sendCmd("ime") }.apply {
+                        setTextColor(Color.parseColor("#7aa2f7"))
+                        background = makeRounded("#247aa2f7", "#557aa2f7", 6, 1)
+                    }
+                    listOf(bApps, bTerm, copy, paste, bIme).forEach { btn ->
+                        btn.setPadding(dp(3), 0, dp(3), 0)
+                        btn.setSingleLine(true)
+                        if (compactBar) btn.textSize = 10f
+                        bar.addView(btn, LinearLayout.LayoutParams(
+                            if (compactBar) 0 else dp(40), dp(25), if (compactBar) 0.95f else 0f
+                        ).apply { setMargins(dp(2), 0, dp(1), 0) })
+                    }
+                } else {
+                    val bFull = makeBarBtn(
+                        if (fullscreenActive) s(R.string.omarchy_overlay_exit_fullscreen)
+                        else s(R.string.omarchy_overlay_enter_fullscreen),
+                        fullscreenActive
+                    ) {
+                        fullscreenActive = !fullscreenActive
+                        refreshFullscreenButton()
+                        sendCmd("fullscreen")
+                    }.apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            if (compactBar) 0 else dp(52), dp(25), if (compactBar) 1.25f else 0f
+                        ).apply { setMargins(dp(3), 0, dp(2), 0) }
+                        setPadding(dp(3), 0, dp(3), 0)
+                        if (compactBar) textSize = 10f
+                        setSingleLine(true)
+                    }
+                    fullscreenBtn = bFull
+                    bar.addView(bFull)
+
+                    val copy = makeBarBtn(s(R.string.omarchy_overlay_copy), false) { copyFromLinux() }
+                    val paste = makeBarBtn(s(R.string.omarchy_overlay_paste), false) { pasteFromAndroid() }
+                    configurePasteButton(paste)
+                    listOf(copy, paste).forEach { btn ->
+                        btn.setPadding(dp(2), 0, dp(2), 0)
+                        btn.setSingleLine(true)
+                        if (compactBar) btn.textSize = 10f
+                        bar.addView(btn, LinearLayout.LayoutParams(
+                            if (compactBar) 0 else dp(42), dp(25), if (compactBar) 1.05f else 0f
+                        ).apply { setMargins(dp(2), 0, dp(1), 0) })
+                    }
+                }
+
+                val dragSpacer = View(activity).apply { setOnTouchListener(dragTouchListener) }
+                if (!compactBar) bar.addView(dragSpacer, LinearLayout.LayoutParams(0, dp(25), 1f))
+
+                if (!oskCompactMode) {
+                    val alphaBar = SeekBar(activity).apply {
+                        contentDescription = s(R.string.omarchy_overlay_keyboard_opacity)
+                        max = 75
+                        progress = ((oskAlpha - 0.20f) * 100f).roundToInt()
+                        layoutParams = LinearLayout.LayoutParams(
+                            if (compactBar) 0 else dp(60), dp(22), if (compactBar) 1.3f else 0f
+                        ).apply { setMargins(dp(2), 0, dp(4), 0) }
+                        styleOpacitySlider(this)
+                        setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                                oskAlpha = 0.20f + (progress / 100f)
+                                rootBg.setColor(bgWithAlpha(oskAlpha))
+                                root.alpha = max(0.38f, oskAlpha + 0.14f)
+                            }
+                            override fun onStartTrackingTouch(sb: SeekBar?) {}
+                            override fun onStopTrackingTouch(sb: SeekBar?) {}
+                        })
+                    }
+                    bar.addView(alphaBar)
+                }
+
+                val bMode = makeBarBtn(
+                    if (oskCompactMode) s(R.string.omarchy_overlay_osk_expand) else s(R.string.omarchy_overlay_osk_collapse),
+                    false
+                ) {
+                    oskCompactMode = !oskCompactMode
+                    prefs.edit().putBoolean("osk_compact_mode", oskCompactMode).apply()
+                    renderOskContent()
+                }.apply {
+                    setTextColor(Color.parseColor("#9ece6a"))
+                    background = makeRounded("#1F9ECE6A", "#669ECE6A", 6, 1)
+                    setSingleLine(true)
+                    setPadding(dp(4), 0, dp(4), 0)
+                    if (compactBar) textSize = 10f
+                    layoutParams = LinearLayout.LayoutParams(
+                        if (compactBar) 0 else dp(44), dp(25), if (compactBar) 1.0f else 0f
+                    ).apply { setMargins(dp(2), 0, dp(2), 0) }
+                }
+                bar.addView(bMode)
+
+                val bKill = makeCloseWindowBarBtn(compactBar).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        if (compactBar) 0 else dp(42), dp(25), if (compactBar) 0.95f else 0f
+                    ).apply { setMargins(dp(1), 0, dp(2), 0) }
+                }
+                bar.addView(bKill)
+
+                val bClose = makeBarBtn(s(R.string.omarchy_overlay_dismiss_symbol), false) { hideOsk() }.apply {
+                    contentDescription = s(R.string.omarchy_overlay_keyboard_hide)
+                    layoutParams = LinearLayout.LayoutParams(
+                        if (compactBar) 0 else dp(26), dp(25), if (compactBar) 0.65f else 0f
+                    ).apply { setMargins(dp(1), 0, 0, 0) }
+                    setPadding(0, 0, 0, 0)
+                }
+                bar.addView(bClose)
+                contentHost.addView(bar)
+
+                // Subtle divider between lightweight toolbar and keycaps
+                val divider = View(activity).apply {
+                    setBackgroundColor(Color.parseColor("#33414868"))
+                }
+                contentHost.addView(divider, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+                ).apply { bottomMargin = dp(3) })
+
+                if (oskCompactMode) {
+                    // Ultra-slim 2-row Geek Command Strip (~18% screen height)
+                    contentHost.addView(buildKeyRow(listOf(
+                        OskKey(s(R.string.omarchy_key_esc), "Escape", 1.0f, tone = "ctrl"),
+                        OskKey(s(R.string.omarchy_key_tab), "Tab", 1.0f, tone = "ctrl"),
+                        OskKey(s(R.string.omarchy_key_ctrl), "MOD:ctrl", 1.1f, tone = "mod"),
+                        OskKey(s(R.string.omarchy_key_alt), "MOD:alt", 0.95f, tone = "mod"),
+                        OskKey(s(R.string.omarchy_key_super), "MOD:super", 1.15f, tone = "mod"),
+                        OskKey("|", "backslash", 0.85f, forceShift = true, tone = "sym"),
+                        OskKey("~", "grave", 0.85f, forceShift = true, tone = "sym"),
+                        OskKey("-", "minus", 0.85f, tone = "sym"),
+                        OskKey("/", "slash", 0.85f, tone = "sym"),
+                        OskKey("←", "Left", 0.9f, tone = "ctrl"),
+                        OskKey("↑", "Up", 0.9f, tone = "ctrl"),
+                        OskKey("↓", "Down", 0.9f, tone = "ctrl"),
+                        OskKey("→", "Right", 0.9f, tone = "ctrl"),
+                        OskKey("⌫", "BackSpace", 1.05f, tone = "ctrl"),
+                        OskKey("⏎", "Return", 1.1f, tone = "accent")
+                    )))
+                } else {
+                    // Row 1: Control + Terminal ~ | + Intuitive Arrows (← ↑ ↓ →)
+                    contentHost.addView(buildKeyRow(listOf(
+                        OskKey(s(R.string.omarchy_key_esc), "Escape", 1.05f, tone = "ctrl"),
+                        OskKey(s(R.string.omarchy_key_tab), "Tab", 1.05f, tone = "ctrl"),
+                        OskKey(s(R.string.omarchy_key_super), "MOD:super", 1.25f, tone = "mod"),
+                        OskKey(s(R.string.omarchy_key_ctrl), "MOD:ctrl", 1.1f, tone = "mod"),
+                        OskKey(s(R.string.omarchy_key_alt), "MOD:alt", 1.0f, tone = "mod"),
+                        OskKey("~", "grave", 0.9f, forceShift = true, tone = "sym"),
+                        OskKey("|", "backslash", 0.9f, forceShift = true, tone = "sym"),
+                        OskKey("←", "Left", 0.95f, tone = "ctrl"),
+                        OskKey("↑", "Up", 0.95f, tone = "ctrl"),
+                        OskKey("↓", "Down", 0.95f, tone = "ctrl"),
+                        OskKey("→", "Right", 0.95f, tone = "ctrl")
+                    )))
+
+                    if (!oskSymbolLayer) {
+                        // Row 2: QWERTY with superscript 1-0 (long-press outputs digit directly)
+                        contentHost.addView(buildKeyRow(listOf(
+                            OskKey("q", "q", 1f, "Q", "1", "1"),
+                            OskKey("w", "w", 1f, "W", "2", "2"),
+                            OskKey("e", "e", 1f, "E", "3", "3"),
+                            OskKey("r", "r", 1f, "R", "4", "4"),
+                            OskKey("t", "t", 1f, "T", "5", "5"),
+                            OskKey("y", "y", 1f, "Y", "6", "6"),
+                            OskKey("u", "u", 1f, "U", "7", "7"),
+                            OskKey("i", "i", 1f, "I", "8", "8"),
+                            OskKey("o", "o", 1f, "O", "9", "9"),
+                            OskKey("p", "p", 1f, "P", "0", "0")
+                        )))
+                        // Row 3: ASDFGHJKL + Accent Enter
+                        contentHost.addView(buildKeyRow(listOf(
+                            OskKey("a", "a", 1f, "A"),
+                            OskKey("s", "s", 1f, "S"),
+                            OskKey("d", "d", 1f, "D"),
+                            OskKey("f", "f", 1f, "F"),
+                            OskKey("g", "g", 1f, "G"),
+                            OskKey("h", "h", 1f, "H"),
+                            OskKey("j", "j", 1f, "J"),
+                            OskKey("k", "k", 1f, "K"),
+                            OskKey("l", "l", 1f, "L"),
+                            OskKey("⏎", "Return", 1.5f, tone = "accent")
+                        )))
+                        // Row 4: Shift + ZXCVBNM , . + Mobile-position BackSpace
+                        contentHost.addView(buildKeyRow(listOf(
+                            OskKey("⇧", "MOD:shift", 1.35f, tone = "mod"),
+                            OskKey("z", "z", 1f, "Z"),
+                            OskKey("x", "x", 1f, "X"),
+                            OskKey("c", "c", 1f, "C"),
+                            OskKey("v", "v", 1f, "V"),
+                            OskKey("b", "b", 1f, "B"),
+                            OskKey("n", "n", 1f, "N"),
+                            OskKey("m", "m", 1f, "M"),
+                            OskKey(",", "comma", 1f, "<", "<"),
+                            OskKey(".", "period", 1f, ">", ">"),
+                            OskKey("⌫", "BackSpace", 1.45f, tone = "ctrl")
+                        )))
+                    } else {
+                        // Symbol & Number Layer (123/#)
+                        contentHost.addView(buildKeyRow(listOf(
+                            OskKey("1", "1", 1f, "!", "!"),
+                            OskKey("2", "2", 1f, "@", "@"),
+                            OskKey("3", "3", 1f, "#", "#"),
+                            OskKey("4", "4", 1f, "$", "$"),
+                            OskKey("5", "5", 1f, "%", "%"),
+                            OskKey("6", "6", 1f, "^", "^"),
+                            OskKey("7", "7", 1f, "&", "&"),
+                            OskKey("8", "8", 1f, "*", "*"),
+                            OskKey("9", "9", 1f, "(", "("),
+                            OskKey("0", "0", 1f, ")", ")")
+                        )))
+                        contentHost.addView(buildKeyRow(listOf(
+                            OskKey("`", "grave", 1f, "~", "~"),
+                            OskKey("-", "minus", 1f, "_", "_"),
+                            OskKey("=", "equal", 1f, "+", "+"),
+                            OskKey("[", "bracketleft", 1f, "{", "{"),
+                            OskKey("]", "bracketright", 1f, "}", "}"),
+                            OskKey("\\", "backslash", 1f, "|", "|"),
+                            OskKey(";", "semicolon", 1f, ":", ":"),
+                            OskKey("'", "apostrophe", 1f, "\"", "\""),
+                            OskKey("/", "slash", 1f, "?", "?"),
+                            OskKey("⏎", "Return", 1.5f, tone = "accent")
+                        )))
+                        contentHost.addView(buildKeyRow(listOf(
+                            OskKey("⇧", "MOD:shift", 1.35f, tone = "mod"),
+                            OskKey("!", "1", 1f, forceShift = true),
+                            OskKey("@", "2", 1f, forceShift = true),
+                            OskKey("#", "3", 1f, forceShift = true),
+                            OskKey("$", "4", 1f, forceShift = true),
+                            OskKey("%", "5", 1f, forceShift = true),
+                            OskKey("^", "6", 1f, forceShift = true),
+                            OskKey("&", "7", 1f, forceShift = true),
+                            OskKey("_", "minus", 1f, forceShift = true),
+                            OskKey("+", "equal", 1f, forceShift = true),
+                            OskKey("⌫", "BackSpace", 1.45f, tone = "ctrl")
+                        )))
+                    }
+
+                    // Row 5: Bottom Action Row (123/# | Apps | Menu | Space | Terminal | IME)
+                    contentHost.addView(buildKeyRow(listOf(
+                        OskKey(if (oskSymbolLayer) "ABC" else s(R.string.omarchy_overlay_sym_key), "MODE:sym", 1.35f, tone = "mod"),
+                        OskKey(s(R.string.omarchy_overlay_apps_key), "CMD:apps", 1.15f, tone = "ctrl"),
+                        OskKey(s(R.string.omarchy_overlay_menu_key), "CMD:menu", 1.15f, tone = "ctrl"),
+                        OskKey(s(R.string.omarchy_key_space), "space", 3.6f),
+                        OskKey(s(R.string.omarchy_overlay_terminal_key), "CMD:terminal", 1.15f, tone = "ctrl"),
+                        OskKey(s(R.string.omarchy_overlay_ime_key), "CMD:ime", 1.35f, tone = "mod")
+                    )))
+                }
+
+                refreshModButtons()
+            }
+
+            renderOskContent()
 
             // Sleek iOS/Android-style bottom drag pill bar
             val grabArea = FrameLayout(activity).apply {
@@ -2661,20 +2956,20 @@ object OmarchyX11Overlay {
             }
             val pillBar = View(activity).apply {
                 background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#AAc0caf5"))
+                    setColor(Color.parseColor("#88c0caf5"))
                     cornerRadius = dp(3).toFloat()
                 }
             }
-            grabArea.addView(pillBar, FrameLayout.LayoutParams(dp(56), dp(4), Gravity.CENTER))
+            grabArea.addView(pillBar, FrameLayout.LayoutParams(dp(52), dp(3), Gravity.CENTER))
             root.addView(grabArea, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(20)
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(16)
             ))
 
             val olp = FrameLayout.LayoutParams(
                 width,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            ).apply { bottomMargin = dp(14) }
+            ).apply { bottomMargin = dp(12) }
 
             host.addView(root, olp)
             // Keep edge tab on top of keyboard
@@ -2689,10 +2984,15 @@ object OmarchyX11Overlay {
                 text = label
                 isAllCaps = false
                 textSize = 11f
-                setTextColor(Color.parseColor(if (active) "#1a1b26" else "#c0caf5"))
-                background = makeRounded(if (active) "#7aa2f7" else "#CC24283b", "#7aa2f7", 6, 1)
-                setPadding(dp(7), dp(2), dp(7), dp(2))
-                minHeight = 0; minimumHeight = dp(28)
+                setTextColor(Color.parseColor(if (active) "#1a1b26" else "#a9b1d6"))
+                if (active) setTypeface(null, Typeface.BOLD)
+                background = makeRounded(
+                    if (active) "#7aa2f7" else "#14FFFFFF",
+                    if (active) "#7aa2f7" else "#00000000",
+                    6, 1
+                )
+                setPadding(dp(6), dp(1), dp(6), dp(1))
+                minHeight = 0; minimumHeight = dp(25)
                 minWidth = 0; minimumWidth = 0
                 setOnClickListener {
                     it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -2705,10 +3005,21 @@ object OmarchyX11Overlay {
             setModStyle("ctrl", modCtrl)
             setModStyle("alt", modAlt)
             setModStyle("shift", modShift)
+            oskDynamicKeyViews.forEach { (tv, base, shifted) ->
+                tv.text = if (modShift) shifted else base
+            }
         }
 
         private fun setModStyle(name: String, on: Boolean) {
-            listOfNotNull(modBtns[name], accessoryModBtns[name]).forEach { button ->
+            modBtns[name]?.let { label ->
+                label.setTextColor(Color.parseColor(if (on) "#1a1b26" else "#7aa2f7"))
+                (label.parent as? View)?.background = makeRounded(
+                    if (on) "#7aa2f7" else "#CC283457",
+                    if (on) "#7aa2f7" else "#887aa2f7",
+                    6, 1
+                )
+            }
+            accessoryModBtns[name]?.let { button ->
                 button.setTextColor(Color.parseColor(if (on) "#1a1b26" else "#7aa2f7"))
                 button.background = makeRounded(if (on) "#7aa2f7" else "#CC283457", "#7aa2f7", 6, 1)
             }

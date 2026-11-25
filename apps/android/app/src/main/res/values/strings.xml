@@ -369,6 +369,10 @@
     <string name="omarchy_overlay_ime_key">IME</string>
     <string name="omarchy_overlay_copy">Copy</string>
     <string name="omarchy_overlay_paste">Paste</string>
+    <string name="omarchy_overlay_osk_collapse">Collapse</string>
+    <string name="omarchy_overlay_osk_expand">Expand</string>
+    <string name="omarchy_overlay_close_hold_hint">Long-press Close to kill the active window</string>
+    <string name="omarchy_overlay_sym_key">123/#</string>
     <string name="omarchy_clipboard_history_title">Clipboard history</string>
     <string name="omarchy_clipboard_history_clear">Clear</string>
     <string name="omarchy_clipboard_history_empty">No clipboard history</string>
