@@ -2561,11 +2561,15 @@ object OmarchyX11Overlay {
                 arrayOf(Triple(s(R.string.omarchy_overlay_apps_key),"CMD:apps",1.3f), Triple(s(R.string.omarchy_overlay_menu_key),"CMD:menu",1.3f), Triple(s(R.string.omarchy_key_space),"space",3.4f), Triple(s(R.string.omarchy_overlay_terminal_key),"CMD:terminal",1.3f), Triple(s(R.string.omarchy_overlay_close_key),"CMD:kill",1.3f))
             )
 
+            val repeatableKeys = setOf("BackSpace", "Left", "Down", "Up", "Right")
+            val keyRepeatInitialDelayMs = 350L
+            val keyRepeatIntervalMs = 55L
             val keyH = dp((36f * 0.70f).roundToInt())
             for (r in rows) {
                 val rowView = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
                 for ((label, code, weight) in r) {
                     val isSpecial = code.startsWith("MOD:") || code.startsWith("CMD:")
+                    val isRepeatable = code in repeatableKeys
                     val b = Button(activity).apply {
                         text = label
                         isAllCaps = false
@@ -2579,20 +2583,66 @@ object OmarchyX11Overlay {
                             if (isSpecial) "#7aa2f7" else "#414868",
                             6, 1
                         )
-                        setOnClickListener {
-                            it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                            when {
-                                code.startsWith("MOD:") -> {
-                                    when (code.substring(4)) {
-                                        "super" -> modSuper = !modSuper
-                                        "ctrl" -> modCtrl = !modCtrl
-                                        "alt" -> modAlt = !modAlt
-                                        "shift" -> modShift = !modShift
-                                    }
-                                    refreshModButtons()
+                        if (isRepeatable) {
+                            var repeating = false
+                            val repeatTask = object : Runnable {
+                                override fun run() {
+                                    if (!repeating || !isAttachedToWindow) return
+                                    sendKey(code)
+                                    mainHandler.postDelayed(this, keyRepeatIntervalMs)
                                 }
-                                code.startsWith("CMD:") -> sendCmd(code.substring(4))
-                                else -> sendKey(code)
+                            }
+                            fun stopRepeat() {
+                                repeating = false
+                                mainHandler.removeCallbacks(repeatTask)
+                                isPressed = false
+                            }
+                            addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                                override fun onViewAttachedToWindow(v: View) {}
+                                override fun onViewDetachedFromWindow(v: View) { stopRepeat() }
+                            })
+                            setOnTouchListener { v, event ->
+                                when (event.actionMasked) {
+                                    MotionEvent.ACTION_DOWN -> {
+                                        stopRepeat()
+                                        repeating = true
+                                        v.isPressed = true
+                                        v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                        sendKey(code)
+                                        mainHandler.postDelayed(repeatTask, keyRepeatInitialDelayMs)
+                                        true
+                                    }
+                                    MotionEvent.ACTION_MOVE -> {
+                                        val inside = event.x >= 0f && event.x <= v.width &&
+                                            event.y >= 0f && event.y <= v.height
+                                        if (!inside && repeating) {
+                                            stopRepeat()
+                                        }
+                                        true
+                                    }
+                                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                        stopRepeat()
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            }
+                        } else {
+                            setOnClickListener {
+                                it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                when {
+                                    code.startsWith("MOD:") -> {
+                                        when (code.substring(4)) {
+                                            "super" -> modSuper = !modSuper
+                                            "ctrl" -> modCtrl = !modCtrl
+                                            "alt" -> modAlt = !modAlt
+                                            "shift" -> modShift = !modShift
+                                        }
+                                        refreshModButtons()
+                                    }
+                                    code.startsWith("CMD:") -> sendCmd(code.substring(4))
+                                    else -> sendKey(code)
+                                }
                             }
                         }
                     }

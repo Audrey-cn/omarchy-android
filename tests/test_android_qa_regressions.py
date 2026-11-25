@@ -253,6 +253,15 @@ fun main() {
         self.assertLess(callback.index('if (exited) return@newSession'), callback.index('stopRuntime('))
         self.assertLess(callback.index('Global.terminalSession !== ownedSession'), callback.index('stopRuntime('))
 
+    def test_osk_repeat_keys_and_ime_sentinel_guard(self):
+        overlay = (JAVA_ROOT / 'ui/misc/OmarchyX11Overlay.kt').read_text()
+        self.assertIn('val repeatableKeys = setOf("BackSpace", "Left", "Down", "Up", "Right")', overlay)
+        self.assertIn('keyRepeatInitialDelayMs = 350L', overlay)
+        self.assertIn('keyRepeatIntervalMs = 55L', overlay)
+        self.assertIn('onViewDetachedFromWindow', overlay)
+        restore = overlay.split('private fun restoreSentinel()', 1)[1].split('override fun onCreateInputConnection', 1)[0]
+        self.assertIn('cur[0] == ImeBridgeHelper.SENTINEL[0] && !composing()', restore)
+
 
 if __name__ == '__main__':
     unittest.main()
