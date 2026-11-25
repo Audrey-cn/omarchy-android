@@ -191,6 +191,37 @@ class DesktopLaunchTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout), ["--profile", str(root / ".local/share/omarchy-firefox/profile"), url])
 
+    def test_fix_desktops_self_heals_stale_icon_and_preserves_custom_exec(self):
+        fix = load("polish_fix_desktops", "core/bin/omarchy-fix-desktops")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app_dir = root / "apps"
+            app_dir.mkdir()
+            exe = root / "code"
+            exe.write_text("#!/bin/sh\n")
+            exe.chmod(0o755)
+            cmd = f"{exe} --flag"
+            target = app_dir / "omarchy-android-code.desktop"
+            # Simulate a stale/wrong Icon= from an earlier release
+            target.write_text(
+                f"[Desktop Entry]\nType=Application\nName=Visual Studio Code (Omarchy)\n"
+                f"TryExec={exe}\nExec={cmd}\nIcon=chatgpt\nTerminal=false\nCategories=Utility;\n"
+            )
+            with patch.object(fix, "resolve_icon", return_value="vscode"):
+                fix.publish(app_dir, "code", "Visual Studio Code", str(exe), cmd)
+            self.assertIn("Icon=vscode\n", target.read_text())
+
+            # User-customized Exec= must be preserved untouched
+            custom = target.read_text().replace(f"Exec={cmd}", f"Exec={exe} --my-custom-flag")
+            target.write_text(custom)
+            with patch.object(fix, "resolve_icon", return_value="other-icon"):
+                fix.publish(app_dir, "code", "Visual Studio Code", str(exe), cmd)
+            self.assertEqual(target.read_text(), custom)
+
+    def test_upstream_image_includes_svg_icon_loader(self):
+        self.assertIn("librsvg2-common", (ROOT / "install.sh").read_text())
+        self.assertIn("librsvg2-common", (ROOT / ".github/workflows/build-container.yml").read_text())
+
 
 if __name__ == "__main__":
     unittest.main()

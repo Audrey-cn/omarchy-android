@@ -143,23 +143,27 @@ def publish(directory, slug, name, executable, command, icons=()):
         f"TryExec={executable}\nExec={command}\n{icon_line}Terminal=false\nCategories=Utility;\n"
     )
     if os.path.lexists(target):
-        # Upgrade legacy project-generated entries that omitted Icon=, while preserving user edits.
+        # Self-heal any project-generated entry whose Icon= is missing, stale, or wrong,
+        # while preserving entries where the user customized Exec=.
         # Under proot --link2symlink, os.link() produces a symlink to .proot.l2s.*; treat it as a regular file.
         is_proot_l2s = target.is_symlink() and ".proot.l2s." in os.readlink(target)
-        if icon and target.is_file() and (not target.is_symlink() or is_proot_l2s):
+        if not target.is_symlink() or is_proot_l2s:
             try:
                 existing = target.read_text(errors="ignore")
             except OSError:
+                # Broken .proot.l2s.* symlink (e.g., during chroot migration): safe to replace cleanly.
+                existing = "" if is_proot_l2s else None
+            if existing is None:
                 return
-            legacy = (
-                f"[Desktop Entry]\nType=Application\nName={name} (Omarchy)\n"
-                f"TryExec={executable}\nExec={command}\nTerminal=false\nCategories=Utility;\n"
+            is_managed = (
+                existing == ""
+                or (
+                    f"Name={name} (Omarchy)\n" in existing
+                    and f"TryExec={executable}\n" in existing
+                    and f"Exec={command}\n" in existing
+                )
             )
-            if existing == legacy or (
-                f"Name={name} (Omarchy)\n" in existing
-                and f"TryExec={executable}\n" in existing
-                and "\nIcon=" not in existing
-            ):
+            if is_managed and existing != body:
                 with tempfile.NamedTemporaryFile(dir=directory, mode="w", delete=False) as staged:
                     staged.write(body)
                     staged.flush()
