@@ -17,11 +17,14 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 
 PKG = "omarchy-android-desktop"
 REPO = "Audrey-cn/omarchy-android"
 API = "https://api.github.com/repos/" + REPO + "/releases"
+ATOM = "https://github.com/" + REPO + "/releases.atom"
 DOWNLOAD = "https://github.com/" + REPO + "/releases/download/desktop-v"
 PRIVATE = Path("/usr/lib/omarchy-android/desktop")
 LAUNCH = Path("/usr/local/bin")
@@ -145,21 +148,41 @@ def download_asset(version, name, cap, *, expected_sha=None):
     return data
 
 
+def atom_desktop_versions():
+    root = ET.fromstring(fetch(ATOM, 2 * 1024 * 1024))
+    versions = []
+    for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
+        link = entry.find("{http://www.w3.org/2005/Atom}link")
+        href = link.attrib.get("href", "") if link is not None else ""
+        if "/releases/tag/" not in href:
+            continue
+        tag = href.rsplit("/releases/tag/", 1)[-1]
+        match = re.fullmatch("desktop-v(" + VER + ")", tag)
+        if match:
+            versions.append(match[1])
+    return versions
+
+
 def catalog(version=None):
     if not version:
         versions = []
-        for page in range(1, 11):
-            rows = json.loads(fetch(f"{API}?per_page=100&page={page}", 4 * LIMIT))
-            if not isinstance(rows, list):
-                raise ValueError("Invalid release index")
-            for row in rows:
-                match = re.fullmatch("desktop-v(" + VER + ")", row["tag_name"])
-                if match and not row["draft"] and not row["prerelease"]:
-                    versions.append(match[1])
-            if len(rows) < 100:
-                break
-        else:
-            raise ValueError("Release index exceeds pagination limit")
+        try:
+            for page in range(1, 11):
+                rows = json.loads(fetch(f"{API}?per_page=100&page={page}", 4 * LIMIT))
+                if not isinstance(rows, list):
+                    raise ValueError("Invalid release index")
+                for row in rows:
+                    match = re.fullmatch("desktop-v(" + VER + ")", row["tag_name"])
+                    if match and not row["draft"] and not row["prerelease"]:
+                        versions.append(match[1])
+                if len(rows) < 100:
+                    break
+            else:
+                raise ValueError("Release index exceeds pagination limit")
+        except urllib.error.HTTPError as err:
+            if err.code not in (403, 429):
+                raise
+            versions = atom_desktop_versions()
         if not versions:
             raise ValueError("No published desktop component release")
         version = max(versions, key=version_key)

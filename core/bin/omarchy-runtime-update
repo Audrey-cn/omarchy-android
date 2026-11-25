@@ -18,11 +18,14 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
 from urllib.request import Request, urlopen
+import xml.etree.ElementTree as ET
 
 REPO = "Audrey-cn/omarchy-android"
 BASE = "https://github.com/" + REPO + "/releases/download/"
 API = "https://api.github.com/repos/" + REPO + "/releases"
+ATOM = "https://github.com/" + REPO + "/releases.atom"
 ROOT = Path("/")
 STATE = Path("/var/lib/omarchy-android/runtimes")
 BROWSER_RECEIPT = "opt/omarchy-chromium128/source-manifest.json"
@@ -152,24 +155,61 @@ def download(routes, expected_size, expected_sha, dest=None):
                 progress.finish(size)
 
 
+def atom_runtime_candidate(pkg):
+    with open_source(ATOM) as stream:
+        raw = stream.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
+        raise ValueError("Release feed too large")
+    root = ET.fromstring(raw)
+    tags = []
+    for entry in root.findall("{http://www.w3.org/2005/Atom}entry"):
+        link = entry.find("{http://www.w3.org/2005/Atom}link")
+        href = link.attrib.get("href", "") if link is not None else ""
+        if "/releases/tag/" not in href:
+            continue
+        tag = href.rsplit("/releases/tag/", 1)[-1]
+        m = re.fullmatch(r"runtime-v([0-9]+\.[0-9]+\.[0-9]+)", tag)
+        if m:
+            tags.append((tuple(map(int, m[1].split("."))), tag, m[1]))
+    for _, tag, ver in sorted(tags, key=lambda r: r[0], reverse=True):
+        stem = f"{pkg}_{ver}_arm64"
+        meta_url = BASE + tag + "/" + stem + ".json"
+        deb_url = BASE + tag + "/" + stem + ".deb"
+        try:
+            with open_source(meta_url, binary=True) as stream:
+                meta = json.loads(stream.read(65536))
+        except (OSError, http.client.HTTPException, ValueError):
+            continue
+        if (meta.get("asset"), meta.get("package"), meta.get("version"), meta.get("architecture")) == (
+            stem + ".deb", pkg, ver, "arm64"
+        ) and re.fullmatch("[a-f0-9]{64}", meta.get("sha256", "")):
+            return meta, (deb_url,)
+    raise ValueError("No published stable runtime candidate for " + pkg)
+
+
 def candidate(pkg):
     versions = []
-    for page in range(1, 101):
-        releases = query(f"{API}?per_page=50&page={page}")
-        for release in releases:
-            tag = release["tag_name"]
-            m = re.fullmatch(r"runtime-v([0-9]+\.[0-9]+\.[0-9]+)", tag)
-            if not m or release["draft"] or release["prerelease"]:
-                continue
-            version = m[1]
-            stem = f"{pkg}_{version}_arm64"
-            assets = release["assets"]
-            if any(a["name"] == stem + ".json" for a in assets):
-                versions.append((tuple(map(int, version.split("."))), tag, version, stem, assets))
-        if len(releases) < 50:
-            break
-    else:
-        raise ValueError("Runtime release list exceeded pagination limit")
+    try:
+        for page in range(1, 101):
+            releases = query(f"{API}?per_page=50&page={page}")
+            for release in releases:
+                tag = release["tag_name"]
+                m = re.fullmatch(r"runtime-v([0-9]+\.[0-9]+\.[0-9]+)", tag)
+                if not m or release["draft"] or release["prerelease"]:
+                    continue
+                version = m[1]
+                stem = f"{pkg}_{version}_arm64"
+                assets = release["assets"]
+                if any(a["name"] == stem + ".json" for a in assets):
+                    versions.append((tuple(map(int, version.split("."))), tag, version, stem, assets))
+            if len(releases) < 50:
+                break
+        else:
+            raise ValueError("Runtime release list exceeded pagination limit")
+    except urllib.error.HTTPError as err:
+        if err.code in (403, 429):
+            return atom_runtime_candidate(pkg)
+        raise
     if not versions:
         raise ValueError("No published stable runtime candidate for " + pkg)
     _, tag, ver, stem, assets = max(versions, key=lambda row: row[0])

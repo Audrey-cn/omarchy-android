@@ -176,11 +176,18 @@ def runtime(kind):
 
 def apk():
     installed = os.getenv("OMARCHY_APK_VERSION_NAME")
-    with urlopen(
-        "https://api.github.com/repos/Audrey-cn/omarchy-android/releases/latest",
-        timeout=10,
-    ) as response:
-        latest = json.load(response)["tag_name"].removeprefix("v")
+    try:
+        with urlopen(
+            "https://api.github.com/repos/Audrey-cn/omarchy-android/releases/latest",
+            timeout=10,
+        ) as response:
+            latest = json.load(response)["tag_name"].removeprefix("v")
+    except Exception:
+        with urlopen(
+            "https://github.com/Audrey-cn/omarchy-android/releases/latest",
+            timeout=10,
+        ) as response:
+            latest = response.url.rsplit("/tag/", 1)[-1].removeprefix("v")
     state = "unknown"
     version_pattern = r"(\d+(?:\.\d+)*)(?:-[0-9A-Za-z.+-]+)?"
     local_match = re.fullmatch(version_pattern, installed or "")

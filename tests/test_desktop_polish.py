@@ -228,6 +228,24 @@ class DesktopLaunchTests(unittest.TestCase):
             self.assertTrue(bridge.is_direct_type_app("com.example.clash-verge", 4242))
             self.assertFalse(bridge.is_direct_type_app("firefox", 1001))
 
+    def test_desktop_updater_falls_back_to_releases_atom_on_403_rate_limit(self):
+        import urllib.error
+        updater = load("polish_component_update", "core/bin/omarchy-component-update")
+        atom_xml = (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b'<feed xmlns="http://www.w3.org/2005/Atom">'
+            b'<entry><link href="https://github.com/Audrey-cn/omarchy-android/releases/tag/v1.0.3"/></entry>'
+            b'<entry><link href="https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-v1.0.27"/></entry>'
+            b'<entry><link href="https://github.com/Audrey-cn/omarchy-android/releases/tag/desktop-v1.0.26"/></entry>'
+            b'</feed>'
+        )
+        def fake_fetch(url, *args, **kwargs):
+            if "api.github.com" in url:
+                raise urllib.error.HTTPError(url, 403, "rate limit exceeded", {}, None)
+            return atom_xml
+        with patch.object(updater, "fetch", side_effect=fake_fetch):
+            self.assertEqual(updater.atom_desktop_versions(), ["1.0.27", "1.0.26"])
+
 
 if __name__ == "__main__":
     unittest.main()
