@@ -2409,6 +2409,10 @@ object OmarchyX11Overlay {
             val layers = LayerDrawable(arrayOf(bgTrack, ClipDrawable(fgTrack, Gravity.START, ClipDrawable.HORIZONTAL))).apply {
                 setId(0, android.R.id.background)
                 setId(1, android.R.id.progress)
+                setLayerHeight(0, dp(3))
+                setLayerHeight(1, dp(3))
+                setLayerGravity(0, Gravity.CENTER_VERTICAL)
+                setLayerGravity(1, Gravity.CENTER_VERTICAL)
             }
             val thumb = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -2687,10 +2691,8 @@ object OmarchyX11Overlay {
                         sendCmd("ws_$w")
                         renderOskContent()
                     }
-                    wb.layoutParams = LinearLayout.LayoutParams(
-                        if (compactBar) 0 else dp(24), dp(25), if (compactBar) 0.55f else 0f
-                    ).apply {
-                        setMargins(dp(1), 0, dp(2), 0)
+                    wb.layoutParams = LinearLayout.LayoutParams(0, dp(25), 0.58f).apply {
+                        setMargins(dp(1), 0, dp(1), 0)
                     }
                     wb.contentDescription = s(R.string.omarchy_overlay_workspace, ws)
                     wb.setPadding(0, 0, 0, 0)
@@ -2708,12 +2710,12 @@ object OmarchyX11Overlay {
                         background = makeRounded("#247aa2f7", "#557aa2f7", 6, 1)
                     }
                     listOf(bApps, bTerm, copy, paste, bIme).forEach { btn ->
-                        btn.setPadding(dp(3), 0, dp(3), 0)
+                        btn.setPadding(dp(2), 0, dp(2), 0)
                         btn.setSingleLine(true)
                         if (compactBar) btn.textSize = 10f
-                        bar.addView(btn, LinearLayout.LayoutParams(
-                            if (compactBar) 0 else dp(40), dp(25), if (compactBar) 0.95f else 0f
-                        ).apply { setMargins(dp(2), 0, dp(1), 0) })
+                        bar.addView(btn, LinearLayout.LayoutParams(0, dp(25), 0.92f).apply {
+                            setMargins(dp(1), 0, dp(1), 0)
+                        })
                     }
                 } else {
                     val bFull = makeBarBtn(
@@ -2725,10 +2727,10 @@ object OmarchyX11Overlay {
                         refreshFullscreenButton()
                         sendCmd("fullscreen")
                     }.apply {
-                        layoutParams = LinearLayout.LayoutParams(
-                            if (compactBar) 0 else dp(52), dp(25), if (compactBar) 1.25f else 0f
-                        ).apply { setMargins(dp(3), 0, dp(2), 0) }
-                        setPadding(dp(3), 0, dp(3), 0)
+                        layoutParams = LinearLayout.LayoutParams(0, dp(25), 1.25f).apply {
+                            setMargins(dp(2), 0, dp(1), 0)
+                        }
+                        setPadding(dp(2), 0, dp(2), 0)
                         if (compactBar) textSize = 10f
                         setSingleLine(true)
                     }
@@ -2742,23 +2744,20 @@ object OmarchyX11Overlay {
                         btn.setPadding(dp(2), 0, dp(2), 0)
                         btn.setSingleLine(true)
                         if (compactBar) btn.textSize = 10f
-                        bar.addView(btn, LinearLayout.LayoutParams(
-                            if (compactBar) 0 else dp(42), dp(25), if (compactBar) 1.05f else 0f
-                        ).apply { setMargins(dp(2), 0, dp(1), 0) })
+                        bar.addView(btn, LinearLayout.LayoutParams(0, dp(25), 0.95f).apply {
+                            setMargins(dp(1), 0, dp(1), 0)
+                        })
                     }
                 }
-
-                val dragSpacer = View(activity).apply { setOnTouchListener(dragTouchListener) }
-                if (!compactBar) bar.addView(dragSpacer, LinearLayout.LayoutParams(0, dp(25), 1f))
 
                 if (!oskCompactMode) {
                     val alphaBar = SeekBar(activity).apply {
                         contentDescription = s(R.string.omarchy_overlay_keyboard_opacity)
                         max = 75
                         progress = ((oskAlpha - 0.20f) * 100f).roundToInt()
-                        layoutParams = LinearLayout.LayoutParams(
-                            if (compactBar) 0 else dp(60), dp(22), if (compactBar) 1.3f else 0f
-                        ).apply { setMargins(dp(2), 0, dp(4), 0) }
+                        layoutParams = LinearLayout.LayoutParams(0, dp(22), 1.35f).apply {
+                            setMargins(dp(2), 0, dp(2), 0)
+                        }
                         styleOpacitySlider(this)
                         setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
@@ -2784,26 +2783,26 @@ object OmarchyX11Overlay {
                     setTextColor(Color.parseColor("#9ece6a"))
                     background = makeRounded("#1F9ECE6A", "#669ECE6A", 6, 1)
                     setSingleLine(true)
-                    setPadding(dp(4), 0, dp(4), 0)
+                    setPadding(dp(2), 0, dp(2), 0)
                     if (compactBar) textSize = 10f
-                    layoutParams = LinearLayout.LayoutParams(
-                        if (compactBar) 0 else dp(44), dp(25), if (compactBar) 1.0f else 0f
-                    ).apply { setMargins(dp(2), 0, dp(2), 0) }
+                    layoutParams = LinearLayout.LayoutParams(0, dp(25), 0.98f).apply {
+                        setMargins(dp(1), 0, dp(1), 0)
+                    }
                 }
                 bar.addView(bMode)
 
                 val bKill = makeCloseWindowBarBtn(compactBar).apply {
-                    layoutParams = LinearLayout.LayoutParams(
-                        if (compactBar) 0 else dp(42), dp(25), if (compactBar) 0.95f else 0f
-                    ).apply { setMargins(dp(1), 0, dp(2), 0) }
+                    layoutParams = LinearLayout.LayoutParams(0, dp(25), 0.95f).apply {
+                        setMargins(dp(1), 0, dp(1), 0)
+                    }
                 }
                 bar.addView(bKill)
 
                 val bClose = makeBarBtn(s(R.string.omarchy_overlay_dismiss_symbol), false) { hideOsk() }.apply {
                     contentDescription = s(R.string.omarchy_overlay_keyboard_hide)
-                    layoutParams = LinearLayout.LayoutParams(
-                        if (compactBar) 0 else dp(26), dp(25), if (compactBar) 0.65f else 0f
-                    ).apply { setMargins(dp(1), 0, 0, 0) }
+                    layoutParams = LinearLayout.LayoutParams(0, dp(25), 0.65f).apply {
+                        setMargins(dp(1), 0, 0, 0)
+                    }
                     setPadding(0, 0, 0, 0)
                 }
                 bar.addView(bClose)
