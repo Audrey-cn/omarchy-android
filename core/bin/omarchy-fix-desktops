@@ -81,9 +81,15 @@ VENDOR_DESKTOPS = {
         "/usr/share/applications/CC-Switch.desktop",
     ),
     "chatgpt": ("/usr/share/applications/chatgpt.desktop",),
-    "claude": ("/usr/share/applications/claude-desktop.desktop",),
+    "claude": (
+        "/usr/share/applications/com.anthropic.Claude.desktop",
+        "/usr/share/applications/claude-desktop.desktop",
+    ),
     "hermes": ("/usr/share/applications/hermes-desktop.desktop",),
-    "code": ("/usr/share/applications/code.desktop",),
+    "code": (
+        "/usr/share/applications/com.microsoft.VSCode.desktop",
+        "/usr/share/applications/code.desktop",
+    ),
 }
 
 
@@ -95,11 +101,15 @@ def resolve_icon(slug, candidates=(), executable=""):
         for entry in sorted(vendor_dir.glob("*.desktop")):
             if str(entry) not in scan_paths:
                 try:
-                    txt = entry.read_text(errors="ignore")
+                    lines = entry.read_text(errors="ignore").splitlines()
                 except OSError:
                     continue
-                if exec_base in txt.lower():
-                    scan_paths.append(str(entry))
+                for line in lines:
+                    if line.startswith(("Exec=", "TryExec=")):
+                        cmd_tok = line.split("=", 1)[1].strip().split()[0] if line.split("=", 1)[1].strip() else ""
+                        if os.path.basename(cmd_tok).lower() == exec_base:
+                            scan_paths.append(str(entry))
+                            break
     for desktop_path in scan_paths:
         path = Path(desktop_path)
         if path.is_file():
