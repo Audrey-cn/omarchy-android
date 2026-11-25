@@ -49,6 +49,8 @@ LAUNCHERS = [
         "/usr/local/bin/hermes-desktop-launch %u",
         (
             "/opt/hermes-desktop/.omarchy-onboarding/icon.png",
+            "/opt/hermes-desktop/resources/app.asar.unpacked/dist/hermes.png",
+            "/opt/hermes-desktop/resources/app.asar.unpacked/dist/apple-touch-icon.png",
             "/usr/share/icons/hicolor/512x512/apps/hermes-desktop.png",
             "/usr/share/icons/hicolor/256x256/apps/hermes-desktop.png",
             "/usr/share/pixmaps/hermes-desktop.png",
@@ -132,7 +134,9 @@ def publish(directory, slug, name, executable, command, icons=()):
     )
     if os.path.lexists(target):
         # Upgrade legacy project-generated entries that omitted Icon=, while preserving user edits.
-        if icon and target.is_file() and not target.is_symlink():
+        # Under proot --link2symlink, os.link() produces a symlink to .proot.l2s.*; treat it as a regular file.
+        is_proot_l2s = target.is_symlink() and ".proot.l2s." in os.readlink(target)
+        if icon and target.is_file() and (not target.is_symlink() or is_proot_l2s):
             try:
                 existing = target.read_text(errors="ignore")
             except OSError:
@@ -141,21 +145,22 @@ def publish(directory, slug, name, executable, command, icons=()):
                 f"[Desktop Entry]\nType=Application\nName={name} (Omarchy)\n"
                 f"TryExec={executable}\nExec={command}\nTerminal=false\nCategories=Utility;\n"
             )
-            if existing == legacy:
+            if existing == legacy or (
+                f"Name={name} (Omarchy)\n" in existing
+                and f"TryExec={executable}\n" in existing
+                and "\nIcon=" not in existing
+            ):
                 with tempfile.NamedTemporaryFile(dir=directory, mode="w", delete=False) as staged:
                     staged.write(body)
                     staged.flush()
                     os.chmod(staged.name, 0o644)
                     os.replace(staged.name, target)
         return
-    with tempfile.NamedTemporaryFile(dir=directory, mode="w") as staged:
+    with tempfile.NamedTemporaryFile(dir=directory, mode="w", delete=False) as staged:
         staged.write(body)
         staged.flush()
         os.chmod(staged.name, 0o644)
-        try:
-            os.link(staged.name, target)
-        except FileExistsError:
-            pass
+        os.replace(staged.name, target)
 
 
 if __name__ == "__main__":
