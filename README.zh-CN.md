@@ -38,7 +38,8 @@
 市面上大多数手机跑 Linux 的方案只停留在“勉强连上 VNC”或“黑框终端”。**Omarchy Android** 重点打磨了移动端交互体验、PRoot 疑难杂症排雷，以及全栈 ARM64 AI 桌面生态的“最后一公里”：
 
 ### 1. 为手机触控与小屏重构的桌面增强层
-- **零悬浮窗权限的贴边呼吸手柄**：进程内原生挂载，**无需申请 `SYSTEM_ALERT_WINDOW` 权限**。轻点展开控制抽屉，双击呼出 `0.70×` 透明悬浮键盘（自带透明度滑块与极简底栏拖条），长按轻震直连 Android 输入法/语音输入，拖动自由吸附左右边缘。
+- **零悬浮窗权限的贴边呼吸手柄 + 重构悬浮软键盘**：进程内原生挂载，**无需申请 `SYSTEM_ALERT_WINDOW` 权限**。轻点展开控制抽屉，双击呼出全新双模式悬浮键盘（紧凑栏 + 分层符号页、退格/方向键长按连发、极细透明度滑块与底栏拖条），长按轻震直连 Android 输入法/语音输入，拖动自由吸附左右边缘。
+- **WebKitGTK / Tauri 通用粘贴自动检测与智能聚焦**：通过 `/proc/<pid>/maps` 自动识别任意 WebKitGTK/Tauri 窗口（如 CC Switch）并启用直打粘贴，桌面组件更新后自动重启 `deck-bridge`，并对齐 Omarchy 智能聚焦窗口标题。
 - **Tokyo Night 底部实体 Dock (`Super + D`)**：圆角实体 GTK Layer-Shell 栏，配备清晰的 JetBrainsMono Nerd Font 图标与当前活动窗口高亮胶囊，触控和键盘一样顺手。
 - **4 步交互引导 + 屏幕 R 角安全边距**：曲线箭头逐步引导 `1.5×` 实时缩放、边缘手柄、`Super + K` 快捷键与输入权限；支持自定义圆角留白，彻底避免 Waybar 状态栏被手机大 R 角裁切。
 - **横竖屏硬锁 + 竖屏软键盘视口自适应**：锁死横屏或竖屏不乱转；竖屏弹出系统软键盘时桌面视口自动上移收缩，终端命令行永不被遮挡。
@@ -53,12 +54,12 @@
 - **Hermes Desktop + 本地 Hermes Agent**：严格 SHA-256 校验官方包，内置带指纹校验与回滚记录的首次引导防超时补丁、本机重编 `node-pty`、全局 `UV_LINK_MODE=copy`（根治 PRoot 硬链接损坏），以及启动前毫秒级自愈脚本 `omarchy-ensure-hermes-venv`（同时覆盖 `~/.hermes` 与 `/usr/local/lib/hermes-agent`）。
 - **Claude Desktop + CC Switch**：直连 Anthropic 官方 ARM64 APT 源，使用 `--no-install-recommends` 与单源 1 秒刷新（彻底杜绝拉取 1.5 GB 冗余包及 `systemd-resolved` 破坏 `/etc/resolv.conf`），启动器自动识别 3P 网关配置（`--user-data-dir=/root/.config/Claude-3p`）配合 CC Switch 灵活路由模型。
 - **Codex / ChatGPT Desktop、VS Code 与 Helix**：官方原版 ARM64 客户端，开箱自带 Wayland IME 与 PRoot 启动参数。
-- **应用网格全局去重与原厂图标继承**：`omarchy-app-grid` 基于 `TryExec` 二进制名与归一化应用名全局隐藏未适配的原厂重复入口，`omarchy-fix-desktops` 自动扫描继承原厂图标——再也不会出现双图标或默认占位齿轮图标。
+- **应用网格严格去重与图标自愈**：`omarchy-app-grid` 严格按 `Exec=/TryExec=` 二进制基名匹配去重（杜绝 VS Code 误继承其他应用图标），配合 `omarchy-fix-desktops` 与 `librsvg2-common` 自动自愈陈旧启动器图标并接入 Hermes 官方 PNG 图标——每个应用都只显示**唯一且清晰的原生图标**。
 - **真实 HTTPS 握手验证的本地代理探测**：`omarchy-installer.sh` 自动探测常见本机代理端口（`18888 / 7890 / 7897 / 10809 / 10808`），**必须通过真实 HTTPS 握手才启用加速**，遇到休眠或纯 SOCKS 端口自动静默回退直连，永不误报 `Proxy CONNECT aborted`。
 
 ### 4. 兼顾全球与国内网络的容灾分发体系
 - **APK 与桌面更新中心双端「下载线路」引导**：支持 **GitHub 直连**、**国内加速** 与 **自定义镜像**；桌面更新中心精简为「Omarchy 桌面组件 + Linux APT」双路径，告别冗余选项。
-- **同源 HTTP `Range` 续传重试 + SHA-256 自动兜底**：移动弱网中途断流时先对同镜像重试 2 次保住已下进度；任何体积或 SHA-256 校验异常自动回退 GitHub 官方源。
+- **同源 HTTP `Range` 续传重试、Atom 限流降级与 SHA-256 兜底**：移动弱网中途断流时先对同镜像重试 2 次保住已下进度；遇到 GitHub API `403`/`429` 限流自动降级至 Releases Atom 订阅与网页重定向；任何体积或 SHA-256 校验异常自动回退 GitHub 官方源。
 - **终端实时进度条 + 一键回滚**：桌面组件更新实时展示进度条、网速与剩余时间，支持 `omarchy-component-update recover` 无损回退上一版本。
 - **攻克 PRoot 音视频与输入法**：预装 PRoot 适配版 **Mozilla Firefox + `ffmpeg`**（`MOZ_SHM_NO_SEALS=1`），彻底消除「不支持 HTML5 播放器」与标签页崩溃（B 站视频与弹幕流畅实测），配合 PulseAudio 音频桥接与 `fcitx5` 中文拼音输入法。
 
@@ -70,7 +71,7 @@
 
 | 步骤 | 操作 |
 | :--- | :--- |
-| **1 · 安装 APK** | 从 [Releases](https://github.com/Audrey-cn/omarchy-android/releases) 下载 `OmarchyAndroid-v1.0.2-arm64.apk` 并打开 **Omarchy Android**。 |
+| **1 · 安装 APK** | 从 [Releases](https://github.com/Audrey-cn/omarchy-android/releases) 下载 `OmarchyAndroid-v1.0.3-arm64.apk` 并打开 **Omarchy Android**。 |
 | **2 · 拉取 Ubuntu 24.04** | 按网络环境选择 **GitHub 直连** 或 **国内加速**，点击**下载并安装桌面**（支持断点续传与本地 `rootfs.tar.zst` 离线导入）。 |
 | **3 · 进入桌面** | 点击**启动桌面**，按可跳过的 4 步引导完成缩放设置；用 `Super + Space` 打开应用网格，`Super + D` 呼出底部 Dock。 |
 
@@ -102,8 +103,8 @@
 
 | 模块 | 当前基线 | 更新策略 |
 | :--- | :--- | :--- |
-| **Android App (APK)** | **v1.0.2** (`versionCode 102`) | 同签名 APK 覆盖升级完整保留既有 Ubuntu 与个人数据。 |
-| **桌面组件增量包** | **desktop-v1.0.19** | 在桌面更新中心显式一键更新，支持随时回滚上一版。 |
+| **Android App (APK)** | **v1.0.3** (`versionCode 103`) | 同签名 APK 覆盖升级完整保留既有 Ubuntu 与个人数据。 |
+| **桌面组件增量包** | **desktop-v1.0.27** | 在桌面更新中心显式一键更新，支持随时回滚上一版。 |
 | **Chromium / Playwright** | **128.0.6613.18** | 固定兼容基线；日常网页与视频默认预装 Mozilla Firefox DEB + `ffmpeg`。 |
 | **Hermes Desktop** | **2026.9.7-7** | 审核定版上游 ARM64 包，自动配套引导、PTY 与 venv 自愈。 |
 | **Ubuntu 系统底座** | **24.04 LTS ARM64** | 直接在容器内通过标准 `apt` 维护系统软件包。 |
