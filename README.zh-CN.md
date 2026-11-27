@@ -139,6 +139,12 @@ Android 应用基于 Caten Hu 的 **[Tiny Container](https://github.com/Cateners
 
 感谢 [Omarchy](https://github.com/basecamp/omarchy)、[Tiny Container](https://github.com/Cateners/tiny_container)、[Termux:X11](https://github.com/termux/termux-x11)、[PRoot](https://github.com/proot-me/proot)、[Sway](https://github.com/swaywm/sway)、[wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) 及各位社区贡献者。
 
-## 支持项目
+## 开放协作与支持项目
 
-由 [Audrey](https://github.com/Audrey-cn/omarchy-android) 维护。如果这个项目对你有帮助，欢迎通过 [GitHub Sponsors](https://github.com/sponsors/Audrey-cn) 支持后续开发，也欢迎在仓库提交设备实测报告、翻译或 PR。
+由 [Audrey](https://github.com/Audrey-cn/omarchy-android) 维护。本项目非常欢迎各位开发者 **Fork 二次开发、提 Issue 反馈与提交 Pull Request**——无论你是在新机型上适配、反馈硬件/Wayland 问题、补充翻译，还是魔改桌面环境：
+
+- **欢迎 Fork** —— 在开源协议允许的范围内自由定制主题、启动器或设备配置。
+- **欢迎提 [Issue](https://github.com/Audrey-cn/omarchy-android/issues)** —— 非常欢迎分享设备实测报告、Bug 日志与功能建议。
+- **欢迎提 [PR](https://github.com/Audrey-cn/omarchy-android/pulls)** —— 代码修复、翻译改进与新特性贡献统统欢迎！
+
+如果这个项目对你有帮助，也欢迎通过 [GitHub Sponsors](https://github.com/sponsors/Audrey-cn) 支持后续开发。

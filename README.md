@@ -139,6 +139,12 @@ The Android application is based on **[Tiny Container](https://github.com/Catene
 
 Thank you to [Omarchy](https://github.com/basecamp/omarchy), [Tiny Container](https://github.com/Cateners/tiny_container), [Termux:X11](https://github.com/termux/termux-x11), [PRoot](https://github.com/proot-me/proot), [Sway](https://github.com/swaywm/sway), [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots), and their contributors.
 
-## Support
+## Support &amp; Open Collaboration
 
-Maintained by [Audrey](https://github.com/Audrey-cn/omarchy-android). If this project helps you, consider supporting development via [GitHub Sponsors](https://github.com/sponsors/Audrey-cn), or share a device report, translation, or PR.
+Maintained by [Audrey](https://github.com/Audrey-cn/omarchy-android). This project actively encourages **Forks, Issues, and Pull Requests** — whether you're porting it to a new Android device, reporting a hardware/Wayland quirk, improving translations, or remixing the desktop setup:
+
+- **Fork & build on it** — customize themes, launchers, or device profiles freely under the repository licenses.
+- **Open an [Issue](https://github.com/Audrey-cn/omarchy-android/issues)** — device compatibility reports, bug logs, and feature ideas are always welcome.
+- **Submit a [Pull Request](https://github.com/Audrey-cn/omarchy-android/pulls)** — fixes, translations, and improvements are greatly appreciated.
+
+If this project helps you, you can also support development via [GitHub Sponsors](https://github.com/sponsors/Audrey-cn).
